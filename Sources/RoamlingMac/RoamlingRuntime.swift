@@ -388,7 +388,9 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     private var preferredTickInterval: TimeInterval {
         if ProcessInfo.processInfo.systemUptime <= catchArmedUntil { return 1 / 60 }
         return switch behavior.state {
-        case .wander, .evadePointer, .caught, .dragged, .dropped, .findSleepSpot:
+        case .wander, .evadePointer, .findSleepSpot, .travelToInterest:
+            1 / 60
+        case .caught, .dragged, .dropped:
             1 / 30
         case .lookAtPointer:
             1 / 16

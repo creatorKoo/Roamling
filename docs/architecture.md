@@ -353,7 +353,7 @@ tap이나 input 내용을 수집하지 않고 마지막 local input 이후 경�
 
 ## Performance model
 
-- movement/evade/drag: 약 30 Hz
+- active movement/evade/travel: 약 60 Hz, caught/drop: 약 30 Hz
 - catch가 arm된 짧은 구간: 60 Hz input gate
 - animated idle/look: 약 10–12 Hz 또는 다음 frame deadline
 - sleep: 2 Hz (wake input은 최대 약 0.5초 안에 감지)

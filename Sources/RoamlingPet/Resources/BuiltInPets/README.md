@@ -10,9 +10,10 @@ and converted locally from a flat chroma-key background to PNG alpha. No
 third-party pet artwork is included in these files.
 
 The sheets intentionally contain only four key poses: idle, walking right,
-sleeping, and caught. `MascotPetFactory` derives a small temporary runtime
-atlas from these poses so they can be evaluated at actual desktop size before
-a hand-cleaned animation set is commissioned or authored.
+sleeping, and caught. `MascotPetFactory` derives a temporary multi-step runtime
+atlas from these poses, using reversible transform sequences instead of
+inventing new artwork. This lets the mascots be evaluated at actual desktop
+size before a hand-cleaned animation set is commissioned or authored.
 
 Core prompt, Mochi:
 
@@ -33,6 +34,11 @@ The final FatMochi idle revision keeps the solid-black pixel shape, uses a
 shorter and slightly taller profile for readability at 96×104pt, and flattens
 the inward angry slant so the expression reads as blankly sleepy and a little
 dazed.
+
+The idle transform briefly settles the whole pose by less than one rendered
+point. Its pixel resampling reads like a tiny blink at desktop size; the
+runtime deliberately returns through intermediate frames so that effect and
+the walking bob do not snap at their loop boundaries.
 
 The working chroma-key prompts changed only the background to a flat solid
 `#00FF00`; transparency was produced locally without network upload.

@@ -29,13 +29,13 @@ public enum BuiltInPetKind: String, CaseIterable, Codable, Sendable {
 /// Builds a small runtime atlas from the selected mascot's four approved key poses.
 ///
 /// The source sheets deliberately remain pose auditions rather than pretending to be
-/// finished animation. Tiny vertical offsets provide enough life for in-app evaluation
-/// while the final hand-cleaned sprite sheets are still being authored.
+/// finished animation. Small reversible transform sequences provide enough life for
+/// in-app evaluation while the final hand-cleaned sprite sheets are still being authored.
 public enum MascotPetFactory {
     private static let cellWidth = 192
     private static let cellHeight = 208
     private static let columns = 8
-    private static let rows = 2
+    private static let rows = 4
 
     private enum Pose: Int {
         case idle
@@ -71,23 +71,68 @@ public enum MascotPetFactory {
         )
 
         let tracks = [
-            "idle": track("idle", frames: [(0, 0.72), (1, 0.28)]),
-            "running-right": track("running-right", frames: [(2, 0.17), (3, 0.17)]),
-            "running-left": track("running-left", frames: [(4, 0.17), (5, 0.17)]),
-            "sleeping": track("sleeping", frames: [(6, 0.9), (7, 0.9)]),
-            "caught": track("caught", frames: [(8, 0.22), (9, 0.22)]),
-            "dragged": track("dragged", frames: [(8, 0.5)]),
-            "sitting": track("sitting", frames: [(10, 0.8)]),
-            "landing": track("landing", frames: [(11, 0.14), (0, 0.3)], loops: false),
-            "watching": track("watching", frames: [(12, 0.8)]),
-            "failed": track("failed", frames: [(13, 0.8)]),
-            "jumping": track("jumping", frames: [(14, 0.16), (11, 0.16), (0, 0.28)], loops: false),
-            "stretching": track("stretching", frames: [(15, 0.35), (0, 0.3)], loops: false),
-            "waiting": track("waiting", frames: [(8, 0.34), (9, 0.34)]),
-            "working": track("working", frames: [(2, 0.2), (3, 0.2)]),
-            "running": track("running", frames: [(2, 0.2), (3, 0.2)]),
-            "waving": track("waving", frames: [(8, 0.25), (9, 0.25)]),
-            "review": track("review", frames: [(12, 0.8)])
+            // The quick reversible settle reads as a tiny blink/breath without a
+            // hard jump back to the resting pose.
+            "idle": track(
+                "idle",
+                frames: [(0, 1.55), (1, 0.09), (2, 0.08), (3, 0.10), (2, 0.08), (1, 0.09)]
+            ),
+            "running-right": track(
+                "running-right",
+                frames: [(4, 0.075), (5, 0.075), (6, 0.075), (7, 0.075),
+                         (8, 0.075), (7, 0.075), (6, 0.075), (5, 0.075)]
+            ),
+            "running-left": track(
+                "running-left",
+                frames: [(9, 0.075), (10, 0.075), (11, 0.075), (12, 0.075),
+                         (13, 0.075), (12, 0.075), (11, 0.075), (10, 0.075)]
+            ),
+            "sleeping": track(
+                "sleeping",
+                frames: [(14, 0.52), (15, 0.52), (16, 0.52), (15, 0.52)]
+            ),
+            "caught": track(
+                "caught",
+                frames: [(17, 0.14), (18, 0.14), (19, 0.14), (18, 0.14)]
+            ),
+            "dragged": track("dragged", frames: [(17, 0.5)]),
+            "sitting": track("sitting", frames: [(20, 0.8)]),
+            "landing": track(
+                "landing",
+                frames: [(21, 0.10), (3, 0.08), (2, 0.08), (1, 0.08), (0, 0.3)],
+                loops: false
+            ),
+            "watching": track("watching", frames: [(22, 0.8)]),
+            "failed": track("failed", frames: [(23, 0.8)]),
+            "jumping": track(
+                "jumping",
+                frames: [(24, 0.12), (21, 0.10), (3, 0.08), (0, 0.28)],
+                loops: false
+            ),
+            "stretching": track(
+                "stretching",
+                frames: [(25, 0.22), (3, 0.08), (2, 0.08), (1, 0.08), (0, 0.3)],
+                loops: false
+            ),
+            "waiting": track(
+                "waiting",
+                frames: [(17, 0.17), (18, 0.17), (19, 0.17), (18, 0.17)]
+            ),
+            "working": track(
+                "working",
+                frames: [(4, 0.09), (5, 0.09), (6, 0.09), (7, 0.09),
+                         (8, 0.09), (7, 0.09), (6, 0.09), (5, 0.09)]
+            ),
+            "running": track(
+                "running",
+                frames: [(4, 0.09), (5, 0.09), (6, 0.09), (7, 0.09),
+                         (8, 0.09), (7, 0.09), (6, 0.09), (5, 0.09)]
+            ),
+            "waving": track(
+                "waving",
+                frames: [(17, 0.16), (18, 0.16), (19, 0.16), (18, 0.16)]
+            ),
+            "review": track("review", frames: [(22, 0.8)])
         ]
 
         return PetAsset(
@@ -218,22 +263,51 @@ public enum MascotPetFactory {
 
     private static var frameRecipes: [FrameRecipe] {
         [
+            // 0...3: idle settle / blink-like breathing.
             FrameRecipe(pose: .idle, mirrored: false, yOffset: 0, scale: 1),
+            FrameRecipe(pose: .idle, mirrored: false, yOffset: 0.5, scale: 0.999),
+            FrameRecipe(pose: .idle, mirrored: false, yOffset: 1, scale: 0.997),
             FrameRecipe(pose: .idle, mirrored: false, yOffset: 1.5, scale: 0.995),
+
+            // 4...8: right-facing waddle, sampled on the way up and down.
             FrameRecipe(pose: .walkRight, mirrored: false, yOffset: 0, scale: 1),
-            FrameRecipe(pose: .walkRight, mirrored: false, yOffset: 3, scale: 1),
+            FrameRecipe(pose: .walkRight, mirrored: false, yOffset: 0.75, scale: 0.998),
+            FrameRecipe(pose: .walkRight, mirrored: false, yOffset: 1.5, scale: 0.996),
+            FrameRecipe(pose: .walkRight, mirrored: false, yOffset: 2.25, scale: 0.994),
+            FrameRecipe(pose: .walkRight, mirrored: false, yOffset: 3, scale: 0.992),
+
+            // 9...13: the same phase sequence, mirrored for left travel.
             FrameRecipe(pose: .walkRight, mirrored: true, yOffset: 0, scale: 1),
-            FrameRecipe(pose: .walkRight, mirrored: true, yOffset: 3, scale: 1),
+            FrameRecipe(pose: .walkRight, mirrored: true, yOffset: 0.75, scale: 0.998),
+            FrameRecipe(pose: .walkRight, mirrored: true, yOffset: 1.5, scale: 0.996),
+            FrameRecipe(pose: .walkRight, mirrored: true, yOffset: 2.25, scale: 0.994),
+            FrameRecipe(pose: .walkRight, mirrored: true, yOffset: 3, scale: 0.992),
+
+            // 14...16: slow reversible sleep breathing.
             FrameRecipe(pose: .sleep, mirrored: false, yOffset: 0, scale: 1),
+            FrameRecipe(pose: .sleep, mirrored: false, yOffset: 0, scale: 1.005),
             FrameRecipe(pose: .sleep, mirrored: false, yOffset: 0, scale: 1.01),
+
+            // 17...19: caught/waiting bounce.
             FrameRecipe(pose: .caught, mirrored: false, yOffset: 0, scale: 1),
-            FrameRecipe(pose: .caught, mirrored: false, yOffset: 2, scale: 1),
+            FrameRecipe(pose: .caught, mirrored: false, yOffset: 1, scale: 0.997),
+            FrameRecipe(pose: .caught, mirrored: false, yOffset: 2, scale: 0.994),
+
+            // 20...25: single-purpose transition anchors.
             FrameRecipe(pose: .idle, mirrored: false, yOffset: -1, scale: 1),
             FrameRecipe(pose: .idle, mirrored: false, yOffset: 10, scale: 0.98),
             FrameRecipe(pose: .idle, mirrored: false, yOffset: 0, scale: 1),
             FrameRecipe(pose: .sleep, mirrored: false, yOffset: 0, scale: 1),
             FrameRecipe(pose: .caught, mirrored: false, yOffset: 12, scale: 0.98),
-            FrameRecipe(pose: .idle, mirrored: false, yOffset: 0, scale: 1.015)
+            FrameRecipe(pose: .idle, mirrored: false, yOffset: 0, scale: 1.015),
+
+            // 26...31: safe non-transparent padding for the rectangular atlas.
+            FrameRecipe(pose: .idle, mirrored: false, yOffset: 0, scale: 1),
+            FrameRecipe(pose: .walkRight, mirrored: false, yOffset: 0, scale: 1),
+            FrameRecipe(pose: .walkRight, mirrored: true, yOffset: 0, scale: 1),
+            FrameRecipe(pose: .sleep, mirrored: false, yOffset: 0, scale: 1),
+            FrameRecipe(pose: .caught, mirrored: false, yOffset: 0, scale: 1),
+            FrameRecipe(pose: .idle, mirrored: false, yOffset: 0, scale: 1)
         ]
     }
 

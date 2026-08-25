@@ -63,15 +63,39 @@ func petLogicTests() -> [LogicTest] {
                 try expect(pet.manifest.displayName == kind.displayName)
                 try expect(pet.manifest.id == "roamling-\(kind.rawValue)")
                 try expect(pet.columns == 8)
-                try expect(pet.rows == 2)
-                try expect(pet.frameCount == 16)
+                try expect(pet.rows == 4)
+                try expect(pet.frameCount == 32)
                 try expect(pet.frameImage(at: 0) != nil)
-                try expect(pet.frameImage(at: 15) != nil)
+                try expect(pet.frameImage(at: 31) != nil)
                 try expect(pet.resolver.resolve(.moveLeft)?.name == "running-left")
                 try expect(pet.resolver.resolve(.moveRight)?.name == "running-right")
                 try expect(pet.resolver.resolve(.sleep)?.name == "sleeping")
                 try expect(pet.resolver.resolve(.caught)?.name == "caught")
                 try expect(pet.resolver.resolve(.dragged)?.name == "dragged")
+            }
+        },
+        LogicTest(name: "built-in animation cycles return through intermediate frames") {
+            for kind in BuiltInPetKind.allCases {
+                let pet = MascotPetFactory.make(kind)
+                let idle = try require(pet.tracks["idle"])
+                let right = try require(pet.tracks["running-right"])
+                let left = try require(pet.tracks["running-left"])
+                let sleep = try require(pet.tracks["sleeping"])
+
+                try expect(idle.frames.map(\.index) == [0, 1, 2, 3, 2, 1])
+                try expect(idle.frames.first?.duration == 1.55)
+                try expect(right.frames.map(\.index) == [4, 5, 6, 7, 8, 7, 6, 5])
+                try expect(left.frames.map(\.index) == [9, 10, 11, 12, 13, 12, 11, 10])
+                try expect(sleep.frames.map(\.index) == [14, 15, 16, 15])
+
+                let idleSignatures = try [0, 1, 2, 3].map {
+                    try require(imageSignature(try require(pet.frameImage(at: $0))))
+                }
+                let rightSignatures = try [4, 5, 6, 7, 8].map {
+                    try require(imageSignature(try require(pet.frameImage(at: $0))))
+                }
+                try expect(Set(idleSignatures).count == 4)
+                try expect(Set(rightSignatures).count == 5)
             }
         },
         LogicTest(name: "loader keeps valid custom animation and isolates invalid track") {
@@ -192,6 +216,27 @@ private func sampleRGBA(_ image: CGImage) -> (UInt8, UInt8, UInt8, UInt8)? {
     ) else { return nil }
     context.draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
     return (bytes[0], bytes[1], bytes[2], bytes[3])
+}
+
+private func imageSignature(_ image: CGImage) -> UInt64? {
+    let bytesPerRow = image.width * 4
+    var bytes = [UInt8](repeating: 0, count: bytesPerRow * image.height)
+    guard let context = CGContext(
+        data: &bytes,
+        width: image.width,
+        height: image.height,
+        bitsPerComponent: 8,
+        bytesPerRow: bytesPerRow,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    ) else { return nil }
+    context.interpolationQuality = .none
+    context.setShouldAntialias(false)
+    context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+
+    return bytes.reduce(UInt64(1_469_598_103_934_665_603)) { partial, byte in
+        (partial ^ UInt64(byte)) &* 1_099_511_628_211
+    }
 }
 
 private final class FixturePackage {
