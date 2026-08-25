@@ -29,8 +29,8 @@ Core prompt, FatMochi:
 > caught/squished. Use a limited palette, crisp silhouette, no props, labels,
 > or extra animals.
 
-The final FatMochi idle revision keeps the original eye width, thickness, and
-solid-black pixel shape. Only the inward angry slant is flattened slightly so
+The final FatMochi idle revision keeps the solid-black pixel shape, enlarges it
+slightly for readability at 96×104pt, and flattens the inward angry slant so
 the expression reads as blankly sleepy and a little dazed.
 
 The working chroma-key prompts changed only the background to a flat solid
