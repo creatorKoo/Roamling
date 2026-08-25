@@ -56,7 +56,9 @@ travel slowly -> sleep
 - pure-logic tests for rest timing, placement, and behavior transitions
 
 표준 pet에 sleep/sit animation이 없으면 pet 사용을 막지 않고 idle로 fallback한다. Built-in
-Mochi는 기존 atlas frame을 느리게 재생하는 최소 sleeping track만 사용한다.
+Mochi와 FatMochi는 전체 animation 제작 전 실제 크기 검증을 위한 네 가지 key pose와
+미세한 bob/breathing transform만 사용한다. 이 visual audition은 MVP 0.7 polish이며 이후
+agent integration을 미리 구현하지 않는다.
 
 ### Explicitly out of scope for this gate
 

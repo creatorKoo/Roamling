@@ -21,6 +21,9 @@ let package = Package(
         .target(
             name: "RoamlingPet",
             dependencies: ["RoamlingCore"],
+            resources: [
+                .process("Resources")
+            ],
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("ImageIO")

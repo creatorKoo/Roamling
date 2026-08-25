@@ -33,6 +33,9 @@ APP_DIR="$REPOSITORY_DIR/build/Roamling.app"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 cp "$BIN_DIR/Roamling" "$APP_DIR/Contents/MacOS/Roamling"
 cp "$REPOSITORY_DIR/Support/Info.plist" "$APP_DIR/Contents/Info.plist"
+if [[ -d "$BIN_DIR/Roamling_RoamlingPet.bundle" ]]; then
+  cp -R "$BIN_DIR/Roamling_RoamlingPet.bundle" "$APP_DIR/Contents/Resources/"
+fi
 
 # Bind Info.plist and resources into a valid local bundle signature. Release
 # distribution will replace this ad-hoc identity with Developer ID signing.

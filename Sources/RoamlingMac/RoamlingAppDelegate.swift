@@ -60,14 +60,17 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
 
         let petItem = NSMenuItem(title: "Pet", action: nil, keyEquivalent: "")
         let petMenu = NSMenu(title: "Pet")
-        let builtIn = NSMenuItem(
-            title: "Mochi (Built-in)",
-            action: #selector(selectBuiltInPet),
-            keyEquivalent: ""
-        )
-        builtIn.target = self
-        builtIn.state = runtime.currentPetPackagePath == nil ? .on : .off
-        petMenu.addItem(builtIn)
+        for kind in BuiltInPetKind.allCases {
+            let builtIn = NSMenuItem(
+                title: "\(kind.displayName) (Built-in)",
+                action: #selector(selectBuiltInPet(_:)),
+                keyEquivalent: ""
+            )
+            builtIn.target = self
+            builtIn.representedObject = kind.rawValue as NSString
+            builtIn.state = runtime.selectedBuiltInPet == kind ? .on : .off
+            petMenu.addItem(builtIn)
+        }
         if !runtime.installedPets.isEmpty { petMenu.addItem(.separator()) }
         for descriptor in runtime.installedPets {
             let item = NSMenuItem(
@@ -169,8 +172,10 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         rebuildMenu()
     }
 
-    @objc private func selectBuiltInPet() {
-        runtime?.useBuiltInPet()
+    @objc private func selectBuiltInPet(_ sender: NSMenuItem) {
+        guard let rawValue = sender.representedObject as? String,
+              let kind = BuiltInPetKind(rawValue: rawValue) else { return }
+        runtime?.useBuiltInPet(kind)
         rebuildMenu()
     }
 

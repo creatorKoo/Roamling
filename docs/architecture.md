@@ -51,7 +51,8 @@ module만 추출할 수 있다. 선행 Rust/C ABI는 만들지 않는다.
 - `AnimationResolver`: custom mapping -> aliases -> standard fallback
 - `PetAnimationPlayer`: timing only; no source/platform knowledge
 - `PetCatalog`: local read-only discovery
-- `PlaceholderPetFactory`: license-safe procedural fallback
+- `MascotPetFactory`: Mochi/FatMochi key-pose sheets -> temporary evaluation atlas
+- `PlaceholderPetFactory`: resource failure에도 앱이 뜨는 procedural emergency fallback
 
 ### RoamlingMac
 
@@ -394,12 +395,14 @@ frame swap에 scene graph가 필요하지 않다. particle/effect가 복잡해�
 **Chosen:** local discovery. existing CLI와 Codex가 설치한 package를 modification 없이
 읽고, network/gallery는 별도 installer milestone로 둔다.
 
-### Procedural placeholder
+### Original mascot auditions with procedural fallback
 
-**Options:** gallery pet 번들, 빈 화면, code-drawn cat.
+**Options:** gallery pet 번들, 빈 화면, generated key-pose sheets, code-drawn cat.
 
-**Chosen:** code-drawn cat. third-party asset license 불확실성 없이 앱이 즉시 살아 있고,
-실제 Petdex loader는 사용자 package와 fixtures로 검증한다.
+**Chosen:** original Mochi/FatMochi key-pose sheets를 built-in visual audition으로 사용하고
+code-drawn cat은 resource failure 전용 fallback으로 유지한다. 전체 animation을 먼저
+생산하지 않고 실제 96×104pt overlay에서 silhouette과 성격을 검증한다. third-party asset
+license에 의존하지 않으며 Petdex loader는 사용자 package와 fixtures로 계속 검증한다.
 
 ## Future migration
 

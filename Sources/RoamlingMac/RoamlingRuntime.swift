@@ -14,6 +14,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         static let scale = "roamling.scale"
         static let runtimeTuning = "roamling.runtimeTuning"
         static let petPackagePath = "roamling.petPackagePath"
+        static let builtInPet = "roamling.builtInPet"
         static let positionX = "roamling.position.x"
         static let positionY = "roamling.position.y"
         static let hasPosition = "roamling.position.exists"
@@ -53,6 +54,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
 
     public private(set) var asset: PetAsset
     public private(set) var installedPets: [PetDescriptor]
+    public private(set) var selectedBuiltInPet: BuiltInPetKind?
     public private(set) var tuning: RuntimeTuning
 
     public var currentPetPackagePath: String? { asset.packageURL?.standardizedFileURL.path }
@@ -94,16 +96,20 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
             DefaultsKey.roaming: true,
             DefaultsKey.avoidPointer: true,
             DefaultsKey.interactions: true,
-            DefaultsKey.scale: 1.0
+            DefaultsKey.scale: 1.0,
+            DefaultsKey.builtInPet: BuiltInPetKind.mochi.rawValue
         ])
         let runtimeTuning = Self.loadRuntimeTuning(defaults: defaults)
 
         let catalog = PetCatalog()
         let descriptors = catalog.discover()
         let selectedPath = defaults.string(forKey: DefaultsKey.petPackagePath)
+        let selectedBuiltInPet = defaults.string(forKey: DefaultsKey.builtInPet)
+            .flatMap(BuiltInPetKind.init(rawValue:)) ?? .mochi
         let initialAsset = Self.loadInitialAsset(
             descriptors: descriptors,
             selectedPath: selectedPath,
+            builtInPet: selectedBuiltInPet,
             loader: PetLoader()
         )
 
@@ -124,6 +130,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         self.catalog = catalog
         installedPets = descriptors
         asset = initialAsset
+        self.selectedBuiltInPet = initialAsset.packageURL == nil ? selectedBuiltInPet : nil
         displays = displaySet.displays
         coordinateSpace = displaySet.coordinateSpace
         world = initialWorld
@@ -208,6 +215,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         do {
             let newAsset = try loader.load(packageAt: packageURL)
             install(asset: newAsset)
+            selectedBuiltInPet = nil
             UserDefaults.standard.set(packageURL.standardizedFileURL.path, forKey: DefaultsKey.petPackagePath)
             return .success(())
         } catch {
@@ -215,8 +223,10 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         }
     }
 
-    public func useBuiltInPet() {
-        install(asset: PlaceholderPetFactory.make())
+    public func useBuiltInPet(_ kind: BuiltInPetKind) {
+        install(asset: MascotPetFactory.make(kind))
+        selectedBuiltInPet = kind
+        UserDefaults.standard.set(kind.rawValue, forKey: DefaultsKey.builtInPet)
         UserDefaults.standard.removeObject(forKey: DefaultsKey.petPackagePath)
     }
 
@@ -777,6 +787,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     private static func loadInitialAsset(
         descriptors: [PetDescriptor],
         selectedPath: String?,
+        builtInPet: BuiltInPetKind,
         loader: PetLoader
     ) -> PetAsset {
         if let selectedPath,
@@ -786,9 +797,6 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
            let loaded = try? loader.load(packageAt: selected.packageURL) {
             return loaded
         }
-        for descriptor in descriptors {
-            if let loaded = try? loader.load(packageAt: descriptor.packageURL) { return loaded }
-        }
-        return PlaceholderPetFactory.make()
+        return MascotPetFactory.make(builtInPet)
     }
 }

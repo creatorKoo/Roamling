@@ -56,6 +56,23 @@ func petLogicTests() -> [LogicTest] {
             try expect(pet.resolver.resolve(.sleep)?.name == "sleeping")
             try expect(pet.resolver.resolve(.sit)?.name == "idle")
         },
+        LogicTest(name: "built-in mascot pose auditions load with semantic tracks") {
+            for kind in BuiltInPetKind.allCases {
+                let pet = MascotPetFactory.make(kind)
+                try expect(pet.manifest.displayName == kind.displayName)
+                try expect(pet.manifest.id == "roamling-\(kind.rawValue)")
+                try expect(pet.columns == 8)
+                try expect(pet.rows == 2)
+                try expect(pet.frameCount == 16)
+                try expect(pet.frameImage(at: 0) != nil)
+                try expect(pet.frameImage(at: 15) != nil)
+                try expect(pet.resolver.resolve(.moveLeft)?.name == "running-left")
+                try expect(pet.resolver.resolve(.moveRight)?.name == "running-right")
+                try expect(pet.resolver.resolve(.sleep)?.name == "sleeping")
+                try expect(pet.resolver.resolve(.caught)?.name == "caught")
+                try expect(pet.resolver.resolve(.dragged)?.name == "dragged")
+            }
+        },
         LogicTest(name: "loader keeps valid custom animation and isolates invalid track") {
             let fixture = try FixturePackage(frameWidth: 1, frameHeight: 1, rows: 9)
             defer { fixture.remove() }

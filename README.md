@@ -15,8 +15,8 @@ This repository contains the first working vertical slice:
 - a native AppKit menu-bar app and transparent, non-activating overlay;
 - Codex/Petdex v1 (8×9) and v2 (8×11) pet loading, plus custom animation
   definitions and graceful capability fallback;
-- a code-drawn fallback cat, so the app works without redistributing a
-  third-party pet asset;
+- two original built-in mascot auditions, **Mochi** and **FatMochi**, selectable
+  from the menu, plus a code-drawn emergency fallback;
 - global desktop coordinates, display topology, hot-plug handling, and
   continuous cross-display paths;
 - calmer wandering with visible idle pauses, shorter local trips, and more
@@ -73,8 +73,8 @@ $ROAMLING_PET_PATH
 
 `ROAMLING_PET_PATH` may point either to one package directory or to a directory
 containing packages. A package contains `pet.json` and the referenced PNG or
-WebP atlas. If no valid package is found, Roamling uses its built-in procedural
-cat.
+WebP atlas. Mochi is the default. FatMochi and discovered Petdex-compatible
+packages can be selected from the menu, and the choice persists across launches.
 
 ## Repository guide
 
