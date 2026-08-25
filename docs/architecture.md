@@ -303,7 +303,8 @@ normal/look/evade  -> window click-through
 catch armed AND pointer in pet ellipse -> interactive
 mouseDown          -> caught
 mouseDragged       -> caught intro를 끝낸 뒤 dragged; global pointer point로 panel 이동 + paw cycle 반복
-mouseUp            -> nearest visible frame clamp, dropped, click-through
+mouseUp after drag -> nearest visible frame clamp, dropped, click-through
+mouseUp after click -> 즉시 click-through, caught intro + 짧은 네 발 loop 1회, dropped
 ```
 
 window가 sprite 크기이고 hit ellipse가 투명 margin을 제외하므로 interactive 순간에도
@@ -323,12 +324,13 @@ alpha silhouette을 독립적으로 중앙 정렬하고, 크기는 idle bounding
 center는 2px 이상 좌우로 움직이지 않아야 한다. 이 invariant는 asset test로 고정해
 moonwalk, 목이 사라지는 체형 변화, 얼굴 drift regression을 함께 막는다.
 
-caught track은 idle과 동일한 첫 frame에서 앞발을 드는 짧은 non-loop intro이고, dragged
-track은 그 마지막 자세와 이어지는 별도의 loop다. runtime은 mouseDown 시 intro 길이만큼
-caught를 유지한 다음, pointer가 이미 이동 중이어도 dragged loop로 넘긴다. 따라서 클릭만
-했을 때와 즉시 drag했을 때 모두 같은 부드러운 시작을 본다. dragged frame은 앞발과 뒷발의
-교대 동작을 읽을 수 있도록 팔다리만 idle bounds 밖으로 확장할 수 있다. 최대 범위는
-192×208 atlas cell 안이며 bounds center는 계속 고정한다.
+caught track은 idle과 동일한 첫 frame에서 작은 앞발이 나타나는 짧은 non-loop intro이고,
+dragged track은 그 마지막 자세와 이어지는 별도의 loop다. runtime은 mouseDown 시 intro
+길이만큼 caught를 유지한 다음, pointer가 이미 이동 중이어도 dragged loop로 넘긴다. 실제
+drag는 mouseUp까지 loop를 반복한다. 이동 없는 click은 panel ownership을 즉시 반납하고
+같은 intro와 loop를 한 번 재생한 뒤 dropped로 전환하므로 underlying app을 추가로 막지
+않는다. dragged frame도 idle과 같은 174×170 bounds와 짧은 팔다리 길이를 유지하며,
+앞·뒤의 대각선 발 쌍만 빠르게 교대한다.
 
 ## Safe-zone design
 
@@ -425,8 +427,9 @@ MVP 0.7에서 보이는 walk/idle/sleep/caught/stretch/landing만 authored atlas
 key-pose 기반 evaluation atlas를 유지하고 code-drawn cat은 resource failure 전용 fallback이다.
 후속 agent reaction row를 미리 만들지 않아 milestone 범위를 지키며, third-party asset
 license에 의존하지 않고 Petdex loader는 사용자 package와 fixtures로 계속 검증한다. 모든
-동작의 identity 기준은 idle이며, walk/caught는 크기·중심·얼굴·목선 invariant를 asset
-test로 고정한다. dragged만 읽기 쉬운 limb extension을 위해 전체 silhouette 확장을 허용한다.
+동작의 identity 기준은 idle이며, walk/caught/dragged는 크기·중심·얼굴·목선 invariant를
+asset test로 고정한다. dragged도 별도의 긴 팔다리를 만들지 않고 walk와 같은 짧은 발
+길이의 빠른 대각선 교대 동작을 사용한다.
 
 ## Future migration
 

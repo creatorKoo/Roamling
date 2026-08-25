@@ -16,11 +16,11 @@ evaluation at actual desktop size.
 `fat-mochi-runtime-atlas.png` is the authored runtime asset for the default
 FatMochi. It has 8 columns of 192×208 cells and seven internal rows: idle,
 running right, running left, sleeping, caught, stretching, and landing. Walk
-frames articulate all four paws and add restrained body/tail follow-through;
-the other current-MVP states use blink, breathing, paw-wiggle, forward-stretch,
-and landing sequences. The stretch is the feline play-bow shape—forepaws
-forward, chest low, hindquarters raised. An upright, human-like arms-up draft
-was explicitly rejected and is not included.
+frames articulate diagonal front/hind pairs and add restrained body/tail
+follow-through; the other current-MVP states use blink, breathing, a compact
+four-paw scramble, forward-stretch, and landing sequences. The stretch is the
+feline play-bow shape—forepaws forward, chest low, hindquarters raised. An
+upright, human-like arms-up draft was explicitly rejected and is not included.
 
 This seven-row layout is an internal built-in asset, not a new Petdex package
 version. Imported Petdex pets still use their v1/v2 manifest and atlas layouts
@@ -73,12 +73,20 @@ neck invariant, planted-paw travel, lifted-paw recovery, chronological opposing
 contacts, a fixed torso, and a seamless transition back to idle.
 
 Frames 32–35 keep the prior 174×170 one-shot caught transition beginning with
-the exact approved idle frame. Frames 36–39 now form a stronger dragged loop:
-left/right forepaw height and outward hind-paw kicks alternate visibly, with a
-restrained tail response. Those limb extensions may occupy 169–192×183–191
-pixels while their alpha-bounds center stays stable inside the 192×208 cell.
-The torso remains compact instead of stretching with the paws. The approved
-idle/blink row was preserved pixel-for-pixel during this pass.
+the exact approved idle frame. Frames 36–39 now form a compact dragged loop:
+front/hind diagonal pairs alternate below the body like a short in-air run.
+They keep the idle frame's 174×170 alpha bounds, normal short leg length, stable
+center, face, neck, and torso instead of extending arms beside the face. A
+short click plays the same caught-to-scramble response once while remaining
+click-through; a held drag repeats the loop. The approved idle/blink row was
+preserved pixel-for-pixel during this pass.
+
+The 2026-08-26 gait pass used the approved local idle/walk references with
+OpenAI's built-in image-generation mode. The prompt requested an eight-frame
+four-beat walk in which every paw changes position and a compact four-frame
+scramble constrained below the belly. Generated faces and torsos were rejected;
+only selected lower-body motion was chroma-keyed and combined locally with the
+approved FatMochi body, using nearest-neighbor sampling.
 
 The working chroma-key prompts changed only the background to a flat solid
 `#00FF00`; transparency was produced locally without network upload.

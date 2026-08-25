@@ -84,6 +84,8 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     private var nextWanderAt: TimeInterval
     private var catchArmedUntil: TimeInterval = 0
     private var caughtAnimationUntil: TimeInterval = 0
+    private var clickReactionUntil: TimeInterval = 0
+    private var isClickReactionPending = false
     private var isDragging = false
     private var dragOffset = WorldVector.zero
     private var lastPointerDecision: PointerDecision?
@@ -202,6 +204,8 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
             NotificationCenter.default.removeObserver(screenObserver)
             self.screenObserver = nil
         }
+        clickReactionUntil = 0
+        isClickReactionPending = false
         overlay.setInteractionEnabled(false)
         persistPosition()
         overlay.setVisible(false)
@@ -285,6 +289,8 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         }
         let pointer = corePoint(fromAppKitScreenPoint: screenPoint)
         dragOffset = movement.position - pointer
+        clickReactionUntil = 0
+        isClickReactionPending = false
         isDragging = false
         isEvadeTransitioning = false
         movement.cancelRoute(stop: true)
@@ -312,11 +318,28 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
             overlay.setInteractionEnabled(false)
             return
         }
+        let now = ProcessInfo.processInfo.systemUptime
         let pointer = corePoint(fromAppKitScreenPoint: screenPoint)
         if wasDragged || isDragging {
             movement.teleport(to: pointer + dragOffset)
+            finishDrop(at: now)
+            return
         }
-        finishDrop(at: ProcessInfo.processInfo.systemUptime)
+
+        // A click has the same caught -> four-paw scramble response as a drag.
+        // Release panel ownership immediately so the reaction never blocks the
+        // underlying app, then finish with the normal landing after one loop.
+        behavior.handle(.dragMoved, at: now)
+        isClickReactionPending = true
+        clickReactionUntil = max(now, caughtAnimationUntil) + draggedCycleDuration
+        let clamped = world.clamp(movement.position, objectSize: overlay.objectSize)
+        movement.teleport(to: clamped)
+        overlay.setPosition(clamped)
+        overlay.setInteractionEnabled(false)
+        catchArmedUntil = 0
+        updateAnimation(pointerDegrees: nil)
+        renderCurrentFrame()
+        if running { scheduleNextTick(after: 1 / 30) }
     }
 
     @objc private func tickTimerFired() {
@@ -336,7 +359,9 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
             cancelRestForActivity(at: now)
         }
         if (behavior.state == .caught || behavior.state == .dragged), !pointer.primaryButtonDown {
-            finishDrop(at: now)
+            if !isClickReactionPending || now >= clickReactionUntil {
+                finishDrop(at: now)
+            }
         }
 
         let decision = pointerModel.evaluate(
@@ -346,10 +371,12 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         )
         lastPointerDecision = decision
 
-        if decision.shouldArmCatch, areInteractionsEnabled {
+        if !isClickReactionPending, decision.shouldArmCatch, areInteractionsEnabled {
             catchArmedUntil = max(catchArmedUntil, now + tuning.catchWindow)
         }
-        let catchIsArmed = areInteractionsEnabled && now <= catchArmedUntil
+        let catchIsArmed = !isClickReactionPending
+            && areInteractionsEnabled
+            && now <= catchArmedUntil
 
         if behavior.state != .caught && behavior.state != .dragged {
             if catchIsArmed {
@@ -388,9 +415,9 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         }
 
         let catchIsLive = catchIsArmed && overlay.containsPet(atWorldPoint: pointer.position)
-        overlay.setInteractionEnabled(
-            behavior.state == .caught || behavior.state == .dragged || catchIsLive
-        )
+        let ownsPointer = (behavior.state == .caught || behavior.state == .dragged)
+            && !isClickReactionPending
+        overlay.setInteractionEnabled(ownsPointer || catchIsLive)
 
         updateAnimation(
             pointerDegrees: behavior.state == .lookAtPointer ? decision.lookDirectionDegrees : nil
@@ -725,8 +752,10 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
 
     private func finishDrop(at timestamp: TimeInterval) {
         isDragging = false
+        isClickReactionPending = false
         isEvadeTransitioning = false
         caughtAnimationUntil = 0
+        clickReactionUntil = 0
         behavior.handle(.mouseReleased, at: timestamp)
         let clamped = world.clamp(movement.position, objectSize: overlay.objectSize)
         movement.teleport(to: clamped)
@@ -740,6 +769,12 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     private var caughtTransitionDuration: TimeInterval {
         guard let track = asset.resolver.resolve(.caught), !track.loops else { return 0 }
         return min(track.frames.reduce(0) { $0 + $1.duration }, 0.8)
+    }
+
+    private var draggedCycleDuration: TimeInterval {
+        guard let track = asset.resolver.resolve(.dragged) else { return 0.4 }
+        let duration = track.frames.reduce(0) { $0 + $1.duration }
+        return min(max(duration, 0.3), 0.8)
     }
 
     private func handleDisplayChange() {
@@ -763,6 +798,8 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     private func install(asset newAsset: PetAsset) {
         asset = newAsset
         caughtAnimationUntil = 0
+        clickReactionUntil = 0
+        isClickReactionPending = false
         animationPlayer = PetAnimationPlayer(asset: newAsset)
         updateAnimation(pointerDegrees: nil)
         renderCurrentFrame()

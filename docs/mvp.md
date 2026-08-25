@@ -57,8 +57,9 @@ travel slowly -> sleep
 
 표준 pet에 sleep/sit animation이 없으면 pet 사용을 막지 않고 idle로 fallback한다.
 기본 캐릭터 FatMochi는 현재 gate에서 실제 보이는 동작만 authored frame으로 다듬었다.
-walk는 8장 동안 네 발이 교차하고 몸통과 꼬리가 작게 따라오며, idle blink, sleep breathing,
-caught paw wiggle, drop landing, 고양이식 forward stretch도 각각 독립 frame을 쓴다. stretch는
+walk는 8장 동안 앞·뒤의 대각선 발이 교차하고 몸통과 꼬리가 작게 따라오며, idle blink,
+sleep breathing, caught paw wiggle, drop landing, 고양이식 forward stretch도 각각 독립
+frame을 쓴다. stretch는
 앞발을 뻗고 가슴을 낮추며 엉덩이를 드는 자세이고 사람처럼 앞발을 위로 드는 pose는 쓰지
 않는다. Mochi는 아직 네 key pose에서 만든 reversible evaluation cycle을 유지한다.
 active travel만 60Hz로 갱신하며 idle/sleep의 저전력 cadence는 그대로다. 이는 MVP 0.7의
@@ -68,10 +69,12 @@ creature-quality polish이며 이후 agent integration용 animation이나 source
 174×170px silhouette과 같은 얼굴을 유지한 채 짧은 다리만 교차한다. 첫 walk frame은 idle
 원화를 그대로 사용하고 이후 frame도 볼 아래가 좁아졌다가 몸통으로 이어지는 목·어깨선을
 유지한다. alpha bounds center 편차를 2px 미만으로 고정해 atlas 안에서 몸이 뒤로 흐르다
-되감기는 moonwalk도 막는다. 클릭 직후에는 idle과 같은 첫 frame에서 앞발을 드는 caught
-intro를 한 번 재생한다. 실제 drag 중에는 앞발 높이와 뒷발 킥이 좌우로 교대하는 별도의
-네 frame loop를 반복하며, 팔다리가 뻗는 범위만 idle silhouette 밖으로 허용한다. idle의
-승인된 검은 눈과 half-close/closed blink frame은 변경하지 않는다.
+되감기는 moonwalk도 막는다. 클릭 직후에는 idle과 같은 첫 frame에서 작은 앞발이 나타나는
+caught intro를 한 번 재생한다. 실제 drag 중에는 idle과 같은 짧은 팔다리 길이를 유지한
+채 네 발의 대각선 쌍이 빠르게 교대하는 네 frame loop를 반복한다. 짧은 click도 같은
+intro와 loop를 한 번 끝까지 보여 준 뒤 landing으로 이어지며, animation 동안 overlay는
+즉시 click-through로 돌아간다. idle의 승인된 검은 눈과 half-close/closed blink frame은
+변경하지 않는다.
 
 ### Explicitly out of scope for this gate
 

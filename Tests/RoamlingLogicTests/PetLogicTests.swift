@@ -117,6 +117,9 @@ func petLogicTests() -> [LogicTest] {
             let draggedMetrics = try Array(36...39).map {
                 try require(alphaMetrics(try require(pet.frameImage(at: $0))))
             }
+            let draggedSignatures = try Array(36...39).map {
+                try require(imageSignature(try require(pet.frameImage(at: $0))))
+            }
             let idleFrame = try require(pet.frameImage(at: 0))
             let idleMetric = try require(alphaMetrics(idleFrame))
             let idleSignature = try require(imageSignature(idleFrame))
@@ -143,11 +146,10 @@ func petLogicTests() -> [LogicTest] {
             let maximumDraggedBoundsCenter = try require(draggedBoundsCenters.max())
             try expect(maximumDraggedBoundsCenter - minimumDraggedBoundsCenter < 2)
             try expect(draggedMetrics.allSatisfy {
-                $0.width <= 192 && $0.height >= idleMetric.height + 13
+                abs($0.width - idleMetric.width) <= 2
+                    && abs($0.height - idleMetric.height) <= 2
             })
-            try expect(draggedMetrics.contains {
-                $0.width >= idleMetric.width + 9 || $0.height >= idleMetric.height + 18
-            })
+            try expect(Set(draggedSignatures).count == 4)
             let caughtStart = try require(pet.frameImage(at: 32))
             let caughtStartSignature = try require(imageSignature(caughtStart))
             try expect(caughtStartSignature == idleSignature)
@@ -179,9 +181,9 @@ func petLogicTests() -> [LogicTest] {
 
             player.setCapability(.dragged)
             try expect(player.currentFrameIndex == 36)
-            player.update(deltaTime: 0.13)
+            player.update(deltaTime: 0.10)
             try expect(player.currentFrameIndex == 37)
-            player.update(deltaTime: 0.36)
+            player.update(deltaTime: 0.27)
             try expect(player.currentFrameIndex == 36)
         },
         LogicTest(name: "Mochi pose-derived cycles remain reversible") {
