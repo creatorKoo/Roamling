@@ -70,11 +70,15 @@ creature-quality polish이며 이후 agent integration용 animation이나 source
 원화를 그대로 사용하고 이후 frame도 볼 아래가 좁아졌다가 몸통으로 이어지는 목·어깨선을
 유지한다. alpha bounds center 편차를 2px 미만으로 고정해 atlas 안에서 몸이 뒤로 흐르다
 되감기는 moonwalk도 막는다. 클릭 직후에는 idle과 같은 첫 frame에서 작은 앞발이 나타나는
-caught intro를 한 번 재생한다. 실제 drag 중에는 idle과 같은 짧은 팔다리 길이를 유지한
-채 네 발의 대각선 쌍이 빠르게 교대하는 네 frame loop를 반복한다. 짧은 click도 같은
-intro와 loop를 한 번 끝까지 보여 준 뒤 landing으로 이어지며, animation 동안 overlay는
-즉시 click-through로 돌아간다. idle의 승인된 검은 눈과 half-close/closed blink frame은
-변경하지 않는다.
+caught intro를 한 번 재생한다. 실제 drag 중에는 이전의 배가 보이는 caught silhouette을
+유지하고, 긴 팔만 몸 가까이 붙은 짧은 네 발로 바꾼 네 frame loop를 반복한다. 짧은
+click도 같은 intro와 loop를 한 번 끝까지 보여 준 뒤 landing으로 이어지며, animation
+동안 overlay는 즉시 click-through로 돌아간다. idle의 승인된 검은 눈과
+half-close/closed blink frame 및 caught intro 32–35는 변경하지 않는다.
+
+atlas 전체 frame을 alpha connected-component로 검사한다. 현재 mascot pose에는 몸에서
+분리된 effect sprite가 없으므로 frame마다 visible artwork가 하나의 연결된 component여야
+한다. 이 검사로 walk 합성 조각과 stretch/landing에 남은 cell-edge debris를 회귀 테스트한다.
 
 ### Explicitly out of scope for this gate
 

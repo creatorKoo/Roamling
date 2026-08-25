@@ -146,9 +146,9 @@ func petLogicTests() -> [LogicTest] {
             let maximumDraggedBoundsCenter = try require(draggedBoundsCenters.max())
             try expect(maximumDraggedBoundsCenter - minimumDraggedBoundsCenter < 2)
             try expect(draggedMetrics.allSatisfy {
-                abs($0.width - idleMetric.width) <= 2
-                    && abs($0.height - idleMetric.height) <= 2
+                $0.width == 180 && $0.height == 183
             })
+            try expect(draggedMetrics.allSatisfy { $0.height >= idleMetric.height + 10 })
             try expect(Set(draggedSignatures).count == 4)
             let caughtStart = try require(pet.frameImage(at: 32))
             let caughtStartSignature = try require(imageSignature(caughtStart))
@@ -168,6 +168,14 @@ func petLogicTests() -> [LogicTest] {
                 let neckWidth = try require(centeredOpaqueRunWidth(walkFrame, y: 90))
                 let cheekWidth = try require(centeredOpaqueRunWidth(walkFrame, y: 110))
                 try expect(cheekWidth - neckWidth >= 3)
+            }
+
+            for index in 0..<pet.frameCount {
+                let frame = try require(pet.frameImage(at: index))
+                try expect(
+                    opaqueComponentCount(frame) == 1,
+                    "FatMochi frame \(index) contains detached opaque artwork"
+                )
             }
         },
         LogicTest(name: "FatMochi caught intro hands off to a looping drag") {
@@ -408,6 +416,63 @@ private func centeredOpaqueRunWidth(_ image: CGImage, y: Int) -> Int? {
         distance(from: centerX, to: $0) < distance(from: centerX, to: $1)
     }) else { return nil }
     return run.upperBound - run.lowerBound + 1
+}
+
+private func opaqueComponentCount(_ image: CGImage) -> Int? {
+    let bytesPerRow = image.width * 4
+    var bytes = [UInt8](repeating: 0, count: bytesPerRow * image.height)
+    guard let context = CGContext(
+        data: &bytes,
+        width: image.width,
+        height: image.height,
+        bitsPerComponent: 8,
+        bytesPerRow: bytesPerRow,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    ) else { return nil }
+    context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+
+    let width = image.width
+    let height = image.height
+    var visited = [Bool](repeating: false, count: width * height)
+    var componentCount = 0
+    let neighbors = [
+        (-1, -1), (0, -1), (1, -1),
+        (-1, 0),            (1, 0),
+        (-1, 1),  (0, 1),   (1, 1)
+    ]
+
+    for y in 0..<height {
+        for x in 0..<width {
+            let start = y * width + x
+            guard !visited[start], bytes[y * bytesPerRow + x * 4 + 3] > 0 else { continue }
+            componentCount += 1
+            visited[start] = true
+            var queue = [start]
+            var cursor = 0
+
+            while cursor < queue.count {
+                let point = queue[cursor]
+                cursor += 1
+                let pointX = point % width
+                let pointY = point / width
+                for (offsetX, offsetY) in neighbors {
+                    let nextX = pointX + offsetX
+                    let nextY = pointY + offsetY
+                    guard nextX >= 0, nextX < width, nextY >= 0, nextY < height else {
+                        continue
+                    }
+                    let next = nextY * width + nextX
+                    guard !visited[next], bytes[nextY * bytesPerRow + nextX * 4 + 3] > 0 else {
+                        continue
+                    }
+                    visited[next] = true
+                    queue.append(next)
+                }
+            }
+        }
+    }
+    return componentCount
 }
 
 private func distance(from x: Int, to range: ClosedRange<Int>) -> Int {

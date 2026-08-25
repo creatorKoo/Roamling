@@ -73,20 +73,24 @@ neck invariant, planted-paw travel, lifted-paw recovery, chronological opposing
 contacts, a fixed torso, and a seamless transition back to idle.
 
 Frames 32–35 keep the prior 174×170 one-shot caught transition beginning with
-the exact approved idle frame. Frames 36–39 now form a compact dragged loop:
-front/hind diagonal pairs alternate below the body like a short in-air run.
-They keep the idle frame's 174×170 alpha bounds, normal short leg length, stable
-center, face, neck, and torso instead of extending arms beside the face. A
-short click plays the same caught-to-scramble response once while remaining
-click-through; a held drag repeats the loop. The approved idle/blink row was
-preserved pixel-for-pixel during this pass.
+the exact approved idle frame. Frames 36–39 restore the earlier belly-facing
+caught silhouette while replacing only its long limbs with compact paws. The
+four frames stay within 180×183 alpha bounds and alternate front/hind diagonal
+pairs close to the belly. A short click plays the same caught-to-scramble
+response once while remaining click-through; a held drag repeats the loop. The
+approved idle/blink row and caught intro were preserved pixel-for-pixel during
+this pass.
 
 The 2026-08-26 gait pass used the approved local idle/walk references with
 OpenAI's built-in image-generation mode. The prompt requested an eight-frame
 four-beat walk in which every paw changes position and a compact four-frame
 scramble constrained below the belly. Generated faces and torsos were rejected;
 only selected lower-body motion was chroma-keyed and combined locally with the
-approved FatMochi body, using nearest-neighbor sampling.
+approved FatMochi body, using nearest-neighbor sampling. A subsequent repair
+pass replaced the cut lower-body splice with a connected lower-belly drawing,
+restored the belly-facing drag pose, and removed three detached debris components
+from existing stretch/landing frames without changing those poses. Tests now
+require one connected visible-alpha component in every built-in FatMochi frame.
 
 The working chroma-key prompts changed only the background to a flat solid
 `#00FF00`; transparency was produced locally without network upload.

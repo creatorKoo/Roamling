@@ -329,8 +329,14 @@ dragged track은 그 마지막 자세와 이어지는 별도의 loop다. runtime
 길이만큼 caught를 유지한 다음, pointer가 이미 이동 중이어도 dragged loop로 넘긴다. 실제
 drag는 mouseUp까지 loop를 반복한다. 이동 없는 click은 panel ownership을 즉시 반납하고
 같은 intro와 loop를 한 번 재생한 뒤 dropped로 전환하므로 underlying app을 추가로 막지
-않는다. dragged frame도 idle과 같은 174×170 bounds와 짧은 팔다리 길이를 유지하며,
-앞·뒤의 대각선 발 쌍만 빠르게 교대한다.
+않는다. dragged frame은 이전의 배가 보이는 caught body를 복원한 180×183 bounds 안에서
+짧은 팔다리만 움직이며, 앞·뒤의 대각선 발 쌍을 빠르게 교대한다. caught intro 32–35는
+dragged asset을 수정해도 별도 track으로 그대로 유지한다.
+
+현재 authored mascot은 독립 effect layer를 쓰지 않으므로 각 atlas frame의 visible alpha는
+하나의 8-connected component여야 한다. asset test가 detached pixels와 다른 cell에서 잘려
+들어온 debris를 검사한다. 향후 sparkle/Z 같은 분리 effect가 필요하면 pet body atlas에
+섞지 않고 renderer effect layer로 추가한다.
 
 ## Safe-zone design
 
@@ -428,8 +434,8 @@ key-pose 기반 evaluation atlas를 유지하고 code-drawn cat은 resource fail
 후속 agent reaction row를 미리 만들지 않아 milestone 범위를 지키며, third-party asset
 license에 의존하지 않고 Petdex loader는 사용자 package와 fixtures로 계속 검증한다. 모든
 동작의 identity 기준은 idle이며, walk/caught/dragged는 크기·중심·얼굴·목선 invariant를
-asset test로 고정한다. dragged도 별도의 긴 팔다리를 만들지 않고 walk와 같은 짧은 발
-길이의 빠른 대각선 교대 동작을 사용한다.
+asset test로 고정한다. dragged는 이전 belly-facing silhouette을 유지하면서 긴 limb만
+짧은 네 발 교대 동작으로 교체한다.
 
 ## Future migration
 
