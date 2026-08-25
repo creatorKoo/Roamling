@@ -1,0 +1,135 @@
+// SPDX-FileCopyrightText: 2026 GooBeom Jeoung
+// SPDX-License-Identifier: GPL-3.0-only
+
+import Foundation
+
+public struct DisplaySnapshot: Codable, Hashable, Sendable, Identifiable {
+    public let id: String
+    public let name: String
+    public let frame: WorldRect
+    public let visibleFrame: WorldRect
+    public let scale: Double
+
+    public init(
+        id: String,
+        name: String,
+        frame: WorldRect,
+        visibleFrame: WorldRect,
+        scale: Double
+    ) {
+        self.id = id
+        self.name = name
+        self.frame = frame
+        self.visibleFrame = visibleFrame
+        self.scale = scale
+    }
+}
+
+public struct WindowSnapshot: Codable, Hashable, Sendable, Identifiable {
+    public let id: String
+    public let applicationIdentifier: String?
+    public let title: String?
+    public let frame: WorldRect
+    public let isFocused: Bool
+
+    public init(
+        id: String,
+        applicationIdentifier: String? = nil,
+        title: String? = nil,
+        frame: WorldRect,
+        isFocused: Bool = false
+    ) {
+        self.id = id
+        self.applicationIdentifier = applicationIdentifier
+        self.title = title
+        self.frame = frame
+        self.isFocused = isFocused
+    }
+}
+
+public struct PointerSnapshot: Codable, Hashable, Sendable {
+    public let position: WorldPoint
+    public let timestamp: TimeInterval
+    public let primaryButtonDown: Bool
+
+    public init(position: WorldPoint, timestamp: TimeInterval, primaryButtonDown: Bool) {
+        self.position = position
+        self.timestamp = timestamp
+        self.primaryButtonDown = primaryButtonDown
+    }
+}
+
+public struct FocusSnapshot: Codable, Hashable, Sendable {
+    public let windowID: String?
+    public let focusedElementFrame: WorldRect?
+    public let caretFrame: WorldRect?
+    public let confidence: Double
+
+    public init(
+        windowID: String? = nil,
+        focusedElementFrame: WorldRect? = nil,
+        caretFrame: WorldRect? = nil,
+        confidence: Double = 0
+    ) {
+        self.windowID = windowID
+        self.focusedElementFrame = focusedElementFrame
+        self.caretFrame = caretFrame
+        self.confidence = confidence.clamped(to: 0...1)
+    }
+}
+
+public struct SafeZone: Codable, Hashable, Sendable {
+    public let frame: WorldRect
+    public let score: Double
+    public let confidence: Double
+    public let reason: String
+
+    public init(frame: WorldRect, score: Double, confidence: Double, reason: String) {
+        self.frame = frame
+        self.score = score
+        self.confidence = confidence.clamped(to: 0...1)
+        self.reason = reason
+    }
+}
+
+public struct DesktopWorldSnapshot: Codable, Hashable, Sendable {
+    public let displays: [DisplaySnapshot]
+    public let windows: [WindowSnapshot]
+    public let pointer: PointerSnapshot?
+    public let focus: FocusSnapshot?
+    public let safeZones: [SafeZone]
+
+    public init(
+        displays: [DisplaySnapshot],
+        windows: [WindowSnapshot] = [],
+        pointer: PointerSnapshot? = nil,
+        focus: FocusSnapshot? = nil,
+        safeZones: [SafeZone] = []
+    ) {
+        self.displays = displays
+        self.windows = windows
+        self.pointer = pointer
+        self.focus = focus
+        self.safeZones = safeZones
+    }
+
+    public func display(containing point: WorldPoint) -> DisplaySnapshot? {
+        displays.first(where: { $0.frame.contains(point) })
+    }
+
+    public func nearestDisplay(to point: WorldPoint) -> DisplaySnapshot? {
+        displays.min { $0.frame.distance(to: point) < $1.frame.distance(to: point) }
+    }
+
+    public func clamp(_ point: WorldPoint, objectSize: WorldSize) -> WorldPoint {
+        if let containing = displays.first(where: {
+            $0.visibleFrame.insetBy(dx: objectSize.width / 2, dy: objectSize.height / 2).contains(point)
+        }) {
+            return containing.visibleFrame.clampedCenter(point, objectSize: objectSize)
+        }
+        guard let nearest = displays.min(by: {
+            $0.visibleFrame.distance(to: point) < $1.visibleFrame.distance(to: point)
+        }) else { return point }
+        return nearest.visibleFrame.clampedCenter(point, objectSize: objectSize)
+    }
+}

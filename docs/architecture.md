@@ -1,0 +1,386 @@
+# Roamling architecture
+
+## Product boundary
+
+Roamling은 agent status overlay가 아니라 desktop creature runtime이다. coding agent는
+초기 관심 신호 중 하나일 뿐이다. 따라서 의존 방향은 항상 다음과 같다.
+
+```text
+External activity                       Operating system
+Claude / Codex / future game/media      AppKit / AX / ScreenCaptureKit
+          |                                      |
+          v                                      v
+    ActivitySource                        PlatformServices
+          |                                      |
+          +------------ domain values -----------+
+                             |
+                             v
+       Context + Attention + Reaction + Behavior
+                             |
+                  Movement + DesktopWorld
+                             |
+                             v
+                 PetCapabilities / Renderer
+```
+
+`RoamlingCore`의 compile-time dependency에는 OS framework나 product SDK가 없다.
+현재 Swift가 pure core도 담지만, Windows port를 시작할 때 측정 결과가 필요하면 이
+module만 추출할 수 있다. 선행 Rust/C ABI는 만들지 않는다.
+
+## Modules
+
+### RoamlingCore
+
+- `Geometry`: `WorldPoint`, `WorldVector`, `WorldRect` (Double, top-left/y-down)
+- `DesktopWorld`: immutable display/window/pointer/focus/safe-zone snapshot
+- `DisplayTopology`: display graph, seam/portal, continuous route waypoints
+- `MovementController`: acceleration, capped speed, arrival/deceleration
+- `PointerInteractionModel`: proximity, approach speed, catch arming, escape vector
+- `BehaviorController`: explicit creature FSM
+- `CompanionEvent`, `UserContext`, `ActivitySource`
+- `AttentionModel`, `ReactionPolicy`, candidate scoring
+- platform protocols containing domain values only
+
+### RoamlingPet
+
+- `PetManifest`: Codex/Petdex package decode and validation
+- `PetAsset`: atlas and animation tracks
+- `PetCapabilities`: semantic actions used by behavior
+- `AnimationResolver`: custom mapping -> aliases -> standard fallback
+- `PetAnimationPlayer`: timing only; no source/platform knowledge
+- `PetCatalog`: local read-only discovery
+- `PlaceholderPetFactory`: license-safe procedural fallback
+
+### RoamlingMac
+
+- `MacDisplayProvider`: `NSScreen` -> display snapshots and coordinate transform
+- `MacPointerProvider`: `NSEvent` global point sampling
+- `PetOverlayPanel`: transparent, non-activating, all-Spaces sprite window
+- `RoamlingRuntime`: main-actor orchestration and the only owner of input gating
+- menu-bar controls and lifecycle
+
+MVP 3/4에서 `MacWindowProvider`, `MacFocusProvider`,
+`MacBasicSafeZoneProvider`, `MacCaptureProvider`를 이 module에 추가한다.
+
+## Domain events, not agent events
+
+```swift
+struct CompanionEvent {
+    let sourceID: String
+    let sourceType: ActivitySourceType
+    let timestamp: TimeInterval
+    let kind: CompanionEventKind
+    let intensity: Double        // clamped 0...1
+    let context: UserContext?
+    let locationHint: LocationHint?
+    let metadata: [String: ScalarMetadata]
+}
+```
+
+`metadata`는 scalar만 허용하며 core가 그 key를 분기하지 않는다. source adapter가
+Claude/Codex payload를 일반 event로 정규화한다. `ActivitySource`는 event stream을
+내놓고 product-specific detail은 adapter 안에서 끝난다.
+
+## Context
+
+`UserContext`는 source와 독립적이다.
+
+```text
+signals from focus / idle / playback / future telemetry
+                         |
+                         v
+                  ContextResolver
+                         |
+      working | gaming | watchingMedia | browsing | idle
+```
+
+MVP에서는 pointer/user idle과 coding activity로 `working/idle`만 실제 사용한다.
+Context가 source 이름에서 직접 결정되지 않으므로, 같은 game event도 fullscreen,
+focus, media playback 상황에 따라 다른 reaction budget을 가질 수 있다.
+
+## AttentionModel
+
+후보별 base priority의 초기값은 다음과 같다.
+
+| event | priority |
+| --- | ---: |
+| attention required | 100 |
+| negative/failure | 90 |
+| major achievement | 80 |
+| achievement/positive | 65 |
+| active work | 50 |
+| background/calm | 30 |
+| idle | 0 |
+
+최종 score는 priority, intensity, recency, location confidence를 합친다. 현재 target은
+minimum dwell 동안 유지된다. 새 후보는 hysteresis margin을 넘을 때만 교체하고,
+방금 떠난 source는 cooldown을 받는다. attention/failure처럼 urgent한 event만 dwell을
+깨는 것이 가능하다. 이 구조가 monitor 왕복을 막는다.
+
+## ReactionPolicy
+
+policy 입력은 event kind/intensity, context, current behavior, cooldown, personality다.
+출력은 `PetAction`이지 animation 이름이 아니다.
+
+```text
+achievement(0.2) -> glance / paw / small celebrate (weighted)
+achievement(0.9) -> celebrate, occasionally large celebrate
+setback          -> fail/sad, context에 따라 짧게
+attention        -> observe/paw, 반복 cooldown 적용
+```
+
+random unit을 호출자가 주입할 수 있게 하여 테스트를 deterministic하게 만든다.
+gaming/media context의 reaction budget은 낮추고 중앙 회피를 강화할 수 있다.
+
+## Pet runtime and capability resolution
+
+Behavior는 `perform(.sleep)`처럼 semantic capability만 요청한다.
+
+```text
+requested capability
+    -> roamling.json explicit mapping
+    -> manifest custom animation / aliases
+    -> standard Petdex row
+    -> related capability fallback
+    -> idle
+```
+
+예:
+
+```text
+sleep      -> sleeping -> sleep -> idle
+work       -> working -> running -> idle
+observe    -> watching -> review -> waiting -> idle
+celebrate  -> celebrate -> jumping -> waving -> idle
+caught     -> caught -> waiting -> idle
+```
+
+v2 pointer look은 0°=up, 90°=right인 16방향 frame으로 quantize한다. deadzone에서는
+idle을 사용한다. v1 pet은 look row가 없어도 idle/review fallback으로 정상 동작한다.
+
+### Optional Roamling extension
+
+표준 package를 수정하지 않고 root에 `roamling.json`을 선택적으로 추가한다.
+
+```json
+{
+  "schemaVersion": 1,
+  "behaviors": {
+    "sleep": "sleeping",
+    "work": "typing",
+    "observe": "watching",
+    "paw": "pawing",
+    "caught": "caught",
+    "dragged": "dragged",
+    "landing": "landing"
+  }
+}
+```
+
+unknown behavior/key는 무시한다. mapping이 가리킨 track이 없으면 표준 fallback으로
+돌아간다. 이 파일이 없을 때가 가장 중요한 compatibility path다. schema version을
+도입한 이유는 Petdex manifest를 fork하지 않고 확장을 독립적으로 진화시키기 위해서다.
+
+## DesktopWorld and coordinates
+
+Core world는 모든 display를 하나의 top-left/y-down logical-point plane으로 표현한다.
+negative x/y도 허용한다. `NSScreen`, backing pixel, `CGDirectDisplayID`는 platform
+snapshot 생성 뒤 core에 남지 않는다.
+
+```text
+Mac AppKit point (bottom-left/y-up)
+               |
+       DesktopCoordinateSpace
+               |
+Core WorldPoint (top-left/y-down)
+```
+
+`visibleFrame`은 wander destination과 drop clamp에, full `frame`은 display seam/path에
+사용한다. display hot-plug notification을 받으면:
+
+1. 새 snapshot과 transform을 만든다.
+2. 현재 core point를 새 transform에 무작정 재해석하지 않고, 기존 AppKit screen point를
+   새 world로 변환한다.
+3. live display 밖이면 가장 가까운 visible frame으로 clamp한다.
+4. active path를 취소하고 re-plan한다.
+
+### Cross-display path
+
+각 display는 graph node다. rectangle이 맞닿으면 overlap midpoint를 seam portal로,
+떨어져 있으면 두 rectangle의 closest boundary points를 exit/entry portal로 쓴다.
+route는 다음 waypoint를 가진다.
+
+```text
+current -> exit A -> entry B -> ... -> destination
+```
+
+gap에서도 좌표는 연속적으로 진행한다. 실제 panel은 물리적 display가 없는 구간에서
+잠깐 보이지 않을 수 있지만 entry로 순간이동하지 않는다. 위/아래, 부분 seam, 음수
+origin, disconnected layout을 같은 planner가 처리한다.
+
+## Movement
+
+복잡한 physics engine 대신 seek/arrival controller를 쓴다.
+
+- wander speed는 느리고 acceleration 제한이 있다.
+- destination 근처에서는 `sqrt(2*a*d)` 기반으로 감속한다.
+- animation direction은 velocity의 x sign으로 결정한다.
+- evade speed도 hard cap을 가진다.
+- pointer가 떠나면 즉시 무작위 이동으로 튀지 않고 짧게 안정된 뒤 wander한다.
+
+목적지는 display edge/lower safe area에 편향시키되 hard-coded corner 하나가 아니다.
+후속 safe-zone provider가 candidate list/score를 제공하면 같은 이동 planner에 넣는다.
+
+## Behavior FSM
+
+```text
+idle <-> wander
+  |        |
+  +-> lookAtPointer -> evadePointer --+
+                     |                 |
+                     +-> caught -> dragged -> dropped -> idle
+
+idle -> sit -> findSleepSpot -> sleep
+  ^                              |
+  +------ meaningful event ------+
+
+wake -> travelToInterest -> observe
+                            | work / attention / celebrate / sad
+```
+
+MVP 0/0.5가 실행하는 state는 idle, wander, look, evade, caught, dragged, dropped다.
+나머지도 enum/event 경계에는 존재하지만 timer/safe-zone/source가 생기는 milestone에서
+활성화한다. transition은 UI event handler에 흩어놓지 않고 pure controller에서 검증한다.
+
+## Pointer interaction and non-interference
+
+초기 configuration(모두 settings로 이동 가능):
+
+```text
+distance > 180 pt       ignore
+100...180 pt            look
+50...100 pt             slow evade
+< 50 pt                 faster evade
+fast closing < 46 pt    arm catch briefly
+```
+
+단순 pointer speed가 아니라 이전 distance와 비교한 closing speed도 사용한다. 따라서
+pet 근처에서 옆으로 빠르게 움직였다고 잡히지 않는다. evade velocity는 pet에서 pointer
+반대 방향이며 cap을 넘지 않는다.
+
+입력 모드 writer는 `RoamlingRuntime` 하나다.
+
+```text
+normal/look/evade  -> window click-through
+catch armed AND pointer in pet ellipse -> interactive
+mouseDown          -> caught
+mouseDragged       -> dragged; global pointer point로 panel 이동
+mouseUp            -> nearest visible frame clamp, dropped, click-through
+```
+
+window가 sprite 크기이고 hit ellipse가 투명 margin을 제외하므로 interactive 순간에도
+가리는 면적이 작다. 향후 alpha-mask hit test를 추가해도 이 ownership은 바뀌지 않는다.
+
+## Safe-zone design
+
+### BasicSafeZoneProvider
+
+권한 없이 screen visible frame, Dock/menu-bar exclusion, edge/corner preference를 쓴다.
+Accessibility가 있으면 focused window/element, control/caret bounds를 obstacle로 추가한다.
+
+### VisualSafeZoneProvider
+
+Screen Recording opt-in일 때만 single snapshot을 downsample하여 edge density, local
+variance, temporal stability를 점수화한다. OCR/LLM/network/disk write는 없다.
+
+```text
+CandidateScore =
+  visualEmpty + caretDistance + controlDistance + edgePreference
+  + stability + contextPreference + petComfort
+  - pointerProximity - obstructionPenalty
+```
+
+confidence가 낮으면 중앙 후보를 만들지 않고 window/display corner로 fallback한다.
+caret은 관심 위치지만 avoid radius 안에서는 강한 obstacle이다. minor caret movement는
+head/look pose로만 반응하고 dwell/hysteresis가 지나야 위치를 바꾼다.
+
+## Permission model
+
+| permission | 기능 |
+| --- | --- |
+| 없음 | render, wander, multi-monitor, pointer evade/catch/drag, basic sleep |
+| Accessibility | focused app/window/element, caret hint, smarter basic placement |
+| Screen Recording | opt-in visual empty-region placement |
+
+MVP 0/0.5는 추가 permission을 요청하지 않는다. permission prompt는 사용자가 해당
+기능을 켠 순간에만 설명과 함께 제시한다. 거절/취소는 정상 상태다.
+
+## Performance model
+
+- movement/evade/drag: 약 30 Hz
+- animated idle/look: 약 10–12 Hz 또는 다음 frame deadline
+- future sleep: 1–4 Hz, 완전 정적 frame은 timer pause
+- display/AX/window tree: notification/debounce 기반
+- screen capture: placement 시 single shot만
+- image atlas는 한 번 decode하고 frame crop을 cache
+
+renderer는 event source를 모르고 `frame, position, direction, scale, visibility`만 받는다.
+occlusion/static 상태에서 redraw를 중단할 수 있게 animation clock과 world clock을 분리한다.
+
+## Decisions
+
+### Native AppKit overlay
+
+**Options:** Electron full-screen overlay, Tauri WebView, AppKit small panel.
+
+**Chosen:** AppKit small panel. macOS의 Spaces/fullscreen/input semantics를 직접 제어하고
+상주 비용을 줄일 수 있다. settings에는 SwiftUI를 나중에 섞을 수 있다.
+
+### Swift core now, extraction later
+
+**Options:** Rust core + FFI 선행, Swift pure module, app code에 직접 구현.
+
+**Chosen:** Swift pure module. boundary와 tests는 얻되 미확인 Windows 요구를 위해 FFI를
+선행하지 않는다.
+
+### SpriteKit versus AppKit drawing
+
+**Options:** SpriteKit scene, Core Animation/AppKit view.
+
+**Chosen for MVP:** 작은 AppKit view가 atlas frame을 draw한다. 한 sprite의 translation과
+frame swap에 scene graph가 필요하지 않다. particle/effect가 복잡해질 때 SpriteKit을
+재평가한다.
+
+### Local packages before gallery API
+
+**Options:** Petdex network catalog 내장, local discovery, asset fork.
+
+**Chosen:** local discovery. existing CLI와 Codex가 설치한 package를 modification 없이
+읽고, network/gallery는 별도 installer milestone로 둔다.
+
+### Procedural placeholder
+
+**Options:** gallery pet 번들, 빈 화면, code-drawn cat.
+
+**Chosen:** code-drawn cat. third-party asset license 불확실성 없이 앱이 즉시 살아 있고,
+실제 Petdex loader는 사용자 package와 fixtures로 검증한다.
+
+## Future migration
+
+Windows 구현은 아래 domain protocol을 채운다.
+
+```text
+DisplayProvider    NSScreen             -> EnumDisplayMonitors
+WindowProvider     CGWindow/AX          -> HWND/Win32
+PointerProvider    NSEvent              -> GetCursorPos
+FocusProvider      AXUIElement          -> UI Automation
+OverlayProvider    NSPanel              -> layered click-through window
+CaptureProvider    ScreenCaptureKit     -> Windows Graphics Capture
+```
+
+HWND/UIAutomation COM type은 adapter를 넘지 않는다. pure geometry/movement/event/
+reaction test가 그대로 통과하는지 확인한 후에만 언어 추출을 논의한다.
+
+Game/media도 동일하다. official telemetry/local event를 먼저 쓰며 occasional visual
+detection은 opt-in fallback이다. injection, process memory, anti-cheat-sensitive hook은
+Roamling의 관찰자 모델과 맞지 않아 금지한다.
