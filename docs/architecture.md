@@ -262,11 +262,11 @@ MVP 0/0.5가 실행하는 state는 idle, wander, look, evade, caught, dragged, d
 초기 configuration(모두 settings로 이동 가능):
 
 ```text
-distance > 220 pt       ignore
-100...220 pt            look
+distance > 170 pt       ignore
+100...170 pt            look
 50...100 pt             slow evade
 < 50 pt                 faster evade
-fast closing < 86 pt    arm catch for 0.65 s
+fast closing < 74 pt    arm catch for 0.35 s
 ```
 
 단순 pointer speed가 아니라 이전 distance와 비교한 closing speed도 사용한다. 따라서

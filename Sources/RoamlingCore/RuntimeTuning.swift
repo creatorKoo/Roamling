@@ -20,10 +20,10 @@ public struct RuntimeTuning: Codable, Equatable, Sendable {
         walkingSpeed: Double = 40,
         wanderPause: Double = 12,
         crossDisplayWanderChance: Double = 0.46,
-        pointerAwarenessDistance: Double = 220,
-        catchArmDistance: Double = 86,
+        pointerAwarenessDistance: Double = 170,
+        catchArmDistance: Double = 74,
         catchApproachSpeed: Double = 380,
-        catchWindow: Double = 0.65,
+        catchWindow: Double = 0.35,
         hitRegionScale: Double = 1.12
     ) {
         self.walkingSpeed = walkingSpeed.clamped(to: 20...80)

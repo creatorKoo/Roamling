@@ -83,7 +83,8 @@ Retina/해상도 혼합은 AppKit logical point로 정규화한다. backing scal
 - 기본 walk speed 40pt/s, 이동 후 randomized idle 약 8.4–17.4초
 - 같은 display의 지나치게 긴 wander leg 제한
 - 다른 display 방문 기본 확률 46%, target 경계 가까운 도착점 선택
-- 220pt pointer notice, trackpad 친화적인 catch radius/speed/window
+- 실제 3-display tuning 결과를 반영한 170pt pointer notice, 74pt catch radius,
+  380pt/s catch speed, 0.35초 catch window
 - 1.12배 hit ellipse와 catch arm 중 60Hz input sampling
 - 실제로 맞닿은 display seam의 방향성 evade transition
 - movement/pointer/catch 값을 live 적용하고 저장하는 `Behavior Tuning…` 창

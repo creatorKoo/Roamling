@@ -170,9 +170,9 @@ func coreLogicTests() -> [LogicTest] {
         LogicTest(name: "standard tuning makes trackpad catch forgiving but intentional") {
             let tuning = RuntimeTuning.standard
             var fastApproach = PointerInteractionModel(configuration: tuning.pointerConfiguration)
-            _ = fastApproach.evaluate(pointer: WorldPoint(x: 170, y: 0), pet: .zero, timestamp: 0)
+            _ = fastApproach.evaluate(pointer: WorldPoint(x: 160, y: 0), pet: .zero, timestamp: 0)
             let catchable = fastApproach.evaluate(
-                pointer: WorldPoint(x: 78, y: 0),
+                pointer: WorldPoint(x: 70, y: 0),
                 pet: .zero,
                 timestamp: 0.15
             )
@@ -181,7 +181,7 @@ func coreLogicTests() -> [LogicTest] {
             var slowApproach = PointerInteractionModel(configuration: tuning.pointerConfiguration)
             _ = slowApproach.evaluate(pointer: WorldPoint(x: 110, y: 0), pet: .zero, timestamp: 0)
             let evade = slowApproach.evaluate(
-                pointer: WorldPoint(x: 78, y: 0),
+                pointer: WorldPoint(x: 70, y: 0),
                 pet: .zero,
                 timestamp: 0.3
             )

@@ -22,10 +22,10 @@ public struct PointerInteractionConfiguration: Equatable, Sendable {
     public var catchClosingSpeed: Double
 
     public init(
-        awarenessDistance: Double = 220,
+        awarenessDistance: Double = 170,
         slowEvadeDistance: Double = 100,
         fastEvadeDistance: Double = 50,
-        catchDistance: Double = 86,
+        catchDistance: Double = 74,
         slowEvadeSpeed: Double = 74,
         fastEvadeSpeed: Double = 138,
         catchPointerSpeed: Double = 380,
