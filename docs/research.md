@@ -93,6 +93,15 @@ reduced-motion 대응도 명시한다.
 
 000°는 neutral이 아니라 위쪽이다. neutral/deadzone은 `idle`로 돌아간다.
 
+이 표의 `frames`는 동일 sprite를 runtime에서 흔드는 횟수가 아니라 pet 제작자가 채우는
+서로 다른 atlas cell이다. Petdex의 현재
+[`pet-states.ts`](https://github.com/crafter-station/petdex/blob/main/src/lib/pet-states.ts)도
+idle을 breathing/blinking loop, 좌우 running row를 directional locomotion으로 설명한다.
+따라서 다리 교차, 체중 이동, 꼬리 지연 같은 자연스러운 동작은 규격 밖 기능이 아니라
+각 frame artwork에 들어가야 하는 표준적인 제작 책임이다. Roamling이 임시 key pose에
+transform만 주었을 때 떠 보였던 것은 Petdex 제약이 아니라 built-in audition asset의
+한계였다.
+
 ### 공개 Codex source에서 추가로 확인한 custom surface
 
 [Codex `model.rs`](https://github.com/openai/codex/blob/main/codex-rs/tui/src/pets/model.rs)는

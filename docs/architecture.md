@@ -51,7 +51,7 @@ module만 추출할 수 있다. 선행 Rust/C ABI는 만들지 않는다.
 - `AnimationResolver`: custom mapping -> aliases -> standard fallback
 - `PetAnimationPlayer`: timing only; no source/platform knowledge
 - `PetCatalog`: local read-only discovery
-- `MascotPetFactory`: Mochi/FatMochi key-pose sheets -> temporary evaluation atlas
+- `MascotPetFactory`: authored FatMochi atlas 선택 + Mochi key-pose evaluation fallback
 - `PlaceholderPetFactory`: resource failure에도 앱이 뜨는 procedural emergency fallback
 
 ### RoamlingMac
@@ -164,6 +164,12 @@ caught     -> caught -> waiting -> idle
 
 v2 pointer look은 0°=up, 90°=right인 16방향 frame으로 quantize한다. deadzone에서는
 idle을 사용한다. v1 pet은 look row가 없어도 idle/review fallback으로 정상 동작한다.
+
+Petdex row는 완성 동작을 담는 frame slot이다. renderer가 한 장을 위아래로 흔들어 걷는
+규격이 아니므로, 발·몸통·꼬리의 변화는 pet 제작자가 각 frame에 그린다. Roamling의
+standard package loader도 atlas frame을 그대로 재생하며 임의 관절 animation을 합성하지
+않는다. Built-in FatMochi의 7-row atlas는 현재 MVP에서 필요한 authored 동작을 담는 내부
+resource이고, 외부 Petdex v1/v2 package 계약을 바꾸지 않는다.
 
 ### Optional Roamling extension
 
@@ -395,14 +401,16 @@ frame swap에 scene graph가 필요하지 않다. particle/effect가 복잡해�
 **Chosen:** local discovery. existing CLI와 Codex가 설치한 package를 modification 없이
 읽고, network/gallery는 별도 installer milestone로 둔다.
 
-### Original mascot auditions with procedural fallback
+### Authored default mascot with pose-derived fallback
 
 **Options:** gallery pet 번들, 빈 화면, generated key-pose sheets, code-drawn cat.
 
-**Chosen:** original Mochi/FatMochi key-pose sheets를 built-in visual audition으로 사용하고
-code-drawn cat은 resource failure 전용 fallback으로 유지한다. 전체 animation을 먼저
-생산하지 않고 실제 96×104pt overlay에서 silhouette과 성격을 검증한다. third-party asset
-license에 의존하지 않으며 Petdex loader는 사용자 package와 fixtures로 계속 검증한다.
+**Chosen:** 실제 96×104pt overlay에서 승인된 FatMochi의 얼굴과 silhouette을 고정한 뒤,
+MVP 0.7에서 보이는 walk/idle/sleep/caught/stretch/landing만 authored atlas로 교체한다.
+고양이식 forward stretch를 사용하며 인간처럼 앞발을 드는 후보는 폐기했다. Mochi는
+key-pose 기반 evaluation atlas를 유지하고 code-drawn cat은 resource failure 전용 fallback이다.
+후속 agent reaction row를 미리 만들지 않아 milestone 범위를 지키며, third-party asset
+license에 의존하지 않고 Petdex loader는 사용자 package와 fixtures로 계속 검증한다.
 
 ## Future migration
 

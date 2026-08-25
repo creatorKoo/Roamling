@@ -56,17 +56,18 @@ func petLogicTests() -> [LogicTest] {
             try expect(pet.resolver.resolve(.sleep)?.name == "sleeping")
             try expect(pet.resolver.resolve(.sit)?.name == "idle")
         },
-        LogicTest(name: "built-in mascot pose auditions load with semantic tracks") {
+        LogicTest(name: "built-in mascots load with semantic tracks") {
             try expect(MascotPetFactory.make().manifest.displayName == "FatMochi")
             for kind in BuiltInPetKind.allCases {
                 let pet = MascotPetFactory.make(kind)
+                let expectedRows = kind == .fatMochi ? 7 : 4
                 try expect(pet.manifest.displayName == kind.displayName)
                 try expect(pet.manifest.id == "roamling-\(kind.rawValue)")
                 try expect(pet.columns == 8)
-                try expect(pet.rows == 4)
-                try expect(pet.frameCount == 32)
+                try expect(pet.rows == expectedRows)
+                try expect(pet.frameCount == expectedRows * 8)
                 try expect(pet.frameImage(at: 0) != nil)
-                try expect(pet.frameImage(at: 31) != nil)
+                try expect(pet.frameImage(at: expectedRows * 8 - 1) != nil)
                 try expect(pet.resolver.resolve(.moveLeft)?.name == "running-left")
                 try expect(pet.resolver.resolve(.moveRight)?.name == "running-right")
                 try expect(pet.resolver.resolve(.sleep)?.name == "sleeping")
@@ -74,29 +75,51 @@ func petLogicTests() -> [LogicTest] {
                 try expect(pet.resolver.resolve(.dragged)?.name == "dragged")
             }
         },
-        LogicTest(name: "built-in animation cycles return through intermediate frames") {
-            for kind in BuiltInPetKind.allCases {
-                let pet = MascotPetFactory.make(kind)
-                let idle = try require(pet.tracks["idle"])
-                let right = try require(pet.tracks["running-right"])
-                let left = try require(pet.tracks["running-left"])
-                let sleep = try require(pet.tracks["sleeping"])
+        LogicTest(name: "FatMochi uses authored limb animation cycles") {
+            let pet = MascotPetFactory.make(.fatMochi)
+            let idle = try require(pet.tracks["idle"])
+            let right = try require(pet.tracks["running-right"])
+            let left = try require(pet.tracks["running-left"])
+            let sleep = try require(pet.tracks["sleeping"])
+            let caught = try require(pet.tracks["caught"])
+            let stretch = try require(pet.tracks["stretching"])
+            let landing = try require(pet.tracks["landing"])
 
-                try expect(idle.frames.map(\.index) == [0, 1, 2, 3, 2, 1])
-                try expect(idle.frames.first?.duration == 1.55)
-                try expect(right.frames.map(\.index) == [4, 5, 6, 7, 8, 7, 6, 5])
-                try expect(left.frames.map(\.index) == [9, 10, 11, 12, 13, 12, 11, 10])
-                try expect(sleep.frames.map(\.index) == [14, 15, 16, 15])
+            try expect(idle.frames.map(\.index) == [0, 1, 2, 3, 4, 5])
+            try expect(idle.frames.first?.duration == 1.55)
+            try expect(right.frames.map(\.index) == Array(8...15))
+            try expect(left.frames.map(\.index) == Array(16...23))
+            try expect(sleep.frames.map(\.index) == [24, 25, 26, 27])
+            try expect(caught.frames.map(\.index) == [32, 33, 34, 35])
+            try expect(stretch.frames.map(\.index) == [40, 41, 42, 43, 44, 45])
+            try expect(!stretch.loops)
+            try expect(landing.frames.map(\.index) == [48, 49, 50, 51, 52])
+            try expect(!landing.loops)
 
-                let idleSignatures = try [0, 1, 2, 3].map {
-                    try require(imageSignature(try require(pet.frameImage(at: $0))))
-                }
-                let rightSignatures = try [4, 5, 6, 7, 8].map {
-                    try require(imageSignature(try require(pet.frameImage(at: $0))))
-                }
-                try expect(Set(idleSignatures).count == 4)
-                try expect(Set(rightSignatures).count == 5)
+            let idleSignatures = try [0, 1, 2, 3].map {
+                try require(imageSignature(try require(pet.frameImage(at: $0))))
             }
+            let rightSignatures = try Array(8...15).map {
+                try require(imageSignature(try require(pet.frameImage(at: $0))))
+            }
+            let sleepSignatures = try Array(24...27).map {
+                try require(imageSignature(try require(pet.frameImage(at: $0))))
+            }
+            try expect(Set(idleSignatures).count == 4)
+            try expect(Set(rightSignatures).count == 8)
+            try expect(Set(sleepSignatures).count == 4)
+        },
+        LogicTest(name: "Mochi pose-derived cycles remain reversible") {
+            let pet = MascotPetFactory.make(.mochi)
+            let idle = try require(pet.tracks["idle"])
+            let right = try require(pet.tracks["running-right"])
+            let left = try require(pet.tracks["running-left"])
+            let sleep = try require(pet.tracks["sleeping"])
+
+            try expect(idle.frames.map(\.index) == [0, 1, 2, 3, 2, 1])
+            try expect(right.frames.map(\.index) == [4, 5, 6, 7, 8, 7, 6, 5])
+            try expect(left.frames.map(\.index) == [9, 10, 11, 12, 13, 12, 11, 10])
+            try expect(sleep.frames.map(\.index) == [14, 15, 16, 15])
         },
         LogicTest(name: "loader keeps valid custom animation and isolates invalid track") {
             let fixture = try FixturePackage(frameWidth: 1, frameHeight: 1, rows: 9)

@@ -1,7 +1,7 @@
 <!-- SPDX-FileCopyrightText: 2026 GooBeom Jeoung -->
 <!-- SPDX-License-Identifier: GPL-3.0-only -->
 
-# Built-in mascot pose auditions
+# Built-in mascot assets
 
 `mochi-poses.png` and `fat-mochi-poses.png` are the first visual audition
 sheets for Roamling's built-in mascots. They were generated with OpenAI's
@@ -9,11 +9,22 @@ built-in image-generation tool on 2026-08-25, selected by the project owner,
 and converted locally from a flat chroma-key background to PNG alpha. No
 third-party pet artwork is included in these files.
 
-The sheets intentionally contain only four key poses: idle, walking right,
-sleeping, and caught. `MascotPetFactory` derives a temporary multi-step runtime
-atlas from these poses, using reversible transform sequences instead of
-inventing new artwork. This lets the mascots be evaluated at actual desktop
-size before a hand-cleaned animation set is commissioned or authored.
+The pose sheets contain four key poses: idle, walking, sleeping, and caught.
+Mochi still uses a reversible transform sequence derived from those poses for
+evaluation at actual desktop size.
+
+`fat-mochi-runtime-atlas.png` is the authored runtime asset for the default
+FatMochi. It has 8 columns of 192×208 cells and seven internal rows: idle,
+running right, running left, sleeping, caught, stretching, and landing. Walk
+frames articulate all four paws and add restrained body/tail follow-through;
+the other current-MVP states use blink, breathing, paw-wiggle, forward-stretch,
+and landing sequences. The stretch is the feline play-bow shape—forepaws
+forward, chest low, hindquarters raised. An upright, human-like arms-up draft
+was explicitly rejected and is not included.
+
+This seven-row layout is an internal built-in asset, not a new Petdex package
+version. Imported Petdex pets still use their v1/v2 manifest and atlas layouts
+without modification.
 
 Core prompt, Mochi:
 
@@ -35,10 +46,18 @@ shorter and slightly taller profile for readability at 96×104pt, and flattens
 the inward angry slant so the expression reads as blankly sleepy and a little
 dazed.
 
-The idle transform briefly settles the whole pose by less than one rendered
-point. Its pixel resampling reads like a tiny blink at desktop size; the
-runtime deliberately returns through intermediate frames so that effect and
-the walking bob do not snap at their loop boundaries.
+The authored idle preserves that exact approved open-eye frame and adds local
+half-closed/closed eye pixels for the blink. The generated open-eye variants
+were not used because they drifted from the approved eye shape. The first and
+last forward-stretch frames likewise use the approved idle artwork so the
+transition returns to the same character cleanly.
+
+Additional image-generation prompts preserved FatMochi's approved identity and
+requested: an eight-frame four-paw alternating walk with a fixed ground line;
+a four-frame sleeping breath; a four-frame restrained caught wiggle; a
+six-frame feline forward stretch; and a five-frame drop/squash/recovery. Frame
+normalization and chroma removal were performed locally with nearest-neighbor
+sampling. No generated frame was uploaded again after chroma processing.
 
 The working chroma-key prompts changed only the background to a flat solid
 `#00FF00`; transparency was produced locally without network upload.

@@ -55,13 +55,14 @@ travel slowly -> sleep
 - display hot-plug, pointer avoidance, catch/drag의 기존 동작 유지
 - pure-logic tests for rest timing, placement, and behavior transitions
 
-표준 pet에 sleep/sit animation이 없으면 pet 사용을 막지 않고 idle로 fallback한다. Built-in
-Mochi와 FatMochi는 전체 animation 제작 전 실제 크기 검증을 위한 네 가지 key pose와
-왕복형 in-between bob/breathing transform만 사용한다. idle은 빠르게 닫혔다 돌아오는
-미세한 settle을 눈깜빡임처럼 보이게 유지하고, walk는 좌우 각각 5개의 transform frame을
-오르내려 loop 경계에서 순간이동하지 않는다. active travel만 60Hz로 갱신하며 idle/sleep의
-저전력 cadence는 유지한다. 이 visual audition은 MVP 0.7 polish이며 이후 agent integration을
-미리 구현하지 않는다.
+표준 pet에 sleep/sit animation이 없으면 pet 사용을 막지 않고 idle로 fallback한다.
+기본 캐릭터 FatMochi는 현재 gate에서 실제 보이는 동작만 authored frame으로 다듬었다.
+walk는 8장 동안 네 발이 교차하고 몸통과 꼬리가 작게 따라오며, idle blink, sleep breathing,
+caught paw wiggle, drop landing, 고양이식 forward stretch도 각각 독립 frame을 쓴다. stretch는
+앞발을 뻗고 가슴을 낮추며 엉덩이를 드는 자세이고 사람처럼 앞발을 위로 드는 pose는 쓰지
+않는다. Mochi는 아직 네 key pose에서 만든 reversible evaluation cycle을 유지한다.
+active travel만 60Hz로 갱신하며 idle/sleep의 저전력 cadence는 그대로다. 이는 MVP 0.7의
+creature-quality polish이며 이후 agent integration용 animation이나 source는 미리 만들지 않는다.
 
 ### Explicitly out of scope for this gate
 
