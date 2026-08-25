@@ -111,7 +111,10 @@ func petLogicTests() -> [LogicTest] {
             let walkMetrics = try Array(8...15).map {
                 try require(alphaMetrics(try require(pet.frameImage(at: $0))))
             }
-            let caughtMetrics = try Array(32...39).map {
+            let caughtIntroMetrics = try Array(32...35).map {
+                try require(alphaMetrics(try require(pet.frameImage(at: $0))))
+            }
+            let draggedMetrics = try Array(36...39).map {
                 try require(alphaMetrics(try require(pet.frameImage(at: $0))))
             }
             let idleFrame = try require(pet.frameImage(at: 0))
@@ -120,24 +123,38 @@ func petLogicTests() -> [LogicTest] {
             try expect(Set(idleSignatures).count == 4)
             try expect(Set(rightSignatures).count == 8)
             try expect(Set(sleepSignatures).count == 4)
-            let walkCentroids = walkMetrics.map { $0.centroidX }
-            let minimumWalkCentroid = try require(walkCentroids.min())
-            let maximumWalkCentroid = try require(walkCentroids.max())
-            try expect(maximumWalkCentroid - minimumWalkCentroid < 2)
+            let walkBoundsCenters = walkMetrics.map { $0.boundsCenterX }
+            let minimumWalkBoundsCenter = try require(walkBoundsCenters.min())
+            let maximumWalkBoundsCenter = try require(walkBoundsCenters.max())
+            try expect(maximumWalkBoundsCenter - minimumWalkBoundsCenter < 2)
             try expect(walkMetrics.allSatisfy {
                 abs($0.width - idleMetric.width) <= 2 && abs($0.height - idleMetric.height) <= 2
             })
 
-            let caughtCentroids = caughtMetrics.map { $0.centroidX }
-            let minimumCaughtCentroid = try require(caughtCentroids.min())
-            let maximumCaughtCentroid = try require(caughtCentroids.max())
-            try expect(maximumCaughtCentroid - minimumCaughtCentroid < 2)
-            try expect(caughtMetrics.allSatisfy {
+            let caughtIntroCenters = caughtIntroMetrics.map { $0.boundsCenterX }
+            let minimumCaughtIntroCenter = try require(caughtIntroCenters.min())
+            let maximumCaughtIntroCenter = try require(caughtIntroCenters.max())
+            try expect(maximumCaughtIntroCenter - minimumCaughtIntroCenter < 2)
+            try expect(caughtIntroMetrics.allSatisfy {
                 abs($0.width - idleMetric.width) <= 1 && abs($0.height - idleMetric.height) <= 1
+            })
+            let draggedBoundsCenters = draggedMetrics.map { $0.boundsCenterX }
+            let minimumDraggedBoundsCenter = try require(draggedBoundsCenters.min())
+            let maximumDraggedBoundsCenter = try require(draggedBoundsCenters.max())
+            try expect(maximumDraggedBoundsCenter - minimumDraggedBoundsCenter < 2)
+            try expect(draggedMetrics.allSatisfy {
+                $0.width <= 192 && $0.height >= idleMetric.height + 13
+            })
+            try expect(draggedMetrics.contains {
+                $0.width >= idleMetric.width + 9 || $0.height >= idleMetric.height + 18
             })
             let caughtStart = try require(pet.frameImage(at: 32))
             let caughtStartSignature = try require(imageSignature(caughtStart))
             try expect(caughtStartSignature == idleSignature)
+
+            let walkStart = try require(pet.frameImage(at: 16))
+            let walkStartSignature = try require(imageSignature(walkStart))
+            try expect(walkStartSignature == idleSignature)
 
             let idleFace = try require(idleFrame.cropping(to: CGRect(x: 24, y: 100, width: 104, height: 30)))
             let idleFaceSignature = try require(imageSignature(idleFace))
@@ -146,6 +163,9 @@ func petLogicTests() -> [LogicTest] {
                 let walkFace = try require(walkFrame.cropping(to: CGRect(x: 24, y: 100, width: 104, height: 30)))
                 let walkFaceSignature = try require(imageSignature(walkFace))
                 try expect(walkFaceSignature == idleFaceSignature)
+                let neckWidth = try require(centeredOpaqueRunWidth(walkFrame, y: 90))
+                let cheekWidth = try require(centeredOpaqueRunWidth(walkFrame, y: 110))
+                try expect(cheekWidth - neckWidth >= 3)
             }
         },
         LogicTest(name: "FatMochi caught intro hands off to a looping drag") {
@@ -317,7 +337,9 @@ private func imageSignature(_ image: CGImage) -> UInt64? {
     }
 }
 
-private func alphaMetrics(_ image: CGImage) -> (width: Int, height: Int, centroidX: Double)? {
+private func alphaMetrics(
+    _ image: CGImage
+) -> (width: Int, height: Int, boundsCenterX: Double)? {
     let bytesPerRow = image.width * 4
     var bytes = [UInt8](repeating: 0, count: bytesPerRow * image.height)
     guard let context = CGContext(
@@ -335,7 +357,6 @@ private func alphaMetrics(_ image: CGImage) -> (width: Int, height: Int, centroi
     var maximumX = -1
     var minimumY = image.height
     var maximumY = -1
-    var xTotal = 0.0
     var pixelCount = 0
     for y in 0..<image.height {
         for x in 0..<image.width where bytes[y * bytesPerRow + x * 4 + 3] > 8 {
@@ -343,7 +364,6 @@ private func alphaMetrics(_ image: CGImage) -> (width: Int, height: Int, centroi
             maximumX = max(maximumX, x)
             minimumY = min(minimumY, y)
             maximumY = max(maximumY, y)
-            xTotal += Double(x)
             pixelCount += 1
         }
     }
@@ -351,8 +371,46 @@ private func alphaMetrics(_ image: CGImage) -> (width: Int, height: Int, centroi
     return (
         width: maximumX - minimumX + 1,
         height: maximumY - minimumY + 1,
-        centroidX: xTotal / Double(pixelCount)
+        boundsCenterX: Double(minimumX + maximumX) / 2
     )
+}
+
+private func centeredOpaqueRunWidth(_ image: CGImage, y: Int) -> Int? {
+    let bytesPerRow = image.width * 4
+    var bytes = [UInt8](repeating: 0, count: bytesPerRow * image.height)
+    guard y >= 0, y < image.height,
+          let context = CGContext(
+              data: &bytes,
+              width: image.width,
+              height: image.height,
+              bitsPerComponent: 8,
+              bytesPerRow: bytesPerRow,
+              space: CGColorSpaceCreateDeviceRGB(),
+              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+          ) else { return nil }
+    context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+
+    let centerX = image.width / 2
+    var runs: [ClosedRange<Int>] = []
+    var runStart: Int?
+    for x in 0..<image.width {
+        let isOpaque = bytes[y * bytesPerRow + x * 4 + 3] > 8
+        if isOpaque, runStart == nil { runStart = x }
+        if !isOpaque, let start = runStart {
+            runs.append(start...(x - 1))
+            runStart = nil
+        }
+    }
+    if let start = runStart { runs.append(start...(image.width - 1)) }
+    guard let run = runs.min(by: {
+        distance(from: centerX, to: $0) < distance(from: centerX, to: $1)
+    }) else { return nil }
+    return run.upperBound - run.lowerBound + 1
+}
+
+private func distance(from x: Int, to range: ClosedRange<Int>) -> Int {
+    if range.contains(x) { return 0 }
+    return min(abs(x - range.lowerBound), abs(x - range.upperBound))
 }
 
 private final class FixturePackage {

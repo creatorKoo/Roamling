@@ -65,10 +65,12 @@ active travel만 60Hz로 갱신하며 idle/sleep의 저전력 cadence는 그대�
 creature-quality polish이며 이후 agent integration용 animation이나 source는 미리 만들지 않는다.
 
 실사용 피드백 뒤 FatMochi의 승인된 idle을 캐릭터 기준으로 고정했다. walk는 idle의
-174×170px silhouette에 맞춘 176×168px 체형과 같은 얼굴을 유지한 채 짧은 다리만 교차한다.
-각 frame의 alpha centroid 편차를 2px 미만으로 정규화해 atlas 안에서 몸이 뒤로 흐르다
+174×170px silhouette과 같은 얼굴을 유지한 채 짧은 다리만 교차한다. 첫 walk frame은 idle
+원화를 그대로 사용하고 이후 frame도 볼 아래가 좁아졌다가 몸통으로 이어지는 목·어깨선을
+유지한다. alpha bounds center 편차를 2px 미만으로 고정해 atlas 안에서 몸이 뒤로 흐르다
 되감기는 moonwalk도 막는다. 클릭 직후에는 idle과 같은 첫 frame에서 앞발을 드는 caught
-intro를 한 번 재생하고, 실제 drag 중에는 별도의 네 frame wiggle을 계속 반복한다. idle의
+intro를 한 번 재생한다. 실제 drag 중에는 앞발 높이와 뒷발 킥이 좌우로 교대하는 별도의
+네 frame loop를 반복하며, 팔다리가 뻗는 범위만 idle silhouette 밖으로 허용한다. idle의
 승인된 검은 눈과 half-close/closed blink frame은 변경하지 않는다.
 
 ### Explicitly out of scope for this gate

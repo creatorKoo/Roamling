@@ -316,16 +316,19 @@ catch window와 hit region이 실행 중 반영되고 `UserDefaults`에 저장�
 rest timing은 첫 체감 검증 전까지 별도 고정 configuration으로 두며 기존 tuning 값을
 섞지 않는다.
 
-FatMochi의 idle frame을 visual identity의 기준으로 둔다. walk/caught row는 frame마다 alpha
-silhouette을 독립적으로 중앙 정렬하고, 크기는 idle bounding box에서 2px 이상 벗어나지
-않는다. renderer가 world position을 이동시키므로 atlas cell 안의 torso centroid도 2px 이상
-좌우로 움직이지 않아야 한다. walk에는 승인된 idle face pixel을 그대로 사용한다. 이
-invariant는 asset test로 고정해 moonwalk, 체형 변화, 얼굴 drift regression을 함께 막는다.
+FatMochi의 idle frame을 visual identity의 기준으로 둔다. walk와 caught intro는 frame마다
+alpha silhouette을 독립적으로 중앙 정렬하고, 크기는 idle bounding box에서 2px 이상
+벗어나지 않는다. walk 첫 frame은 idle과 동일하고 나머지도 승인된 idle face pixel 및
+볼보다 좁은 목·어깨 run을 유지한다. renderer가 world position을 이동시키므로 alpha bounds
+center는 2px 이상 좌우로 움직이지 않아야 한다. 이 invariant는 asset test로 고정해
+moonwalk, 목이 사라지는 체형 변화, 얼굴 drift regression을 함께 막는다.
 
 caught track은 idle과 동일한 첫 frame에서 앞발을 드는 짧은 non-loop intro이고, dragged
 track은 그 마지막 자세와 이어지는 별도의 loop다. runtime은 mouseDown 시 intro 길이만큼
 caught를 유지한 다음, pointer가 이미 이동 중이어도 dragged loop로 넘긴다. 따라서 클릭만
-했을 때와 즉시 drag했을 때 모두 같은 부드러운 시작을 본다.
+했을 때와 즉시 drag했을 때 모두 같은 부드러운 시작을 본다. dragged frame은 앞발과 뒷발의
+교대 동작을 읽을 수 있도록 팔다리만 idle bounds 밖으로 확장할 수 있다. 최대 범위는
+192×208 atlas cell 안이며 bounds center는 계속 고정한다.
 
 ## Safe-zone design
 
@@ -422,8 +425,8 @@ MVP 0.7에서 보이는 walk/idle/sleep/caught/stretch/landing만 authored atlas
 key-pose 기반 evaluation atlas를 유지하고 code-drawn cat은 resource failure 전용 fallback이다.
 후속 agent reaction row를 미리 만들지 않아 milestone 범위를 지키며, third-party asset
 license에 의존하지 않고 Petdex loader는 사용자 package와 fixtures로 계속 검증한다. 모든
-동작의 identity 기준은 idle이며, walk/caught는 크기·중심·얼굴 invariant를 asset test로
-고정한다.
+동작의 identity 기준은 idle이며, walk/caught는 크기·중심·얼굴·목선 invariant를 asset
+test로 고정한다. dragged만 읽기 쉬운 limb extension을 위해 전체 silhouette 확장을 허용한다.
 
 ## Future migration
 

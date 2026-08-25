@@ -62,20 +62,23 @@ extracts as explicit image-to-image references. Final chroma removal, exact
 face restoration, sizing, centering, and green-spill cleanup were local steps.
 
 The latest identity pass treats the approved idle pose as the source of truth.
-Walk frames use a 176×168 alpha silhouette beside idle's 174×170 silhouette,
-retain the exact approved face pixels, and move the short paws beneath a stable
-round torso. Their alpha centroid varies by less than two source pixels across
-the cycle, preventing the old leftward drift and snap-back that read as a
-moonwalk. The walk prompt explicitly specifies planted-paw travel, lifted-paw
-recovery, chronological opposing contacts, a fixed torso, and a seamless
-frame-eight-to-frame-one transition.
+Every walk frame uses idle's 174×170 alpha silhouette and retains the exact
+approved face pixels. Frame 16 is the exact idle artwork; the selected frames
+then alternate short planted and lifted paws before returning to a stable
+contact pose. The cheeks narrow into a readable neck/shoulder transition in
+every frame instead of merging into the former pear-shaped torso. Alpha-bounds
+center varies by less than two source pixels, preventing the old leftward drift
+and snap-back that read as a moonwalk. The walk prompt explicitly specifies the
+neck invariant, planted-paw travel, lifted-paw recovery, chronological opposing
+contacts, a fixed torso, and a seamless transition back to idle.
 
-The caught/drag pass follows the same size rule at 174×170. Frames 32–35 form a
-one-shot transition beginning with the exact approved idle frame; frames 36–39
-hold that compact pose as a seamless paw/ear/tail wiggle while dragging. This
-keeps click and drag responsive without making FatMochi change into a larger,
-more upright cat. The approved idle/blink row was preserved pixel-for-pixel
-during this pass.
+Frames 32–35 keep the prior 174×170 one-shot caught transition beginning with
+the exact approved idle frame. Frames 36–39 now form a stronger dragged loop:
+left/right forepaw height and outward hind-paw kicks alternate visibly, with a
+restrained tail response. Those limb extensions may occupy 169–192×183–191
+pixels while their alpha-bounds center stays stable inside the 192×208 cell.
+The torso remains compact instead of stretching with the paws. The approved
+idle/blink row was preserved pixel-for-pixel during this pass.
 
 The working chroma-key prompts changed only the background to a flat solid
 `#00FF00`; transparency was produced locally without network upload.
