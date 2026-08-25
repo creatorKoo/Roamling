@@ -51,7 +51,7 @@ public enum MascotPetFactory {
         let scale: CGFloat
     }
 
-    public static func make(_ kind: BuiltInPetKind = .mochi) -> PetAsset {
+    public static func make(_ kind: BuiltInPetKind = .fatMochi) -> PetAsset {
         guard let sheet = loadSheet(named: kind.resourceName),
               let atlas = makeAtlas(from: sheet, kind: kind) else {
             return PlaceholderPetFactory.make()

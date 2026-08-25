@@ -73,7 +73,7 @@ $ROAMLING_PET_PATH
 
 `ROAMLING_PET_PATH` may point either to one package directory or to a directory
 containing packages. A package contains `pet.json` and the referenced PNG or
-WebP atlas. Mochi is the default. FatMochi and discovered Petdex-compatible
+WebP atlas. FatMochi is the default. Mochi and discovered Petdex-compatible
 packages can be selected from the menu, and the choice persists across launches.
 
 ## Repository guide

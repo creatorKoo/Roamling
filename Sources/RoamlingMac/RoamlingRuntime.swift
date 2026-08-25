@@ -97,7 +97,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
             DefaultsKey.avoidPointer: true,
             DefaultsKey.interactions: true,
             DefaultsKey.scale: 1.0,
-            DefaultsKey.builtInPet: BuiltInPetKind.mochi.rawValue
+            DefaultsKey.builtInPet: BuiltInPetKind.fatMochi.rawValue
         ])
         let runtimeTuning = Self.loadRuntimeTuning(defaults: defaults)
 
@@ -105,7 +105,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         let descriptors = catalog.discover()
         let selectedPath = defaults.string(forKey: DefaultsKey.petPackagePath)
         let selectedBuiltInPet = defaults.string(forKey: DefaultsKey.builtInPet)
-            .flatMap(BuiltInPetKind.init(rawValue:)) ?? .mochi
+            .flatMap(BuiltInPetKind.init(rawValue:)) ?? .fatMochi
         let initialAsset = Self.loadInitialAsset(
             descriptors: descriptors,
             selectedPath: selectedPath,

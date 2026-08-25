@@ -57,6 +57,7 @@ func petLogicTests() -> [LogicTest] {
             try expect(pet.resolver.resolve(.sit)?.name == "idle")
         },
         LogicTest(name: "built-in mascot pose auditions load with semantic tracks") {
+            try expect(MascotPetFactory.make().manifest.displayName == "FatMochi")
             for kind in BuiltInPetKind.allCases {
                 let pet = MascotPetFactory.make(kind)
                 try expect(pet.manifest.displayName == kind.displayName)
