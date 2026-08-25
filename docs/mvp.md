@@ -64,6 +64,12 @@ caught paw wiggle, drop landing, 고양이식 forward stretch도 각각 독립 f
 active travel만 60Hz로 갱신하며 idle/sleep의 저전력 cadence는 그대로다. 이는 MVP 0.7의
 creature-quality polish이며 이후 agent integration용 animation이나 source는 미리 만들지 않는다.
 
+실사용 피드백 뒤 FatMochi walk는 세로로 긴 side pose 대신 가로/세로 silhouette 비율을
+약 1.5배 넓힌 낮고 둥근 체형으로 바꿨다. 각 frame의 alpha centroid 편차를 2px 미만으로
+정규화해 atlas 안에서 몸이 뒤로 흐르다 되감기는 moonwalk를 막는다. caught에서 dragged로
+넘어가도 네 frame paw wiggle이 계속 재생된다. idle은 승인된 검은 눈을 유지하면서 명확한
+half-close/closed frame을 사용한다.
+
 ### Explicitly out of scope for this gate
 
 - Accessibility window/focus/caret tracking — MVP 3
@@ -85,6 +91,11 @@ creature-quality polish이며 이후 agent integration용 animation이나 source
 - nearby pointer/catch/drag는 sleep보다 높은 우선순위를 가진다.
 - sleep 중 불필요한 render wakeup을 2Hz 수준으로 낮춘다.
 - 추가 macOS permission prompt가 없다.
+- menu bar의 `Stretch Now`로 75초 idle을 기다리지 않고 wake/stretch 품질을 확인할 수 있다.
+
+정상 lifecycle에서 기지개는 75초 input idle 후 sit/safe-zone travel/sleep까지 들어간 다음,
+keyboard 또는 pointer input으로 깨어날 때 재생된다. `Stretch Now`는 이 MVP 0.7 동작의
+체감 검증 shortcut일 뿐 별도 behavior milestone을 앞당기지 않는다.
 
 ## Exit rule
 

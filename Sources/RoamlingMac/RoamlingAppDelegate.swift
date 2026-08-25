@@ -123,6 +123,14 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         tuning.target = self
         menu.addItem(tuning)
 
+        let stretch = NSMenuItem(
+            title: "Stretch Now",
+            action: #selector(stretchNow),
+            keyEquivalent: ""
+        )
+        stretch.target = self
+        menu.addItem(stretch)
+
         menu.addItem(.separator())
         let openFolder = NSMenuItem(
             title: "Open Pet Folder…",
@@ -192,6 +200,10 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
             controller = created
         }
         controller.present(tuning: runtime.tuning)
+    }
+
+    @objc private func stretchNow() {
+        runtime?.stretchNow()
     }
 
     @objc private func selectInstalledPet(_ sender: NSMenuItem) {

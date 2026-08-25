@@ -75,7 +75,7 @@ public enum MascotPetFactory {
         )
 
         let idleFrames: [(Int, TimeInterval)] = [
-            (0, 1.55), (1, 0.09), (2, 0.08), (3, 0.10), (4, 0.08), (5, 0.09)
+            (0, 1.25), (1, 0.10), (2, 0.12), (3, 0.16), (4, 0.12), (5, 0.10)
         ]
         let walkRightFrames = (8...15).map { ($0, 0.09) }
         let walkLeftFrames = (16...23).map { ($0, 0.09) }
@@ -92,7 +92,10 @@ public enum MascotPetFactory {
                 "caught",
                 frames: [(32, 0.13), (33, 0.13), (34, 0.13), (35, 0.13)]
             ),
-            "dragged": track("dragged", frames: [(32, 0.5)]),
+            "dragged": track(
+                "dragged",
+                frames: [(32, 0.11), (33, 0.11), (34, 0.11), (35, 0.11)]
+            ),
             "sitting": track("sitting", frames: [(0, 0.8)]),
             "landing": track(
                 "landing",
@@ -108,8 +111,8 @@ public enum MascotPetFactory {
             ),
             "stretching": track(
                 "stretching",
-                frames: [(40, 0.18), (41, 0.15), (42, 0.15),
-                         (43, 0.20), (44, 0.17), (45, 0.20)],
+                frames: [(40, 0.16), (41, 0.13), (42, 0.13),
+                         (43, 0.18), (44, 0.15), (45, 0.20)],
                 loops: false
             ),
             "waiting": track(

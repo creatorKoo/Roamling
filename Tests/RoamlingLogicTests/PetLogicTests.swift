@@ -82,15 +82,17 @@ func petLogicTests() -> [LogicTest] {
             let left = try require(pet.tracks["running-left"])
             let sleep = try require(pet.tracks["sleeping"])
             let caught = try require(pet.tracks["caught"])
+            let dragged = try require(pet.tracks["dragged"])
             let stretch = try require(pet.tracks["stretching"])
             let landing = try require(pet.tracks["landing"])
 
             try expect(idle.frames.map(\.index) == [0, 1, 2, 3, 4, 5])
-            try expect(idle.frames.first?.duration == 1.55)
+            try expect(idle.frames.first?.duration == 1.25)
             try expect(right.frames.map(\.index) == Array(8...15))
             try expect(left.frames.map(\.index) == Array(16...23))
             try expect(sleep.frames.map(\.index) == [24, 25, 26, 27])
             try expect(caught.frames.map(\.index) == [32, 33, 34, 35])
+            try expect(dragged.frames.map(\.index) == [32, 33, 34, 35])
             try expect(stretch.frames.map(\.index) == [40, 41, 42, 43, 44, 45])
             try expect(!stretch.loops)
             try expect(landing.frames.map(\.index) == [48, 49, 50, 51, 52])
@@ -105,9 +107,28 @@ func petLogicTests() -> [LogicTest] {
             let sleepSignatures = try Array(24...27).map {
                 try require(imageSignature(try require(pet.frameImage(at: $0))))
             }
+            let walkMetrics = try Array(8...15).map {
+                try require(alphaMetrics(try require(pet.frameImage(at: $0))))
+            }
             try expect(Set(idleSignatures).count == 4)
             try expect(Set(rightSignatures).count == 8)
             try expect(Set(sleepSignatures).count == 4)
+            let walkCentroids = walkMetrics.map { $0.centroidX }
+            let minimumWalkCentroid = try require(walkCentroids.min())
+            let maximumWalkCentroid = try require(walkCentroids.max())
+            try expect(maximumWalkCentroid - minimumWalkCentroid < 2)
+            try expect(walkMetrics.allSatisfy { Double($0.width) / Double($0.height) > 1.3 })
+        },
+        LogicTest(name: "FatMochi dragged animation advances while held") {
+            var player = PetAnimationPlayer(asset: MascotPetFactory.make(.fatMochi))
+            player.setCapability(.dragged)
+            try expect(player.currentFrameIndex == 32)
+            player.update(deltaTime: 0.12)
+            try expect(player.currentFrameIndex == 33)
+            player.update(deltaTime: 0.22)
+            try expect(player.currentFrameIndex == 35)
+            player.update(deltaTime: 0.12)
+            try expect(player.currentFrameIndex == 32)
         },
         LogicTest(name: "Mochi pose-derived cycles remain reversible") {
             let pet = MascotPetFactory.make(.mochi)
@@ -260,6 +281,44 @@ private func imageSignature(_ image: CGImage) -> UInt64? {
     return bytes.reduce(UInt64(1_469_598_103_934_665_603)) { partial, byte in
         (partial ^ UInt64(byte)) &* 1_099_511_628_211
     }
+}
+
+private func alphaMetrics(_ image: CGImage) -> (width: Int, height: Int, centroidX: Double)? {
+    let bytesPerRow = image.width * 4
+    var bytes = [UInt8](repeating: 0, count: bytesPerRow * image.height)
+    guard let context = CGContext(
+        data: &bytes,
+        width: image.width,
+        height: image.height,
+        bitsPerComponent: 8,
+        bytesPerRow: bytesPerRow,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    ) else { return nil }
+    context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+
+    var minimumX = image.width
+    var maximumX = -1
+    var minimumY = image.height
+    var maximumY = -1
+    var xTotal = 0.0
+    var pixelCount = 0
+    for y in 0..<image.height {
+        for x in 0..<image.width where bytes[y * bytesPerRow + x * 4 + 3] > 8 {
+            minimumX = min(minimumX, x)
+            maximumX = max(maximumX, x)
+            minimumY = min(minimumY, y)
+            maximumY = max(maximumY, y)
+            xTotal += Double(x)
+            pixelCount += 1
+        }
+    }
+    guard pixelCount > 0 else { return nil }
+    return (
+        width: maximumX - minimumX + 1,
+        height: maximumY - minimumY + 1,
+        centroidX: xTotal / Double(pixelCount)
+    )
 }
 
 private final class FixturePackage {

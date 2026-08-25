@@ -249,6 +249,18 @@ func coreLogicTests() -> [LogicTest] {
             behavior.handle(.tick, at: 21.72)
             try expect(behavior.state == .idle)
         },
+        LogicTest(name: "manual stretch preview settles without breaking drag") {
+            var behavior = BehaviorController(state: .idle, enteredAt: 0)
+            behavior.handle(.beginStretch, at: 1)
+            try expect(behavior.state == .stretch)
+            behavior.handle(.tick, at: 2.01)
+            try expect(behavior.state == .idle)
+
+            behavior.handle(.catchBegan, at: 3)
+            behavior.handle(.dragMoved, at: 3.1)
+            behavior.handle(.beginStretch, at: 3.2)
+            try expect(behavior.state == .dragged)
+        },
         LogicTest(name: "basic safe zones honor visible frame and Dock inset") {
             let display = DisplaySnapshot(
                 id: "main",

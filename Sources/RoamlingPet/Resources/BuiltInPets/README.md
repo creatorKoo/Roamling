@@ -59,8 +59,16 @@ six-frame feline forward stretch; and a five-frame drop/squash/recovery. Frame
 normalization and chroma removal were performed locally with nearest-neighbor
 sampling. No generated frame was uploaded again after chroma processing.
 
+The second walk pass responded to desktop testing: the side silhouette is about
+1.5× wider relative to its height, while every frame is tightly cropped and
+re-centered. Its alpha centroid varies by less than two source pixels across
+the cycle, preventing the old leftward drift and snap-back that read as a
+moonwalk. The walk prompt explicitly specifies planted-paw travel, lifted-paw
+recovery, chronological opposing contacts, a fixed torso, and a seamless
+frame-eight-to-frame-one transition.
+
 The working chroma-key prompts changed only the background to a flat solid
 `#00FF00`; transparency was produced locally without network upload.
 
-These two PNG files are distributed under GPL-3.0-only with this repository.
+These built-in PNG files are distributed under GPL-3.0-only with this repository.
 Roamling names and branding are additionally covered by `TRADEMARKS.md`.

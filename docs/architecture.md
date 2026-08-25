@@ -302,7 +302,7 @@ route를 사용할 수 있다.
 normal/look/evade  -> window click-through
 catch armed AND pointer in pet ellipse -> interactive
 mouseDown          -> caught
-mouseDragged       -> dragged; global pointer point로 panel 이동
+mouseDragged       -> dragged; global pointer point로 panel 이동 + caught paw cycle 계속 재생
 mouseUp            -> nearest visible frame clamp, dropped, click-through
 ```
 
@@ -315,6 +315,11 @@ window가 sprite 크기이고 hit ellipse가 투명 margin을 제외하므로 in
 catch window와 hit region이 실행 중 반영되고 `UserDefaults`에 저장된다. MVP 0.7의
 rest timing은 첫 체감 검증 전까지 별도 고정 configuration으로 두며 기존 tuning 값을
 섞지 않는다.
+
+FatMochi의 walk row는 frame마다 alpha silhouette을 독립적으로 중앙 정렬한다. renderer가
+world position을 이동시키므로 atlas cell 안의 torso centroid는 2px 이상 좌우로 움직이지
+않아야 한다. 이 invariant와 가로/세로 silhouette 비율은 asset test로 고정해 moonwalk나
+다시 홀쭉해지는 regression을 막는다.
 
 ## Safe-zone design
 
