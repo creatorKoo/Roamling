@@ -60,6 +60,18 @@ public struct DisplayTopology: Sendable {
     }
 
     public func portal(from: DisplaySnapshot, to: DisplaySnapshot) -> DisplayPortal {
+        portal(from: from, to: to, near: nil)
+    }
+
+    /// Builds the same display portal as `portal(from:to:)`, but chooses the
+    /// seam point nearest a preferred location. Wander routes use stable seam
+    /// midpoints; edge-pressure evade uses a nearby point so the creature does
+    /// not run halfway around the display before escaping.
+    public func portal(
+        from: DisplaySnapshot,
+        to: DisplaySnapshot,
+        near preferredPoint: WorldPoint?
+    ) -> DisplayPortal {
         let a = from.frame
         let b = to.frame
         let overlapXMin = max(a.minX, b.minX)
@@ -73,25 +85,35 @@ public struct DisplayTopology: Sendable {
         let entry: WorldPoint
 
         if hasYOverlap, a.maxX <= b.minX {
-            let y = (overlapYMin + overlapYMax) / 2
+            let y = preferredPoint.map {
+                min(max($0.y, overlapYMin), overlapYMax)
+            } ?? (overlapYMin + overlapYMax) / 2
             exit = WorldPoint(x: a.maxX, y: y)
             entry = WorldPoint(x: b.minX, y: y)
         } else if hasYOverlap, b.maxX <= a.minX {
-            let y = (overlapYMin + overlapYMax) / 2
+            let y = preferredPoint.map {
+                min(max($0.y, overlapYMin), overlapYMax)
+            } ?? (overlapYMin + overlapYMax) / 2
             exit = WorldPoint(x: a.minX, y: y)
             entry = WorldPoint(x: b.maxX, y: y)
         } else if hasXOverlap, a.maxY <= b.minY {
-            let x = (overlapXMin + overlapXMax) / 2
+            let x = preferredPoint.map {
+                min(max($0.x, overlapXMin), overlapXMax)
+            } ?? (overlapXMin + overlapXMax) / 2
             exit = WorldPoint(x: x, y: a.maxY)
             entry = WorldPoint(x: x, y: b.minY)
         } else if hasXOverlap, b.maxY <= a.minY {
-            let x = (overlapXMin + overlapXMax) / 2
+            let x = preferredPoint.map {
+                min(max($0.x, overlapXMin), overlapXMax)
+            } ?? (overlapXMin + overlapXMax) / 2
             exit = WorldPoint(x: x, y: a.minY)
             entry = WorldPoint(x: x, y: b.maxY)
         } else if hasXOverlap, hasYOverlap {
             let common = WorldPoint(
-                x: (overlapXMin + overlapXMax) / 2,
-                y: (overlapYMin + overlapYMax) / 2
+                x: preferredPoint.map { min(max($0.x, overlapXMin), overlapXMax) }
+                    ?? (overlapXMin + overlapXMax) / 2,
+                y: preferredPoint.map { min(max($0.y, overlapYMin), overlapYMax) }
+                    ?? (overlapYMin + overlapYMax) / 2
             )
             exit = common
             entry = common
@@ -105,6 +127,74 @@ public struct DisplayTopology: Sendable {
             toDisplayID: to.id,
             exit: exit,
             entry: entry
+        )
+    }
+
+    /// Plans a quick, visible escape through a real neighboring seam when the
+    /// pointer keeps pressing the creature against a display edge. Gapped
+    /// displays are deliberately excluded; ordinary wander routing remains the
+    /// only place where an invisible gap may be traversed.
+    public func evadeTransition(
+        from start: WorldPoint,
+        direction: WorldVector,
+        objectSize: WorldSize,
+        maximumPortalDistance: Double = 320,
+        maximumGap: Double = 1
+    ) -> DisplayRoute? {
+        guard direction.length > 0.001,
+              let sourceIndex = displayIndex(containingOrNearestTo: start) else { return nil }
+
+        let source = displays[sourceIndex]
+        let safeSource = source.visibleFrame.insetBy(
+            dx: objectSize.width / 2,
+            dy: objectSize.height / 2
+        )
+        let pressureProbe = start + direction.normalized
+            * (max(objectSize.width, objectSize.height) / 2 + 2)
+        guard !safeSource.contains(pressureProbe) else { return nil }
+
+        struct Candidate {
+            let target: DisplaySnapshot
+            let portal: DisplayPortal
+            let score: Double
+        }
+
+        let normalizedDirection = direction.normalized
+        let candidates: [Candidate] = displays.enumerated().compactMap { index, target in
+            guard index != sourceIndex else { return nil }
+            let portal = portal(from: source, to: target, near: start)
+            guard portal.gap <= maximumGap else { return nil }
+            let towardDisplay = (target.frame.center - source.frame.center).normalized
+            let alignment = normalizedDirection.dot(towardDisplay)
+            guard alignment >= 0.18 else { return nil }
+            let portalDistance = start.distance(to: portal.exit)
+            guard portalDistance <= maximumPortalDistance else { return nil }
+            return Candidate(
+                target: target,
+                portal: portal,
+                score: portalDistance + (1 - alignment) * maximumPortalDistance
+            )
+        }
+
+        guard let best = candidates.min(by: { $0.score < $1.score }) else { return nil }
+        let targetSafe = best.target.visibleFrame.insetBy(
+            dx: objectSize.width / 2,
+            dy: objectSize.height / 2
+        )
+        let inward = (best.target.visibleFrame.center - best.portal.entry).normalized
+        let rawTarget = best.portal.entry + inward
+            * (max(objectSize.width, objectSize.height) / 2 + 14)
+        let entryTarget = targetSafe.closestPoint(to: rawTarget)
+        let sourceApproach = safeSource.closestPoint(to: best.portal.exit)
+
+        var waypoints: [WorldPoint] = []
+        appendIfDistinct(sourceApproach, to: &waypoints)
+        appendIfDistinct(best.portal.exit, to: &waypoints)
+        appendIfDistinct(best.portal.entry, to: &waypoints)
+        appendIfDistinct(entryTarget, to: &waypoints)
+        return DisplayRoute(
+            displayIDs: [source.id, best.target.id],
+            waypoints: waypoints
         )
     }
 

@@ -31,7 +31,8 @@ let package = Package(
             dependencies: ["RoamlingCore", "RoamlingPet"],
             linkerSettings: [
                 .linkedFramework("AppKit"),
-                .linkedFramework("CoreGraphics")
+                .linkedFramework("CoreGraphics"),
+                .linkedFramework("SwiftUI")
             ]
         ),
         .executableTarget(

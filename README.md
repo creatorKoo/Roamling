@@ -19,9 +19,12 @@ This repository contains the first working vertical slice:
   third-party pet asset;
 - global desktop coordinates, display topology, hot-plug handling, and
   continuous cross-display paths;
-- low-speed wandering and state-dependent animation cadence;
+- calmer wandering with visible idle pauses, shorter local trips, and more
+  noticeable multi-display exploration;
 - pointer awareness, capped evasion, fast-approach catching, click, drag, drop,
-  and cross-monitor dragging;
+  cross-monitor dragging, and connected-edge escape when gently cornered;
+- a live **Behavior Tuning…** panel for MVP 0/0.5 movement, pointer, catch,
+  and hit-region values, with persistent settings and one-click reset;
 - a sprite-sized overlay whose input region is enabled only while a catch is
   armed, leaving the underlying app alone during normal operation;
 - pure-logic tests for geometry, display paths, movement, pointer interaction,
@@ -29,6 +32,8 @@ This repository contains the first working vertical slice:
 
 Coding-agent integrations and Accessibility-based placement are deliberately
 behind the next milestones; the core event vocabulary is not coding-specific.
+Sleep and safe-zone placement are also deliberately held for MVP 0.7 until this
+interaction pass is validated on a real multi-monitor setup.
 
 ## Build and run
 
@@ -79,6 +84,7 @@ Sources/RoamlingApp/    executable entry point
 Tests/                  pure and loader tests
 docs/research.md        upstream/API research with source locations
 docs/architecture.md    boundaries, decisions, and milestone architecture
+docs/mvp.md             current MVP gate, scope, and acceptance criteria
 ```
 
 Roamling is an independent project and is not affiliated with OpenAI,

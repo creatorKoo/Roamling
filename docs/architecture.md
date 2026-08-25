@@ -222,11 +222,16 @@ origin, disconnected layout을 같은 planner가 처리한다.
 
 복잡한 physics engine 대신 seek/arrival controller를 쓴다.
 
-- wander speed는 느리고 acceleration 제한이 있다.
+- 기본 wander speed는 40 logical pt/s이고 acceleration 제한이 있다.
 - destination 근처에서는 `sqrt(2*a*d)` 기반으로 감속한다.
 - animation direction은 velocity의 x sign으로 결정한다.
 - evade speed도 hard cap을 가진다.
 - pointer가 떠나면 즉시 무작위 이동으로 튀지 않고 짧게 안정된 뒤 wander한다.
+
+MVP 0/0.5 기본 pacing은 한 이동 뒤 약 8.4–17.4초 idle이며, 같은 display의 한 leg는
+최대 약 520pt로 제한한다. 다른 display를 선택할 기본 확률은 46%이고 목적지는 target
+display 경계에서 너무 멀지 않은 곳으로 잡는다. 이 조합은 계속 걷는 인상을 줄이면서도
+실제 display exploration이 보이게 한다. 이 idle은 sleep/safe-zone behavior가 아니다.
 
 목적지는 display edge/lower safe area에 편향시키되 hard-coded corner 하나가 아니다.
 후속 safe-zone provider가 candidate list/score를 제공하면 같은 이동 planner에 넣는다.
@@ -257,16 +262,24 @@ MVP 0/0.5가 실행하는 state는 idle, wander, look, evade, caught, dragged, d
 초기 configuration(모두 settings로 이동 가능):
 
 ```text
-distance > 180 pt       ignore
-100...180 pt            look
+distance > 220 pt       ignore
+100...220 pt            look
 50...100 pt             slow evade
 < 50 pt                 faster evade
-fast closing < 46 pt    arm catch briefly
+fast closing < 86 pt    arm catch for 0.65 s
 ```
 
 단순 pointer speed가 아니라 이전 distance와 비교한 closing speed도 사용한다. 따라서
 pet 근처에서 옆으로 빠르게 움직였다고 잡히지 않는다. evade velocity는 pet에서 pointer
-반대 방향이며 cap을 넘지 않는다.
+반대 방향이며 cap을 넘지 않는다. 기본 fast-approach threshold는 pointer speed
+380pt/s와 closing speed 약 182pt/s다. catch radius를 fast-evade radius보다 넓게 두어
+trackpad가 sprite에 도착하기 전에 잠깐 멈춰 잡을 기회를 준다.
+
+연결된 display seam에 계속 밀리면 현재 위치에서 약 320pt 안의 portal을 골라 현재
+display 안전 경계를 따라간 뒤 이웃 display 안쪽까지 짧은 evade route를 만든다. 실제
+gap이 있는 display는 이 경로의 후보에서 제외하므로
+pointer evade가 보이지 않는 공간을 순간이동하지 않는다. 일반 wander만 기존의 연속 gap
+route를 사용할 수 있다.
 
 입력 모드 writer는 `RoamlingRuntime` 하나다.
 
@@ -279,7 +292,13 @@ mouseUp            -> nearest visible frame clamp, dropped, click-through
 ```
 
 window가 sprite 크기이고 hit ellipse가 투명 margin을 제외하므로 interactive 순간에도
-가리는 면적이 작다. 향후 alpha-mask hit test를 추가해도 이 ownership은 바뀌지 않는다.
+가리는 면적이 작다. 기본 hit ellipse scale은 1.12이며 window bounds보다 커지지 않는다.
+향후 alpha-mask hit test를 추가해도 이 ownership은 바뀌지 않는다.
+
+`RuntimeTuning`과 menu bar의 **Behavior Tuning…** 창은 MVP 0/0.5의 체감 검증 값만
+노출한다. walk speed, idle pause, 다른 display 방문 확률, notice/catch thresholds,
+catch window와 hit region이 실행 중 반영되고 `UserDefaults`에 저장된다. sleep이나
+safe-zone 설정은 해당 milestone이 열릴 때까지 이 창에 추가하지 않는다.
 
 ## Safe-zone design
 
@@ -318,6 +337,7 @@ MVP 0/0.5는 추가 permission을 요청하지 않는다. permission prompt는 �
 ## Performance model
 
 - movement/evade/drag: 약 30 Hz
+- catch가 arm된 짧은 구간: 60 Hz input gate
 - animated idle/look: 약 10–12 Hz 또는 다음 frame deadline
 - future sleep: 1–4 Hz, 완전 정적 frame은 timer pause
 - display/AX/window tree: notification/debounce 기반

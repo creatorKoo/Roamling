@@ -67,6 +67,43 @@ func coreLogicTests() -> [LogicTest] {
             try expect(route.waypoints.count >= 3)
             try expect(route.waypoints[0] != route.waypoints[1])
         },
+        LogicTest(name: "edge pressure chooses the connected display in its direction") {
+            let center = testDisplay("center", WorldRect(x: 0, y: 0, width: 1920, height: 1080))
+            let left = testDisplay("left", WorldRect(x: -1920, y: 180, width: 1920, height: 1080))
+            let upper = testDisplay("upper", WorldRect(x: 520, y: -900, width: 1400, height: 900))
+            let topology = DisplayTopology(displays: [center, left, upper])
+            let objectSize = WorldSize(width: 96, height: 104)
+
+            let leftRoute = try require(topology.evadeTransition(
+                from: WorldPoint(x: 48, y: 540),
+                direction: WorldVector(dx: -1, dy: 0),
+                objectSize: objectSize
+            ))
+            try expect(leftRoute.displayIDs == ["center", "left"])
+            let leftTarget = try require(leftRoute.waypoints.last)
+            try expect(leftTarget.x < 0)
+            try expect(left.visibleFrame.insetBy(dx: 48, dy: 52).contains(leftTarget))
+
+            let upperRoute = try require(topology.evadeTransition(
+                from: WorldPoint(x: 900, y: 52),
+                direction: WorldVector(dx: 0, dy: -1),
+                objectSize: objectSize
+            ))
+            try expect(upperRoute.displayIDs == ["center", "upper"])
+            let upperTarget = try require(upperRoute.waypoints.last)
+            try expect(upperTarget.y < 0)
+            try expect(upper.visibleFrame.insetBy(dx: 48, dy: 52).contains(upperTarget))
+        },
+        LogicTest(name: "edge pressure never teleports across a display gap") {
+            let center = testDisplay("center", WorldRect(x: 0, y: 0, width: 1000, height: 800))
+            let gapped = testDisplay("gapped", WorldRect(x: 1040, y: 0, width: 1000, height: 800))
+            let route = DisplayTopology(displays: [center, gapped]).evadeTransition(
+                from: WorldPoint(x: 952, y: 400),
+                direction: WorldVector(dx: 1, dy: 0),
+                objectSize: WorldSize(width: 96, height: 104)
+            )
+            try expect(route == nil)
+        },
         LogicTest(name: "movement caps speed and arrives without overshoot") {
             var controller = MovementController(
                 position: .zero,
@@ -129,6 +166,49 @@ func coreLogicTests() -> [LogicTest] {
             let decision = model.evaluate(pointer: WorldPoint(x: 40, y: 0), pet: .zero, timestamp: 0.1)
             try expect(decision.proximity == .fastEvade)
             try expectNear(decision.kinematics.closingSpeed, 0)
+        },
+        LogicTest(name: "standard tuning makes trackpad catch forgiving but intentional") {
+            let tuning = RuntimeTuning.standard
+            var fastApproach = PointerInteractionModel(configuration: tuning.pointerConfiguration)
+            _ = fastApproach.evaluate(pointer: WorldPoint(x: 170, y: 0), pet: .zero, timestamp: 0)
+            let catchable = fastApproach.evaluate(
+                pointer: WorldPoint(x: 78, y: 0),
+                pet: .zero,
+                timestamp: 0.15
+            )
+            try expect(catchable.proximity == .catchable)
+
+            var slowApproach = PointerInteractionModel(configuration: tuning.pointerConfiguration)
+            _ = slowApproach.evaluate(pointer: WorldPoint(x: 110, y: 0), pet: .zero, timestamp: 0)
+            let evade = slowApproach.evaluate(
+                pointer: WorldPoint(x: 78, y: 0),
+                pet: .zero,
+                timestamp: 0.3
+            )
+            try expect(evade.proximity == .slowEvade)
+            try expect(!evade.shouldArmCatch)
+        },
+        LogicTest(name: "MVP tuning clamps unsafe values and varies idle pause") {
+            let tuning = RuntimeTuning(
+                walkingSpeed: 500,
+                wanderPause: -1,
+                crossDisplayWanderChance: 2,
+                pointerAwarenessDistance: 80,
+                catchArmDistance: 900,
+                catchApproachSpeed: 10,
+                catchWindow: 3,
+                hitRegionScale: 4
+            )
+            try expect(tuning.walkingSpeed == 80)
+            try expect(tuning.wanderPause == 2)
+            try expect(tuning.crossDisplayWanderChance == 1)
+            try expect(tuning.pointerAwarenessDistance == 140)
+            try expect(tuning.catchArmDistance == 140)
+            try expect(tuning.catchApproachSpeed == 150)
+            try expect(tuning.catchWindow == 1.2)
+            try expect(tuning.hitRegionScale == 1.3)
+            try expectNear(RuntimeTuning.standard.wanderDelay(randomUnit: 0), 8.4)
+            try expectNear(RuntimeTuning.standard.wanderDelay(randomUnit: 1), 17.4)
         },
         LogicTest(name: "look angles match Codex v2 clock convention") {
             let pet = WorldPoint.zero

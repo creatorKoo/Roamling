@@ -8,6 +8,7 @@ import RoamlingPet
 public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var runtime: RoamlingRuntime?
     private var statusItem: NSStatusItem?
+    private var tuningWindowController: RuntimeTuningWindowController?
 
     public override init() {
         super.init()
@@ -111,6 +112,14 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
             action: #selector(toggleInteractions(_:))
         ))
 
+        let tuning = NSMenuItem(
+            title: "Behavior Tuning…",
+            action: #selector(showBehaviorTuning),
+            keyEquivalent: ","
+        )
+        tuning.target = self
+        menu.addItem(tuning)
+
         menu.addItem(.separator())
         let openFolder = NSMenuItem(
             title: "Open Pet Folder…",
@@ -163,6 +172,21 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
     @objc private func selectBuiltInPet() {
         runtime?.useBuiltInPet()
         rebuildMenu()
+    }
+
+    @objc private func showBehaviorTuning() {
+        guard let runtime else { return }
+        let controller: RuntimeTuningWindowController
+        if let tuningWindowController {
+            controller = tuningWindowController
+        } else {
+            let created = RuntimeTuningWindowController(tuning: runtime.tuning) { [weak runtime] tuning in
+                runtime?.applyTuning(tuning)
+            }
+            tuningWindowController = created
+            controller = created
+        }
+        controller.present(tuning: runtime.tuning)
     }
 
     @objc private func selectInstalledPet(_ sender: NSMenuItem) {

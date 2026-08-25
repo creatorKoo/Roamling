@@ -22,19 +22,21 @@ public struct PointerInteractionConfiguration: Equatable, Sendable {
     public var catchClosingSpeed: Double
 
     public init(
-        awarenessDistance: Double = 180,
+        awarenessDistance: Double = 220,
         slowEvadeDistance: Double = 100,
         fastEvadeDistance: Double = 50,
-        catchDistance: Double = 46,
+        catchDistance: Double = 86,
         slowEvadeSpeed: Double = 74,
         fastEvadeSpeed: Double = 138,
-        catchPointerSpeed: Double = 620,
-        catchClosingSpeed: Double = 320
+        catchPointerSpeed: Double = 380,
+        catchClosingSpeed: Double = 182
     ) {
         self.awarenessDistance = awarenessDistance
         self.slowEvadeDistance = min(slowEvadeDistance, awarenessDistance)
         self.fastEvadeDistance = min(fastEvadeDistance, slowEvadeDistance)
-        self.catchDistance = min(catchDistance, fastEvadeDistance)
+        // A fast approach should arm interaction before the pointer reaches
+        // the sprite. It may therefore be wider than the fast-evade radius.
+        self.catchDistance = catchDistance.clamped(to: 0...awarenessDistance)
         self.slowEvadeSpeed = max(0, slowEvadeSpeed)
         self.fastEvadeSpeed = max(slowEvadeSpeed, fastEvadeSpeed)
         self.catchPointerSpeed = max(0, catchPointerSpeed)

@@ -15,6 +15,13 @@ public protocol PetOverlayViewDelegate: AnyObject {
 public final class PetOverlayView: NSView {
     public weak var delegate: PetOverlayViewDelegate?
 
+    public var hitRegionScale: Double = 1 {
+        didSet {
+            let normalized = hitRegionScale.clamped(to: 0.75...1.3)
+            if normalized != hitRegionScale { hitRegionScale = normalized }
+        }
+    }
+
     private var image: CGImage?
     private var dragOrigin: NSPoint?
     private var draggedDistance: CGFloat = 0
@@ -46,8 +53,18 @@ public final class PetOverlayView: NSView {
     /// knowledge of arbitrary artwork. The window-level gate uses this too.
     public func containsPet(at point: NSPoint) -> Bool {
         guard bounds.contains(point) else { return false }
-        let hitRect = bounds.insetBy(dx: bounds.width * 0.13, dy: bounds.height * 0.08)
+        let baseHitRect = bounds.insetBy(dx: bounds.width * 0.13, dy: bounds.height * 0.08)
             .offsetBy(dx: 0, dy: bounds.height * 0.03)
+        let hitSize = NSSize(
+            width: min(bounds.width, baseHitRect.width * hitRegionScale),
+            height: min(bounds.height, baseHitRect.height * hitRegionScale)
+        )
+        let hitRect = NSRect(
+            x: min(max(baseHitRect.midX - hitSize.width / 2, bounds.minX), bounds.maxX - hitSize.width),
+            y: min(max(baseHitRect.midY - hitSize.height / 2, bounds.minY), bounds.maxY - hitSize.height),
+            width: hitSize.width,
+            height: hitSize.height
+        )
         return NSBezierPath(ovalIn: hitRect).contains(point)
     }
 
@@ -123,7 +140,11 @@ public final class MacOverlayProvider: OverlayProviding {
     private var worldPosition: WorldPoint = .zero
     private var interactionEnabled = false
 
-    public init(coordinateSpace: DesktopCoordinateSpace, scale: Double = 1) {
+    public init(
+        coordinateSpace: DesktopCoordinateSpace,
+        scale: Double = 1,
+        hitRegionScale: Double = 1
+    ) {
         self.coordinateSpace = coordinateSpace
         self.scale = scale.clamped(to: 0.6...1.8)
         let size = NSSize(
@@ -131,6 +152,7 @@ public final class MacOverlayProvider: OverlayProviding {
             height: Self.baseSize.height * self.scale
         )
         view = PetOverlayView(frame: NSRect(origin: .zero, size: size))
+        view.hitRegionScale = hitRegionScale
         panel = PetOverlayPanel(contentView: view, size: size)
     }
 
@@ -174,6 +196,10 @@ public final class MacOverlayProvider: OverlayProviding {
         guard enabled != interactionEnabled else { return }
         interactionEnabled = enabled
         panel.ignoresMouseEvents = !enabled
+    }
+
+    public func setHitRegionScale(_ newScale: Double) {
+        view.hitRegionScale = newScale
     }
 
     public func containsPet(atWorldPoint worldPoint: WorldPoint) -> Bool {
