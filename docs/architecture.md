@@ -37,6 +37,8 @@ module만 추출할 수 있다. 선행 Rust/C ABI는 만들지 않는다.
 - `MovementController`: acceleration, capped speed, arrival/deceleration
 - `PointerInteractionModel`: proximity, approach speed, catch arming, escape vector
 - `BehaviorController`: explicit creature FSM
+- `BasicSafeZonePlanner`: permission-free rest candidates and destination scoring
+- `RestConfiguration`: MVP 0.7 idle/sit/wake timing
 - `CompanionEvent`, `UserContext`, `ActivitySource`
 - `AttentionModel`, `ReactionPolicy`, candidate scoring
 - platform protocols containing domain values only
@@ -55,12 +57,14 @@ module만 추출할 수 있다. 선행 Rust/C ABI는 만들지 않는다.
 
 - `MacDisplayProvider`: `NSScreen` -> display snapshots and coordinate transform
 - `MacPointerProvider`: `NSEvent` global point sampling
+- `MacUserIdleProvider`: elapsed time since any local input, without an event tap
+- `MacBasicSafeZoneProvider`: visible-frame corner/Dock candidates
 - `PetOverlayPanel`: transparent, non-activating, all-Spaces sprite window
 - `RoamlingRuntime`: main-actor orchestration and the only owner of input gating
 - menu-bar controls and lifecycle
 
-MVP 3/4에서 `MacWindowProvider`, `MacFocusProvider`,
-`MacBasicSafeZoneProvider`, `MacCaptureProvider`를 이 module에 추가한다.
+MVP 3/4에서 `MacWindowProvider`, `MacFocusProvider`, `MacCaptureProvider`를 이 module에
+추가한다.
 
 ## Domain events, not agent events
 
@@ -94,7 +98,9 @@ signals from focus / idle / playback / future telemetry
       working | gaming | watchingMedia | browsing | idle
 ```
 
-MVP에서는 pointer/user idle과 coding activity로 `working/idle`만 실제 사용한다.
+MVP 0.7은 system-wide input idle duration을 rest trigger로만 사용한다. 이를 아직
+`UserContext`로 승격하거나 coding activity와 합성하지 않는다. ContextResolver wiring은
+activity source가 들어오는 후속 milestone에서 한다.
 Context가 source 이름에서 직접 결정되지 않으므로, 같은 game event도 fullscreen,
 focus, media playback 상황에 따라 다른 reaction budget을 가질 수 있다.
 
@@ -233,8 +239,9 @@ MVP 0/0.5 기본 pacing은 한 이동 뒤 약 8.4–17.4초 idle이며, 같은 d
 display 경계에서 너무 멀지 않은 곳으로 잡는다. 이 조합은 계속 걷는 인상을 줄이면서도
 실제 display exploration이 보이게 한다. 이 idle은 sleep/safe-zone behavior가 아니다.
 
-목적지는 display edge/lower safe area에 편향시키되 hard-coded corner 하나가 아니다.
-후속 safe-zone provider가 candidate list/score를 제공하면 같은 이동 planner에 넣는다.
+wander 목적지는 display edge/lower safe area에 편향시키되 hard-coded corner 하나가
+아니다. Sleep destination도 `BasicSafeZonePlanner`의 candidate를 기존 movement planner에
+넣으므로 별도 이동 시스템을 만들지 않는다.
 
 ## Behavior FSM
 
@@ -247,15 +254,16 @@ idle <-> wander
 
 idle -> sit -> findSleepSpot -> sleep
   ^                              |
-  +------ meaningful event ------+
+  +---- stretch <- wake <---------+ meaningful input
 
 wake -> travelToInterest -> observe
                             | work / attention / celebrate / sad
 ```
 
-MVP 0/0.5가 실행하는 state는 idle, wander, look, evade, caught, dragged, dropped다.
-나머지도 enum/event 경계에는 존재하지만 timer/safe-zone/source가 생기는 milestone에서
-활성화한다. transition은 UI event handler에 흩어놓지 않고 pure controller에서 검증한다.
+MVP 0.7까지 idle, wander, look, evade, caught, dragged, dropped, sit, findSleepSpot,
+sleep, wake, stretch를 실행한다. agent reaction state는 enum/event 경계에만 두고 source가
+생기는 milestone에서 활성화한다. transition은 UI event handler에 흩어놓지 않고 pure
+controller에서 검증한다.
 
 ## Pointer interaction and non-interference
 
@@ -297,15 +305,22 @@ window가 sprite 크기이고 hit ellipse가 투명 margin을 제외하므로 in
 
 `RuntimeTuning`과 menu bar의 **Behavior Tuning…** 창은 MVP 0/0.5의 체감 검증 값만
 노출한다. walk speed, idle pause, 다른 display 방문 확률, notice/catch thresholds,
-catch window와 hit region이 실행 중 반영되고 `UserDefaults`에 저장된다. sleep이나
-safe-zone 설정은 해당 milestone이 열릴 때까지 이 창에 추가하지 않는다.
+catch window와 hit region이 실행 중 반영되고 `UserDefaults`에 저장된다. MVP 0.7의
+rest timing은 첫 체감 검증 전까지 별도 고정 configuration으로 두며 기존 tuning 값을
+섞지 않는다.
 
 ## Safe-zone design
 
 ### BasicSafeZoneProvider
 
-권한 없이 screen visible frame, Dock/menu-bar exclusion, edge/corner preference를 쓴다.
-Accessibility가 있으면 focused window/element, control/caret bounds를 obstacle로 추가한다.
+MVP 0.7 구현은 권한 없이 screen `visibleFrame`, Dock/menu-bar exclusion, edge/corner
+preference, current-display stability, pointer distance, travel distance를 쓴다. 네 corner
+region을 만들고 Dock이 차지한 left/right/bottom inset을 감지하면 인접 후보에 작은 bonus를
+준다. 최종 center는 pet size를 반영해 visible frame 안으로 clamp한다.
+
+`MacBasicSafeZoneProvider`는 macOS snapshot을 이 pure planner에 전달하는 얇은 adapter다.
+MVP 3에서 Accessibility가 생기면 focused window/element, control/caret bounds를 obstacle로
+추가하되 현재 fallback path를 유지한다.
 
 ### VisualSafeZoneProvider
 
@@ -331,15 +346,16 @@ head/look pose로만 반응하고 dwell/hysteresis가 지나야 위치를 바꾼
 | Accessibility | focused app/window/element, caret hint, smarter basic placement |
 | Screen Recording | opt-in visual empty-region placement |
 
-MVP 0/0.5는 추가 permission을 요청하지 않는다. permission prompt는 사용자가 해당
-기능을 켠 순간에만 설명과 함께 제시한다. 거절/취소는 정상 상태다.
+MVP 0/0.5와 MVP 0.7은 추가 permission을 요청하지 않는다. `MacUserIdleProvider`는 event
+tap이나 input 내용을 수집하지 않고 마지막 local input 이후 경과 시간만 조회한다.
+후속 permission prompt는 사용자가 해당 기능을 켠 순간에만 설명과 함께 제시한다.
 
 ## Performance model
 
 - movement/evade/drag: 약 30 Hz
 - catch가 arm된 짧은 구간: 60 Hz input gate
 - animated idle/look: 약 10–12 Hz 또는 다음 frame deadline
-- future sleep: 1–4 Hz, 완전 정적 frame은 timer pause
+- sleep: 2 Hz (wake input은 최대 약 0.5초 안에 감지)
 - display/AX/window tree: notification/debounce 기반
 - screen capture: placement 시 single shot만
 - image atlas는 한 번 decode하고 frame crop을 cache
@@ -393,7 +409,9 @@ Windows 구현은 아래 domain protocol을 채운다.
 DisplayProvider    NSScreen             -> EnumDisplayMonitors
 WindowProvider     CGWindow/AX          -> HWND/Win32
 PointerProvider    NSEvent              -> GetCursorPos
+UserIdleProvider   CGEventSource        -> GetLastInputInfo
 FocusProvider      AXUIElement          -> UI Automation
+SafeZoneProvider   visibleFrame/work area candidates
 OverlayProvider    NSPanel              -> layered click-through window
 CaptureProvider    ScreenCaptureKit     -> Windows Graphics Capture
 ```

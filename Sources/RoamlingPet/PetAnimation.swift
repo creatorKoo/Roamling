@@ -7,6 +7,7 @@ public enum PetCapability: String, CaseIterable, Codable, Hashable, Sendable {
     case idle
     case moveLeft
     case moveRight
+    case sit
     case sleep
     case work
     case observe
@@ -109,6 +110,7 @@ public struct AnimationResolver: Sendable {
         .idle: ["idle"],
         .moveLeft: ["running-left", "move-left", "move_left", "running", "idle"],
         .moveRight: ["running-right", "move-right", "move_right", "running", "idle"],
+        .sit: ["sitting", "sit", "idle"],
         .sleep: ["sleeping", "sleep", "idle"],
         .work: ["working", "typing", "running", "idle"],
         .observe: ["watching", "observe", "review", "waiting", "idle"],

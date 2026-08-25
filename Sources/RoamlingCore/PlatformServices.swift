@@ -19,6 +19,11 @@ public protocol PointerProviding: AnyObject {
 }
 
 @MainActor
+public protocol UserIdleProviding: AnyObject {
+    func idleDuration(at timestamp: TimeInterval) -> TimeInterval
+}
+
+@MainActor
 public protocol FocusProviding: AnyObject {
     func currentFocus() -> FocusSnapshot?
 }

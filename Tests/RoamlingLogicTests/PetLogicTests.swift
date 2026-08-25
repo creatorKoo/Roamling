@@ -53,6 +53,8 @@ func petLogicTests() -> [LogicTest] {
             try expect(pet.lookFrameIndex(degrees: 337.5) == 87)
             try expect(pet.frameImage(at: 0) != nil)
             try expect(pet.frameImage(at: 87) != nil)
+            try expect(pet.resolver.resolve(.sleep)?.name == "sleeping")
+            try expect(pet.resolver.resolve(.sit)?.name == "idle")
         },
         LogicTest(name: "loader keeps valid custom animation and isolates invalid track") {
             let fixture = try FixturePackage(frameWidth: 1, frameHeight: 1, rows: 9)

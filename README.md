@@ -25,15 +25,17 @@ This repository contains the first working vertical slice:
   cross-monitor dragging, and connected-edge escape when gently cornered;
 - a live **Behavior Tuning…** panel for MVP 0/0.5 movement, pointer, catch,
   and hit-region values, with persistent settings and one-click reset;
+- permission-free idle detection plus sit, safe sleep-spot travel, sleep,
+  wake, and stretch behavior at a reduced sleeping cadence;
+- basic corner/Dock-adjacent placement that stays inside each display's
+  visible frame and avoids the pointer;
 - a sprite-sized overlay whose input region is enabled only while a catch is
   armed, leaving the underlying app alone during normal operation;
 - pure-logic tests for geometry, display paths, movement, pointer interaction,
   behavior transitions, attention, reactions, and pet animation fallback.
 
-Coding-agent integrations and Accessibility-based placement are deliberately
+Coding-agent integrations and Accessibility/visual placement are deliberately
 behind the next milestones; the core event vocabulary is not coding-specific.
-Sleep and safe-zone placement are also deliberately held for MVP 0.7 until this
-interaction pass is validated on a real multi-monitor setup.
 
 ## Build and run
 

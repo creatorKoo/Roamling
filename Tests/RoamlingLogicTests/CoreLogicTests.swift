@@ -233,6 +233,72 @@ func coreLogicTests() -> [LogicTest] {
             behavior.handle(.tick, at: 4.36)
             try expect(behavior.state == .idle)
         },
+        LogicTest(name: "behavior follows sit seek sleep wake lifecycle") {
+            var behavior = BehaviorController(state: .idle, enteredAt: 0)
+            behavior.handle(.beginRest, at: 10)
+            try expect(behavior.state == .sit)
+            try expect(behavior.state.isResting)
+            behavior.handle(.seekSleepSpot, at: 12.4)
+            try expect(behavior.state == .findSleepSpot)
+            behavior.handle(.sleepSpotReached, at: 15)
+            try expect(behavior.state == .sleep)
+            behavior.handle(.meaningfulActivity, at: 20)
+            try expect(behavior.state == .wake)
+            behavior.handle(.tick, at: 20.71)
+            try expect(behavior.state == .stretch)
+            behavior.handle(.tick, at: 21.72)
+            try expect(behavior.state == .idle)
+        },
+        LogicTest(name: "basic safe zones honor visible frame and Dock inset") {
+            let display = DisplaySnapshot(
+                id: "main",
+                name: "main",
+                frame: WorldRect(x: 0, y: 0, width: 1_000, height: 800),
+                visibleFrame: WorldRect(x: 0, y: 24, width: 1_000, height: 700),
+                scale: 2
+            )
+            let zones = BasicSafeZonePlanner.safeZones(
+                in: DesktopWorldSnapshot(displays: [display])
+            )
+            try expect(zones.count == 4)
+            for zone in zones {
+                try expect(display.visibleFrame.contains(zone.frame.origin))
+                try expect(display.visibleFrame.contains(
+                    WorldPoint(x: zone.frame.maxX, y: zone.frame.maxY)
+                ))
+            }
+            try expect(zones.contains(where: { $0.reason == "dock-adjacent-bottom-left" }))
+            try expect(zones.contains(where: { $0.reason == "dock-adjacent-bottom-right" }))
+        },
+        LogicTest(name: "sleep placement stays on current display and avoids pointer") {
+            let left = testDisplay("left", WorldRect(x: 0, y: 0, width: 1_000, height: 800))
+            let right = testDisplay("right", WorldRect(x: 1_000, y: 0, width: 1_000, height: 800))
+            let baseWorld = DesktopWorldSnapshot(displays: [left, right])
+            let world = DesktopWorldSnapshot(
+                displays: [left, right],
+                safeZones: BasicSafeZonePlanner.safeZones(in: baseWorld)
+            )
+            let pointer = WorldPoint(x: 870, y: 690)
+            let destination = try require(BasicSafeZonePlanner.destination(
+                in: world,
+                currentPosition: WorldPoint(x: 500, y: 400),
+                pointerPosition: pointer,
+                objectSize: WorldSize(width: 96, height: 104)
+            ))
+            try expect(destination.displayID == "left")
+            try expect(left.visibleFrame.insetBy(dx: 48, dy: 52).contains(destination.point))
+            try expect(destination.point.distance(to: pointer) > 400)
+        },
+        LogicTest(name: "rest timing is bounded") {
+            let rest = RestConfiguration(
+                idleBeforeRest: 1,
+                sittingDuration: 100,
+                wakeWanderDelay: 0
+            )
+            try expect(rest.idleBeforeRest == 10)
+            try expect(rest.sittingDuration == 10)
+            try expect(rest.wakeWanderDelay == 0.5)
+        },
         LogicTest(name: "attention dwell yields to urgent event") {
             var model = AttentionModel(configuration: AttentionConfiguration(
                 minimumDwellTime: 4,

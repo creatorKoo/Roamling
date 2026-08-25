@@ -56,6 +56,15 @@ public enum PlaceholderPetFactory {
             spriteVersionNumber: 2,
             spritesheetPath: "procedural://mochi"
         )
+        var tracks = StandardPetAnimations.tracks(columns: columns)
+        tracks["sleeping"] = PetAnimationTrack(
+            name: "sleeping",
+            frames: (0..<4).map { column in
+                PetAnimationFrame(index: 5 * columns + column, duration: 0.8)
+            },
+            loops: true,
+            fallback: "idle"
+        )
         return PetAsset(
             manifest: manifest,
             packageURL: nil,
@@ -64,7 +73,7 @@ public enum PlaceholderPetFactory {
             frameHeight: cellHeight,
             columns: columns,
             rows: rows,
-            tracks: StandardPetAnimations.tracks(columns: columns)
+            tracks: tracks
         )
     }
 

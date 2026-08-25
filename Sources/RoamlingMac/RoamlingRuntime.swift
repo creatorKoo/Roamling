@@ -60,6 +60,9 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     public var scale: Double { overlay.scale }
 
     private let displayProvider = MacDisplayProvider()
+    private let safeZoneProvider = MacBasicSafeZoneProvider()
+    private let userIdleProvider = MacUserIdleProvider()
+    private let restConfiguration = RestConfiguration.standard
     private var pointerProvider: MacPointerProvider!
     private let catalog: PetCatalog
     private let loader = PetLoader()
@@ -82,6 +85,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     private var dragOffset = WorldVector.zero
     private var lastPointerDecision: PointerDecision?
     private var isEvadeTransitioning = false
+    private var restDestination: RestDestination?
     private var running = false
 
     public override init() {
@@ -225,8 +229,8 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     }
 
     /// Applies only the values currently exposed for MVP 0/0.5 validation.
-    /// Future sleep, placement, and activity behavior must use their own
-    /// milestone-specific settings once those gates are opened.
+    /// Rest and future activity behavior use separate milestone-specific
+    /// configuration so this validated interaction preset remains stable.
     public func applyTuning(_ proposed: RuntimeTuning) {
         let normalized = proposed.normalized
         let pauseChanged = abs(normalized.wanderPause - tuning.wanderPause) > 0.001
@@ -300,6 +304,10 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         behavior.handle(.tick, at: now)
 
         let pointer = pointerProvider.currentPointer(at: now)
+        let userIdleDuration = userIdleProvider.idleDuration(at: now)
+        if userIdleDuration < 0.8, behavior.state.isResting {
+            cancelRestForActivity(at: now)
+        }
         if (behavior.state == .caught || behavior.state == .dragged), !pointer.primaryButtonDown {
             finishDrop(at: now)
         }
@@ -326,6 +334,14 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
                 nextWanderAt = max(nextWanderAt, now + 1.0)
             } else if isEvadeTransitioning {
                 updateEvadeTransition(at: now, deltaTime: deltaTime)
+            } else if updateRestLifecycle(
+                userIdleDuration: userIdleDuration,
+                pointerProximity: decision.proximity,
+                pointerPosition: pointer.position,
+                at: now,
+                deltaTime: deltaTime
+            ) {
+                // Rest owns movement until input wakes the creature.
             } else if isPointerAvoidanceEnabled {
                 behavior.handle(.pointer(decision.proximity), at: now)
                 switch decision.proximity {
@@ -362,10 +378,12 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     private var preferredTickInterval: TimeInterval {
         if ProcessInfo.processInfo.systemUptime <= catchArmedUntil { return 1 / 60 }
         return switch behavior.state {
-        case .wander, .evadePointer, .caught, .dragged, .dropped:
+        case .wander, .evadePointer, .caught, .dragged, .dropped, .findSleepSpot:
             1 / 30
         case .lookAtPointer:
             1 / 16
+        case .sleep:
+            1 / 2
         default:
             1 / 12
         }
@@ -382,6 +400,109 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         )
         tickTimer = timer
         RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func updateRestLifecycle(
+        userIdleDuration: TimeInterval,
+        pointerProximity: PointerProximity,
+        pointerPosition: WorldPoint,
+        at timestamp: TimeInterval,
+        deltaTime: TimeInterval
+    ) -> Bool {
+        if behavior.state.isResting, pointerProximity != .far {
+            cancelRestForActivity(at: timestamp)
+            return false
+        }
+
+        switch behavior.state {
+        case .sit:
+            movement.cancelRoute(stop: false)
+            _ = movement.update(deltaTime: deltaTime)
+            if timestamp - behavior.enteredAt >= restConfiguration.sittingDuration {
+                behavior.handle(.seekSleepSpot, at: timestamp)
+                beginRestTravel(pointerPosition: pointerPosition, at: timestamp)
+            }
+            return true
+
+        case .findSleepSpot:
+            movement.configuration.maximumSpeed = max(24, tuning.walkingSpeed * 0.75)
+            if movement.hasRoute {
+                let update = movement.update(deltaTime: deltaTime)
+                if update.reachedDestination { enterSleep(at: timestamp) }
+            } else {
+                enterSleep(at: timestamp)
+            }
+            return true
+
+        case .sleep:
+            movement.cancelRoute(stop: false)
+            _ = movement.update(deltaTime: deltaTime)
+            return true
+
+        default:
+            break
+        }
+
+        guard userIdleDuration >= restConfiguration.idleBeforeRest,
+              pointerProximity == .far,
+              behavior.state == .idle || behavior.state == .wander || behavior.state == .dropped else {
+            return false
+        }
+        isEvadeTransitioning = false
+        restDestination = nil
+        movement.cancelRoute(stop: false)
+        behavior.handle(.beginRest, at: timestamp)
+        nextWanderAt = .infinity
+        _ = movement.update(deltaTime: deltaTime)
+        return true
+    }
+
+    private func beginRestTravel(pointerPosition: WorldPoint, at timestamp: TimeInterval) {
+        let zones = safeZoneProvider.currentSafeZones(in: world)
+        let restWorld = DesktopWorldSnapshot(
+            displays: world.displays,
+            windows: world.windows,
+            pointer: PointerSnapshot(
+                position: pointerPosition,
+                timestamp: timestamp,
+                primaryButtonDown: false
+            ),
+            focus: world.focus,
+            safeZones: zones
+        )
+        restDestination = BasicSafeZonePlanner.destination(
+            in: restWorld,
+            currentPosition: movement.position,
+            pointerPosition: pointerPosition,
+            objectSize: overlay.objectSize
+        )
+
+        guard isRoamingEnabled, let restDestination else {
+            enterSleep(at: timestamp)
+            return
+        }
+        let route = DisplayTopology(displays: displays).route(
+            from: movement.position,
+            to: restDestination.point
+        )
+        movement.configuration.maximumSpeed = max(24, tuning.walkingSpeed * 0.75)
+        movement.setRoute(route.waypoints)
+        if !movement.hasRoute { enterSleep(at: timestamp) }
+    }
+
+    private func enterSleep(at timestamp: TimeInterval) {
+        movement.cancelRoute(stop: true)
+        behavior.handle(.sleepSpotReached, at: timestamp)
+        nextWanderAt = .infinity
+        persistPosition()
+    }
+
+    private func cancelRestForActivity(at timestamp: TimeInterval) {
+        guard behavior.state.isResting else { return }
+        restDestination = nil
+        movement.cancelRoute(stop: false)
+        behavior.handle(.meaningfulActivity, at: timestamp)
+        nextWanderAt = timestamp + restConfiguration.wakeWanderDelay
     }
 
     private func updateRoaming(at timestamp: TimeInterval, deltaTime: TimeInterval) {
@@ -536,8 +657,10 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     private func updateAnimation(pointerDegrees: Double?) {
         let capability: PetCapability
         switch behavior.state {
-        case .wander, .evadePointer:
+        case .wander, .evadePointer, .findSleepSpot:
             capability = movement.velocity.dx < 0 ? .moveLeft : .moveRight
+        case .sit:
+            capability = .sit
         case .lookAtPointer, .observe:
             capability = .observe
         case .caught:

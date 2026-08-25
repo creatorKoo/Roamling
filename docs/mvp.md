@@ -4,92 +4,84 @@ Roamling은 한 단계의 체감 품질과 acceptance criteria를 닫고 실제 
 뒤 다음 단계로 이동한다. 다음 단계의 구조를 고려할 수는 있지만 기능을 미리 활성화하지
 않는다.
 
-## Current gate — MVP 0 + MVP 0.5 refinement
+## Completed — MVP 0 + MVP 0.5
 
-현재 목표는 **화면에 살아 있는 펫**과 **pointer interaction**의 품질을 다듬는 것이다.
-AI/agent integration이 아니라 아래 장면이 자연스러운지가 첫 검증 기준이다.
+2026-08-25 실제 3-display 환경에서 roaming, pointer evade, catch, drag/drop을 검증하고
+사용자가 다음 단계 진행을 승인했다.
+
+검증 환경과 확정값:
+
+- 중앙 4K scaled display, 왼쪽 1080p display, 16-inch MacBook Pro display의 비대칭 배치
+- walk 40pt/s, pause base 12초, other-display trip 46%
+- pointer notice 170pt, catch radius 74pt, catch speed 380pt/s
+- catch window 0.35초, hit region 1.12배
+- 연결된 display seam evade와 cross-display drag 정상
+
+이 gate의 값은 `Behavior Tuning…`의 **Reset Defaults** 기준이다.
+
+## Current gate — MVP 0.7: It Sleeps
+
+목표는 user input이 한동안 없을 때 Roamling이 방해되지 않는 위치를 찾아 쉬고, 다시
+입력이 생기면 자연스럽게 깨어나는 것이다.
 
 ```text
-idle pause -> wander -> pointer notice -> evade -> catch -> drag -> drop
-                         |
-                         +-> connected display transition
+user idle 75 s
+      |
+      v
+     sit (2.4 s)
+      |
+      v
+find basic safe zone
+      |
+      v
+travel slowly -> sleep
+                    |
+            keyboard/pointer input
+                    |
+                    v
+              wake -> stretch -> idle
 ```
 
 ### In scope
 
-- Petdex/Codex-compatible pet loading and animation fallback
-- transparent, non-activating, mostly click-through overlay
-- global logical-point desktop coordinates and display hot-plug handling
-- random wandering across multiple displays
-- 이동 사이의 짧고 충분한 idle pause
-- pointer awareness, slow/fast evade, capped escape speed
-- fast approach catch, forgiving catch window, sprite-sized hit region
-- click, drag, drop, and cross-display dragging
-- MVP 0.5 값을 live tuning하는 작은 behavior panel
-- pure-logic tests for thresholds, routes, catch, and display transitions
+- permission-free system idle duration
+- `sit -> findSleepSpot -> sleep -> wake -> stretch` behavior transitions
+- current display를 우선하는 sleep placement
+- `visibleFrame` 기반 menu bar/Dock exclusion
+- display corner와 Dock-adjacent safe-zone candidates
+- pointer와 가까운 candidate 회피
+- Petdex pet의 `sitting`/`sleeping` capability fallback
+- sleep 중 2Hz runtime cadence
+- display hot-plug, pointer avoidance, catch/drag의 기존 동작 유지
+- pure-logic tests for rest timing, placement, and behavior transitions
 
-`idle pause`는 현재 단계의 pacing이며 sleep이 아니다. idle animation만 재생하고 위치를
-고르는 safe-zone logic은 실행하지 않는다.
+표준 pet에 sleep/sit animation이 없으면 pet 사용을 막지 않고 idle로 fallback한다. Built-in
+Mochi는 기존 atlas frame을 느리게 재생하는 최소 sleeping track만 사용한다.
 
 ### Explicitly out of scope for this gate
 
-- sit, sleep, findSleepSpot, BasicSafeZoneProvider — MVP 0.7
+- Accessibility window/focus/caret tracking — MVP 3
 - Claude Code/Codex ActivitySource — MVP 1+
-- AttentionModel/ReactionPolicy의 실제 event wiring — MVP 2
-- Accessibility, focus, caret tracking — MVP 3
-- ScreenCaptureKit/VisualSafeZoneProvider — MVP 4
-- enhanced Roamling-only pet animations — MVP 5
+- AttentionModel/ReactionPolicy event wiring — MVP 2
+- ScreenCaptureKit/visual empty-region detection — MVP 4
+- OCR, continuous capture, cloud vision
+- window controls를 분석하는 advanced safe placement
+- `roamling.json` enhanced animation authoring UI — MVP 5
 
-Core enum이나 protocol에 후속 개념이 존재하더라도 현재 runtime에서 활성화하지 않는다.
+### Acceptance criteria
 
-## Current hands-on feedback baseline
-
-2026-08-25 첫 검증 환경:
-
-- 3 displays: 중앙 외부 4K display를 확대된 logical resolution으로 사용, 왼쪽 1080p,
-  16-inch MacBook Pro panel이 상단/측면으로 연결된 비대칭 배치
-- roaming은 이동 비율이 너무 높고 조금 빠르게 느껴짐
-- pointer evade 자체는 좋지만 더 먼 거리에서 먼저 알아보면 좋음
-- pointer로 display 경계까지 밀었을 때 현재 display에 갇힘
-- 자연 상태에서도 display exploration이 잘 느껴지지 않음
-- trackpad fast approach catch가 보통 3~4회 필요함
-- drag와 cross-display drop은 정상
-
-Retina/해상도 혼합은 AppKit logical point로 정규화한다. backing scale은 render metadata로
-유지하며 pointer threshold와 이동 속도를 backing pixel에 곱하지 않는다.
-
-## Refinement acceptance criteria
-
-- 한 번 이동한 뒤 눈에 띄는 idle 구간이 존재한다.
-- 기본 walk speed가 기존 prototype보다 차분하다.
-- 3-display 환경에서 가만히 두면 display를 실제로 탐험한다.
-- 연결된 경계 쪽으로 계속 evade하면 이웃 display로 이동한다.
-- 물리적으로 이어지지 않은 display gap에서는 임의 teleport하지 않는다.
-- trackpad fast approach 후 1~2회 안에 안정적으로 잡을 수 있다.
-- catch가 아닌 동안 underlying UI click-through가 유지된다.
-- tuning panel에서 speed, pause, exploration, pointer distance, catch window,
-  catch threshold, hit region을 실행 중 조절하고 기본값으로 복구할 수 있다.
-- 기존 drag/drop과 display-change 동작이 회귀하지 않는다.
+- 약 75초 동안 keyboard/pointer input이 없으면 현재 wander를 정리하고 잠시 앉는다.
+- 현재 display 안의 corner/Dock-adjacent 후보 중 pointer에서 떨어진 곳을 선택한다.
+- sleep spot까지 기존 movement controller로 천천히 이동하며 순간이동하지 않는다.
+- visible frame 밖이나 Dock/menu bar 위를 최종 위치로 선택하지 않는다.
+- sleep animation이 없는 standard Petdex pet도 idle fallback으로 정상 동작한다.
+- keyboard 또는 pointer input이 돌아오면 0.5초 안팎에 wake한다.
+- nearby pointer/catch/drag는 sleep보다 높은 우선순위를 가진다.
+- sleep 중 불필요한 render wakeup을 2Hz 수준으로 낮춘다.
+- 추가 macOS permission prompt가 없다.
 
 ## Exit rule
 
-위 항목의 자동 검증과 실제 3-display 재검증이 끝나기 전에는 MVP 0.7 sleep 구현으로
-넘어가지 않는다. 다음 gate 진입은 hands-on feedback 뒤 명시적으로 결정한다.
-
-## Implementation checkpoint — 2026-08-25
-
-현재 feedback pass에 구현한 항목:
-
-- 기본 walk speed 40pt/s, 이동 후 randomized idle 약 8.4–17.4초
-- 같은 display의 지나치게 긴 wander leg 제한
-- 다른 display 방문 기본 확률 46%, target 경계 가까운 도착점 선택
-- 실제 3-display tuning 결과를 반영한 170pt pointer notice, 74pt catch radius,
-  380pt/s catch speed, 0.35초 catch window
-- 1.12배 hit ellipse와 catch arm 중 60Hz input sampling
-- 실제로 맞닿은 display seam의 방향성 evade transition
-- movement/pointer/catch 값을 live 적용하고 저장하는 `Behavior Tuning…` 창
-- asymmetric three-display topology와 disconnected-gap 회귀 테스트
-
-pure test/build 검증 뒤에도 이 gate는 사용자의 실제 3-display 재검증 전까지 열린 상태다.
-재검증에서 값을 조절했다면 숫자 대신 tuning panel의 **Reset Defaults** 기준값과 달라진
-항목만 기록하면 된다.
+자동 검증과 실제 사용 환경에서 sleep/wake의 timing 및 위치를 확인하기 전에는 MVP 1
+agent integration으로 넘어가지 않는다. timing이나 위치가 어색하면 MVP 0.7 안에서만
+조정한다.

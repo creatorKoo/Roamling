@@ -38,6 +38,9 @@ public enum CompanionReaction: String, Codable, Hashable, Sendable {
 public enum BehaviorInput: Equatable, Sendable {
     case beginWander
     case arrived
+    case beginRest
+    case seekSleepSpot
+    case sleepSpotReached
     case pointer(PointerProximity)
     case catchBegan
     case dragMoved
@@ -71,6 +74,14 @@ public struct BehaviorController: Sendable {
             if state == .idle || state == .dropped { transition(to: .wander, at: timestamp) }
         case .arrived:
             if state == .wander || state == .travelToInterest { transition(to: .idle, at: timestamp) }
+        case .beginRest:
+            if state == .idle || state == .wander || state == .dropped {
+                transition(to: .sit, at: timestamp)
+            }
+        case .seekSleepSpot:
+            if state == .sit { transition(to: .findSleepSpot, at: timestamp) }
+        case .sleepSpotReached:
+            if state == .findSleepSpot { transition(to: .sleep, at: timestamp) }
         case let .pointer(proximity):
             handlePointer(proximity, at: timestamp)
         case .catchBegan:
@@ -91,7 +102,7 @@ public struct BehaviorController: Sendable {
             case .calm: transition(to: .idle, at: timestamp)
             }
         case .meaningfulActivity:
-            if state == .sleep { transition(to: .wake, at: timestamp) }
+            if state.isResting { transition(to: .wake, at: timestamp) }
         case .tick:
             settleTransientState(at: timestamp)
         }
@@ -101,6 +112,9 @@ public struct BehaviorController: Sendable {
 
     private mutating func handlePointer(_ proximity: PointerProximity, at timestamp: TimeInterval) {
         guard state != .caught && state != .dragged else { return }
+        if state.isResting, proximity != .far {
+            transition(to: .wake, at: timestamp)
+        }
         switch proximity {
         case .far:
             if state == .lookAtPointer || state == .evadePointer {

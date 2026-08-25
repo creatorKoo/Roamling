@@ -94,7 +94,7 @@ private struct RuntimeTuningView: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("MVP 0 / 0.5 feel lab")
                 .font(.title2.weight(.semibold))
-            Text("Changes apply immediately and are saved. This panel tunes roaming and pointer interaction only; sleep and smart placement remain in later milestones.")
+            Text("Changes apply immediately and are saved. This panel tunes roaming and pointer interaction only; MVP 0.7 rest timing stays fixed during its first validation pass.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
