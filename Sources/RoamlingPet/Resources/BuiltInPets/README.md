@@ -29,9 +29,9 @@ Core prompt, FatMochi:
 > caught/squished. Use a limited palette, crisp silhouette, no props, labels,
 > or extra animals.
 
-The final FatMochi idle revision changes only its expression direction: small,
-softly drooping half-open warm-brown eyes with tiny highlights replace the
-angry inward-slanting eyes, while the sleepy deadpan personality remains.
+The final FatMochi idle revision keeps the original eye width, thickness, and
+solid-black pixel shape. Only the inward angry slant is flattened slightly so
+the expression reads as blankly sleepy and a little dazed.
 
 The working chroma-key prompts changed only the background to a flat solid
 `#00FF00`; transparency was produced locally without network upload.
