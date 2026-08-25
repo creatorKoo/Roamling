@@ -57,15 +57,25 @@ requested: an eight-frame four-paw alternating walk with a fixed ground line;
 a four-frame sleeping breath; a four-frame restrained caught wiggle; a
 six-frame feline forward stretch; and a five-frame drop/squash/recovery. Frame
 normalization and chroma removal were performed locally with nearest-neighbor
-sampling. No generated frame was uploaded again after chroma processing.
+sampling. The latest identity pass used local idle, walk, and caught atlas
+extracts as explicit image-to-image references. Final chroma removal, exact
+face restoration, sizing, centering, and green-spill cleanup were local steps.
 
-The second walk pass responded to desktop testing: the side silhouette is about
-1.5× wider relative to its height, while every frame is tightly cropped and
-re-centered. Its alpha centroid varies by less than two source pixels across
+The latest identity pass treats the approved idle pose as the source of truth.
+Walk frames use a 176×168 alpha silhouette beside idle's 174×170 silhouette,
+retain the exact approved face pixels, and move the short paws beneath a stable
+round torso. Their alpha centroid varies by less than two source pixels across
 the cycle, preventing the old leftward drift and snap-back that read as a
 moonwalk. The walk prompt explicitly specifies planted-paw travel, lifted-paw
 recovery, chronological opposing contacts, a fixed torso, and a seamless
 frame-eight-to-frame-one transition.
+
+The caught/drag pass follows the same size rule at 174×170. Frames 32–35 form a
+one-shot transition beginning with the exact approved idle frame; frames 36–39
+hold that compact pose as a seamless paw/ear/tail wiggle while dragging. This
+keeps click and drag responsive without making FatMochi change into a larger,
+more upright cat. The approved idle/blink row was preserved pixel-for-pixel
+during this pass.
 
 The working chroma-key prompts changed only the background to a flat solid
 `#00FF00`; transparency was produced locally without network upload.

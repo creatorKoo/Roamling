@@ -83,6 +83,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     private var lastTickAt: TimeInterval?
     private var nextWanderAt: TimeInterval
     private var catchArmedUntil: TimeInterval = 0
+    private var caughtAnimationUntil: TimeInterval = 0
     private var isDragging = false
     private var dragOffset = WorldVector.zero
     private var lastPointerDecision: PointerDecision?
@@ -288,6 +289,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         isEvadeTransitioning = false
         movement.cancelRoute(stop: true)
         behavior.handle(.catchBegan, at: now)
+        caughtAnimationUntil = now + caughtTransitionDuration
         updateAnimation(pointerDegrees: lastPointerDecision?.lookDirectionDegrees)
     }
 
@@ -693,7 +695,9 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         case .caught:
             capability = .caught
         case .dragged:
-            capability = .dragged
+            capability = ProcessInfo.processInfo.systemUptime < caughtAnimationUntil
+                ? .caught
+                : .dragged
         case .dropped:
             capability = .landing
         case .work:
@@ -722,6 +726,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     private func finishDrop(at timestamp: TimeInterval) {
         isDragging = false
         isEvadeTransitioning = false
+        caughtAnimationUntil = 0
         behavior.handle(.mouseReleased, at: timestamp)
         let clamped = world.clamp(movement.position, objectSize: overlay.objectSize)
         movement.teleport(to: clamped)
@@ -730,6 +735,11 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         catchArmedUntil = 0
         nextWanderAt = timestamp + 1.4
         persistPosition()
+    }
+
+    private var caughtTransitionDuration: TimeInterval {
+        guard let track = asset.resolver.resolve(.caught), !track.loops else { return 0 }
+        return min(track.frames.reduce(0) { $0 + $1.duration }, 0.8)
     }
 
     private func handleDisplayChange() {
@@ -752,6 +762,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
 
     private func install(asset newAsset: PetAsset) {
         asset = newAsset
+        caughtAnimationUntil = 0
         animationPlayer = PetAnimationPlayer(asset: newAsset)
         updateAnimation(pointerDegrees: nil)
         renderCurrentFrame()

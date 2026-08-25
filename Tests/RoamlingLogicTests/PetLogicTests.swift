@@ -92,7 +92,8 @@ func petLogicTests() -> [LogicTest] {
             try expect(left.frames.map(\.index) == Array(16...23))
             try expect(sleep.frames.map(\.index) == [24, 25, 26, 27])
             try expect(caught.frames.map(\.index) == [32, 33, 34, 35])
-            try expect(dragged.frames.map(\.index) == [32, 33, 34, 35])
+            try expect(!caught.loops)
+            try expect(dragged.frames.map(\.index) == [36, 37, 38, 39])
             try expect(stretch.frames.map(\.index) == [40, 41, 42, 43, 44, 45])
             try expect(!stretch.loops)
             try expect(landing.frames.map(\.index) == [48, 49, 50, 51, 52])
@@ -110,6 +111,12 @@ func petLogicTests() -> [LogicTest] {
             let walkMetrics = try Array(8...15).map {
                 try require(alphaMetrics(try require(pet.frameImage(at: $0))))
             }
+            let caughtMetrics = try Array(32...39).map {
+                try require(alphaMetrics(try require(pet.frameImage(at: $0))))
+            }
+            let idleFrame = try require(pet.frameImage(at: 0))
+            let idleMetric = try require(alphaMetrics(idleFrame))
+            let idleSignature = try require(imageSignature(idleFrame))
             try expect(Set(idleSignatures).count == 4)
             try expect(Set(rightSignatures).count == 8)
             try expect(Set(sleepSignatures).count == 4)
@@ -117,18 +124,45 @@ func petLogicTests() -> [LogicTest] {
             let minimumWalkCentroid = try require(walkCentroids.min())
             let maximumWalkCentroid = try require(walkCentroids.max())
             try expect(maximumWalkCentroid - minimumWalkCentroid < 2)
-            try expect(walkMetrics.allSatisfy { Double($0.width) / Double($0.height) > 1.3 })
+            try expect(walkMetrics.allSatisfy {
+                abs($0.width - idleMetric.width) <= 2 && abs($0.height - idleMetric.height) <= 2
+            })
+
+            let caughtCentroids = caughtMetrics.map { $0.centroidX }
+            let minimumCaughtCentroid = try require(caughtCentroids.min())
+            let maximumCaughtCentroid = try require(caughtCentroids.max())
+            try expect(maximumCaughtCentroid - minimumCaughtCentroid < 2)
+            try expect(caughtMetrics.allSatisfy {
+                abs($0.width - idleMetric.width) <= 1 && abs($0.height - idleMetric.height) <= 1
+            })
+            let caughtStart = try require(pet.frameImage(at: 32))
+            let caughtStartSignature = try require(imageSignature(caughtStart))
+            try expect(caughtStartSignature == idleSignature)
+
+            let idleFace = try require(idleFrame.cropping(to: CGRect(x: 24, y: 100, width: 104, height: 30)))
+            let idleFaceSignature = try require(imageSignature(idleFace))
+            for index in 16...23 {
+                let walkFrame = try require(pet.frameImage(at: index))
+                let walkFace = try require(walkFrame.cropping(to: CGRect(x: 24, y: 100, width: 104, height: 30)))
+                let walkFaceSignature = try require(imageSignature(walkFace))
+                try expect(walkFaceSignature == idleFaceSignature)
+            }
         },
-        LogicTest(name: "FatMochi dragged animation advances while held") {
+        LogicTest(name: "FatMochi caught intro hands off to a looping drag") {
             var player = PetAnimationPlayer(asset: MascotPetFactory.make(.fatMochi))
-            player.setCapability(.dragged)
+            player.setCapability(.caught)
             try expect(player.currentFrameIndex == 32)
-            player.update(deltaTime: 0.12)
+            player.update(deltaTime: 0.05)
             try expect(player.currentFrameIndex == 33)
-            player.update(deltaTime: 0.22)
+            player.update(deltaTime: 0.30)
             try expect(player.currentFrameIndex == 35)
-            player.update(deltaTime: 0.12)
-            try expect(player.currentFrameIndex == 32)
+
+            player.setCapability(.dragged)
+            try expect(player.currentFrameIndex == 36)
+            player.update(deltaTime: 0.13)
+            try expect(player.currentFrameIndex == 37)
+            player.update(deltaTime: 0.36)
+            try expect(player.currentFrameIndex == 36)
         },
         LogicTest(name: "Mochi pose-derived cycles remain reversible") {
             let pet = MascotPetFactory.make(.mochi)

@@ -90,11 +90,12 @@ public enum MascotPetFactory {
             ),
             "caught": track(
                 "caught",
-                frames: [(32, 0.13), (33, 0.13), (34, 0.13), (35, 0.13)]
+                frames: [(32, 0.04), (33, 0.08), (34, 0.09), (35, 0.11)],
+                loops: false
             ),
             "dragged": track(
                 "dragged",
-                frames: [(32, 0.11), (33, 0.11), (34, 0.11), (35, 0.11)]
+                frames: [(36, 0.12), (37, 0.12), (38, 0.12), (39, 0.12)]
             ),
             "sitting": track("sitting", frames: [(0, 0.8)]),
             "landing": track(
@@ -117,13 +118,13 @@ public enum MascotPetFactory {
             ),
             "waiting": track(
                 "waiting",
-                frames: [(32, 0.17), (33, 0.17), (34, 0.17), (35, 0.17)]
+                frames: [(36, 0.17), (37, 0.17), (38, 0.17), (39, 0.17)]
             ),
             "working": track("working", frames: walkRightFrames),
             "running": track("running", frames: walkRightFrames),
             "waving": track(
                 "waving",
-                frames: [(32, 0.16), (33, 0.16), (34, 0.16), (35, 0.16)]
+                frames: [(36, 0.16), (37, 0.16), (38, 0.16), (39, 0.16)]
             ),
             "review": track("review", frames: idleFrames)
         ]

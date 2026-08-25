@@ -64,11 +64,12 @@ caught paw wiggle, drop landing, 고양이식 forward stretch도 각각 독립 f
 active travel만 60Hz로 갱신하며 idle/sleep의 저전력 cadence는 그대로다. 이는 MVP 0.7의
 creature-quality polish이며 이후 agent integration용 animation이나 source는 미리 만들지 않는다.
 
-실사용 피드백 뒤 FatMochi walk는 세로로 긴 side pose 대신 가로/세로 silhouette 비율을
-약 1.5배 넓힌 낮고 둥근 체형으로 바꿨다. 각 frame의 alpha centroid 편차를 2px 미만으로
-정규화해 atlas 안에서 몸이 뒤로 흐르다 되감기는 moonwalk를 막는다. caught에서 dragged로
-넘어가도 네 frame paw wiggle이 계속 재생된다. idle은 승인된 검은 눈을 유지하면서 명확한
-half-close/closed frame을 사용한다.
+실사용 피드백 뒤 FatMochi의 승인된 idle을 캐릭터 기준으로 고정했다. walk는 idle의
+174×170px silhouette에 맞춘 176×168px 체형과 같은 얼굴을 유지한 채 짧은 다리만 교차한다.
+각 frame의 alpha centroid 편차를 2px 미만으로 정규화해 atlas 안에서 몸이 뒤로 흐르다
+되감기는 moonwalk도 막는다. 클릭 직후에는 idle과 같은 첫 frame에서 앞발을 드는 caught
+intro를 한 번 재생하고, 실제 drag 중에는 별도의 네 frame wiggle을 계속 반복한다. idle의
+승인된 검은 눈과 half-close/closed blink frame은 변경하지 않는다.
 
 ### Explicitly out of scope for this gate
 
