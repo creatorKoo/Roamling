@@ -38,6 +38,7 @@ module만 추출할 수 있다. 선행 Rust/C ABI는 만들지 않는다.
 - `PointerInteractionModel`: proximity, approach speed, catch arming, escape vector
 - `BehaviorController`: explicit creature FSM
 - `BasicSafeZonePlanner`: permission-free rest candidates and destination scoring
+- `BasicInterestPositionPlanner`: coarse window-edge destination scoring for MVP 1
 - `RestConfiguration`: MVP 0.7 idle/sit/wake timing
 - `CompanionEvent`, `UserContext`, `ActivitySource`
 - `AttentionModel`, `ReactionPolicy`, candidate scoring
@@ -54,18 +55,30 @@ module만 추출할 수 있다. 선행 Rust/C ABI는 만들지 않는다.
 - `MascotPetFactory`: authored FatMochi atlas 선택 + Mochi key-pose evaluation fallback
 - `PlaceholderPetFactory`: resource failure에도 앱이 뜨는 procedural emergency fallback
 
+### RoamlingSources
+
+- `LoopbackHookReceiver`: source-neutral authenticated localhost HTTP transport
+- `ClaudeCodeEventNormalizer`: official hook payload의 lifecycle field만 `CompanionEvent`로 변환
+- `CodexEventNormalizer`: Codex command-hook payload의 lifecycle identifier만 normalize
+- `ClaudeCodeSource`, `CodexSource`: receiver를 `ActivitySource` async stream으로 노출
+- `ClaudeCodeHookInstaller`: user settings를 보존하는 opt-in install/repair/remove
+- `CodexHookInstaller`: sibling hook과 기존 `config.toml`/`notify`를 보존하는 user hook installer
+- product-specific payload는 이 module 밖으로 나가지 않으며 prompt, transcript, tool input/output
+  key를 decode model에 선언하지 않는다.
+
 ### RoamlingMac
 
 - `MacDisplayProvider`: `NSScreen` -> display snapshots and coordinate transform
 - `MacPointerProvider`: `NSEvent` global point sampling
 - `MacUserIdleProvider`: elapsed time since any local input, without an event tap
 - `MacBasicSafeZoneProvider`: visible-frame corner/Dock candidates
+- `MacWindowProvider`: title/content 없이 frontmost app의 coarse window bounds만 제공
 - `PetOverlayPanel`: transparent, non-activating, all-Spaces sprite window
 - `RoamlingRuntime`: main-actor orchestration and the only owner of input gating
 - menu-bar controls and lifecycle
 
-MVP 3/4에서 `MacWindowProvider`, `MacFocusProvider`, `MacCaptureProvider`를 이 module에
-추가한다.
+MVP 3/4에서 `MacFocusProvider`, Accessibility-backed `MacWindowProvider` detail,
+`MacCaptureProvider`를 이 module에 추가한다.
 
 ## Domain events, not agent events
 
@@ -86,6 +99,30 @@ struct CompanionEvent {
 Claude/Codex payload를 일반 event로 정규화한다. `ActivitySource`는 event stream을
 내놓고 product-specific detail은 adapter 안에서 끝난다.
 
+MVP 1의 Claude transport는 `127.0.0.1:47831`에만 bind하고 임의 생성 token을
+`X-Roamling-Token` header로 확인한다. user가 menu에서 설치를 선택하기 전에는 Claude
+settings를 변경하지 않는다. installer는 각 event에 동일한 HTTP handler를 병합하고
+재설치 때 자기 handler만 교체한다. 제거도 URL signature가 일치하는 Roamling handler만
+삭제한다. HTTP connection failure와 timeout은 Claude Code 공식 계약에서 non-blocking이며,
+Roamling response도 빈 204라 agent decision에 관여하지 않는다.
+
+HTTP body에는 Claude Code가 event별 상세 payload를 함께 보낼 수 있지만 decoder가 읽는
+필드는 `session_id`, optional `prompt_id`, `hook_event_name`, notification 분류뿐이다.
+request buffer는 256 KiB로 제한하고 event 생성 직후 폐기하며 disk/log/metadata에는
+원문을 남기지 않는다.
+
+MVP 2의 Codex transport는 user가 명시적으로 설치한 `~/.codex/hooks.json` command
+handler가 stdin JSON을 `/usr/bin/curl`로 `127.0.0.1:47832`에 전달한다. 별도 token,
+동일한 256 KiB request limit, 빈 204 response를 쓴다. 0.15초 connect timeout과 0.3초
+total timeout 뒤 실패를 삼키므로 Roamling이 꺼져 있어도 Codex turn을 중단하지 않는다.
+installer는 `config.toml`을 열거나 수정하지 않으므로 이미 설정된 legacy `notify`와
+공존한다. Codex의 hook trust prompt는 자동 승인하지 않는다.
+
+Codex decoder가 읽는 값은 `session_id`, optional `turn_id`, `hook_event_name`뿐이다.
+Codex가 stdin에 함께 넣는 cwd, transcript path, prompt, model, tool input/output,
+assistant message는 decode model과 metadata에 없다. Claude/Codex listener는 transport만
+공유하며 product event mapping은 각 adapter에 남는다.
+
 ## Context
 
 `UserContext`는 source와 독립적이다.
@@ -99,9 +136,9 @@ signals from focus / idle / playback / future telemetry
       working | gaming | watchingMedia | browsing | idle
 ```
 
-MVP 0.7은 system-wide input idle duration을 rest trigger로만 사용한다. 이를 아직
-`UserContext`로 승격하거나 coding activity와 합성하지 않는다. ContextResolver wiring은
-activity source가 들어오는 후속 milestone에서 한다.
+MVP 0.7은 system-wide input idle duration을 rest trigger로만 사용한다. MVP 2의 Claude와
+Codex adapter는 자기 event에 `.working` hint를 붙이지만 여러 signal을 합치는
+ContextResolver는 아직 활성화하지 않는다.
 Context가 source 이름에서 직접 결정되지 않으므로, 같은 game event도 fullscreen,
 focus, media playback 상황에 따라 다른 reaction budget을 가질 수 있다.
 
@@ -122,12 +159,14 @@ focus, media playback 상황에 따라 다른 reaction budget을 가질 수 있�
 최종 score는 priority, intensity, recency, location confidence를 합친다. 현재 target은
 minimum dwell 동안 유지된다. 새 후보는 hysteresis margin을 넘을 때만 교체하고,
 방금 떠난 source는 cooldown을 받는다. attention/failure처럼 urgent한 event만 dwell을
-깨는 것이 가능하다. 이 구조가 monitor 왕복을 막는다.
+깨는 것이 가능하다. Runtime은 source별 최신 event를 보관하고 선택된 event만 behavior에
+전달한다. terminal event 뒤에는 다음 active source를 pending target으로 넘긴다. 이 구조가
+monitor 왕복을 막는다.
 
 ## ReactionPolicy
 
 policy 입력은 event kind/intensity, context, current behavior, cooldown, personality다.
-출력은 `PetAction`이지 animation 이름이 아니다.
+출력은 `CompanionReaction`이지 animation 이름이 아니다.
 
 ```text
 achievement(0.2) -> glance / paw / small celebrate (weighted)
@@ -138,6 +177,8 @@ attention        -> observe/paw, 반복 cooldown 적용
 
 random unit을 호출자가 주입할 수 있게 하여 테스트를 deterministic하게 만든다.
 gaming/media context의 reaction budget은 낮추고 중앙 회피를 강화할 수 있다.
+MVP 2 runtime은 실제 event에서 이 policy를 호출한다. 0.15 미만의 routine positive event는
+attention 후보와 visible reaction에서 제외해 tool 하나가 끝날 때마다 움직이지 않게 한다.
 
 ## Pet runtime and capability resolution
 
@@ -268,9 +309,10 @@ wake -> travelToInterest -> observe
 ```
 
 MVP 0.7까지 idle, wander, look, evade, caught, dragged, dropped, sit, findSleepSpot,
-sleep, wake, stretch를 실행한다. agent reaction state는 enum/event 경계에만 두고 source가
-생기는 milestone에서 활성화한다. transition은 UI event handler에 흩어놓지 않고 pure
-controller에서 검증한다.
+sleep, wake, stretch를 실행한다. MVP 1은 Claude source에 대해 travelToInterest, observe,
+work, waitingForUser, celebrate, sad를 활성화했다. MVP 2는 같은 state를 Codex source에도
+사용하고 `AttentionModel`과 확률형 `ReactionPolicy`를 runtime에 연결한다. transition은
+UI event handler에 흩어놓지 않고 pure controller에서 검증한다.
 
 ## Pointer interaction and non-interference
 
@@ -350,6 +392,18 @@ region을 만들고 Dock이 차지한 left/right/bottom inset을 감지하면 �
 `MacBasicSafeZoneProvider`는 macOS snapshot을 이 pure planner에 전달하는 얇은 adapter다.
 MVP 3에서 Accessibility가 생기면 focused window/element, control/caret bounds를 obstacle로
 추가하되 현재 fallback path를 유지한다.
+
+### MVP 1 coarse work placement
+
+`MacWindowProvider`는 `CGWindowListCopyWindowInfo`에서 frontmost process의 layer-0 bounds만
+가져오며 window title과 contents는 버린다. `BasicInterestPositionPlanner`는 그 bounds의
+아래쪽 좌우, 가능하면 window 바깥을 후보로 만들고 pointer distance, travel distance,
+visible-frame clamp를 점수화한다. confidence는 0.55로 낮게 두며 bounds를 얻지 못하면 현재
+위치에서 반응한다. 이 단계는 caret-aware placement를 흉내 내지 않는다.
+
+pointer evade/catch/drag가 travel보다 우선한다. evade가 끝난 뒤 동일 destination을 다시
+계산해 이어가며, sleep 중 event는 `wake -> stretch`가 끝날 때까지 pending했다가 이동한다.
+이 규칙으로 agent event가 기존 creature interaction을 빼앗지 않는다.
 
 ### VisualSafeZoneProvider
 

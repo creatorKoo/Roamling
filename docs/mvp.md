@@ -19,7 +19,7 @@ Roamling은 한 단계의 체감 품질과 acceptance criteria를 닫고 실제 
 
 이 gate의 값은 `Behavior Tuning…`의 **Reset Defaults** 기준이다.
 
-## Current gate — MVP 0.7: It Sleeps
+## Completed — MVP 0.7: It Sleeps
 
 목표는 user input이 한동안 없을 때 Roamling이 방해되지 않는 위치를 찾아 쉬고, 다시
 입력이 생기면 자연스럽게 깨어나는 것이다.
@@ -107,8 +107,134 @@ atlas 전체 frame을 alpha connected-component로 검사한다. 현재 mascot p
 keyboard 또는 pointer input으로 깨어날 때 재생된다. `Stretch Now`는 이 MVP 0.7 동작의
 체감 검증 shortcut일 뿐 별도 behavior milestone을 앞당기지 않는다.
 
+2026-08-26 자동 검증, 실제 사용 확인, mascot 동작 보정을 마치고 사용자가 다음 단계
+진행을 승인했다. click/drag pose의 남은 어색함은 알려진 visual polish 항목으로 기록하되
+MVP 1의 activity integration 범위를 넓히지 않는다.
+
+## Completed implementation — MVP 1: It Notices Work
+
+첫 source로 현재 가장 안정적인 공식 lifecycle surface를 제공하는 Claude Code hooks를
+구현했다. 설정 변경은 menu의 명시적 install 뒤에만 일어나며, 실제 사용자 session의
+체감 검증은 MVP 2의 두-source 검증과 함께 수행한다. 사용자가 Claude와 Codex를 한 번에
+진행하도록 승인했으므로 구현 gate를 닫고 다음 gate로 이동했다.
+
+```text
+Claude lifecycle hook
+        |
+        v
+authenticated 127.0.0.1 receiver
+        |
+        v
+CompanionEvent
+        |
+        +-- active ----------> wake / travel / work
+        +-- permission -----> paw / observe
+        +-- completed ------> small celebrate
+        +-- failure --------> sad
+        +-- session end ----> calm / free roam
+```
+
+### In scope
+
+- menu bar에서 명시적으로 설치·복구·제거하는 Claude Code user hooks
+- 기존 `~/.claude/settings.json` key와 다른 hook을 보존하는 idempotent merge
+- 최초 변경 전 `settings.json.roamling-backup` 생성
+- token으로 인증하고 `127.0.0.1:47831`에만 bind하는 HTTP receiver
+- `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`,
+  `PostToolUseFailure`, `PermissionRequest`, `Notification`, `Stop`,
+  `StopFailure`, `SessionEnd` normalization
+- prompt/tool input/output/transcript/source content를 model·metadata·log에 넣지 않음
+- active app의 제목이나 내용을 읽지 않는 coarse window-bounds location hint
+- sleep 중 activity가 오면 기존 wake/stretch를 마친 뒤 source로 이동
+- work/attention/completion/failure의 MVP 1 reaction
+- pointer evade, catch/drag가 activity travel보다 높은 우선순위 유지
+- menu bar의 `Test Reaction` shortcut
+
+### Explicitly out of scope for this gate
+
+- Codex source와 여러 agent 사이의 선택 — MVP 2에서 구현
+- `AttentionModel`/확률형 `ReactionPolicy` runtime wiring — MVP 2에서 구현
+- Accessibility focused element/caret 추적 — MVP 3
+- 정확한 terminal tab/session mapping
+- Claude prompt, tool arguments, output, transcript 읽기
+- 자동 hook 설치 또는 기존 settings 전체 덮어쓰기
+
+### Acceptance criteria
+
+- 설치 전에는 Claude settings를 변경하지 않는다.
+- 설치/재설치를 반복해도 Roamling handler가 중복되지 않는다.
+- 제거하면 Roamling handler만 사라지고 다른 settings/hook은 남는다.
+- 잘못된 token과 malformed payload는 event를 만들지 않는다.
+- Roamling이 꺼져 있거나 receiver가 실패해도 Claude 작업은 block되지 않는다.
+- Claude 작업 시작 시 sleep을 깨우고, 가능한 경우 현재 작업 창의 보수적인 아래쪽
+  edge로 자연스럽게 이동한 뒤 work/observe한다.
+- permission request는 주의를 끌고, Stop은 작은 완료 반응, StopFailure는 실패 반응을 한다.
+- 추가 macOS permission prompt 없이 동작한다.
+- 전체 automated test suite를 통과한다.
+
+## Current gate — MVP 2: Claude + Codex
+
+Codex 0.147.0의 stable hook registry를 사용해 Claude와 Codex를 같은 generic event path로
+연결한다. `notify`나 app-server를 기본 transport로 쓰지 않는다. `notify`는 완료 event만
+표현하고 사용자의 기존 command와 충돌할 수 있으며, app-server는 실행 중인 임의 session을
+관찰하는 안정적인 attach surface가 아니기 때문이다.
+
+```text
+Claude HTTP hooks ---------+
+                           |
+Codex command hooks -------+--> authenticated loopback receivers
+                                      |
+                                      v
+                                CompanionEvent
+                                      |
+                          AttentionModel + ReactionPolicy
+                                      |
+              travel / observe / work / paw / celebrate / sad
+```
+
+### In scope
+
+- `~/.codex/hooks.json`에 명시적으로 설치·복구·제거하는 Codex user hooks
+- 기존 Codex hooks와 `config.toml`/`notify`를 보존하는 idempotent merge
+- 최초 변경 전 `hooks.json.roamling-backup` 생성
+- stdin JSON을 `curl`로 authenticated `127.0.0.1:47832` receiver에 전달
+- receiver가 없을 때 0.3초 안에 실패를 삼켜 Codex 작업을 방해하지 않는 command
+- `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`,
+  `PermissionRequest`, `Stop`, `SessionEnd` normalization
+- Claude와 Codex event를 같은 `AttentionModel`에 넣는 multi-source selection
+- minimum dwell, priority, hysteresis, revisit cooldown
+- event kind/intensity/context/cooldown을 사용하는 `ReactionPolicy` runtime wiring
+- routine low-intensity tool completion을 visible reaction/attention switch에서 제외
+- source별 menu status, install/remove, `Test Reaction`
+- 두 integration 모두 pointer evade/catch/drag보다 낮은 우선순위 유지
+
+### Explicitly out of scope for this gate
+
+- Accessibility focused element/caret 추적 — MVP 3
+- 정확한 terminal tab, IDE pane, Codex thread와 window의 mapping
+- Codex app-server daemon lifecycle 소유 또는 실행 중 session attach
+- prompt, tool input/output, transcript, assistant message 읽기
+- hook trust를 자동 승인하거나 `--dangerously-bypass-hook-trust` 사용
+- ScreenCaptureKit/visual safe-zone — MVP 4
+- game/media source
+
+### Acceptance criteria
+
+- 설치 전에는 `~/.claude/settings.json`과 `~/.codex/hooks.json`을 변경하지 않는다.
+- 재설치해도 Roamling handler가 중복되지 않고, 제거하면 자기 handler만 사라진다.
+- 기존 Codex `notify`, `config.toml`, sibling hooks를 보존한다.
+- Codex hook은 stdin payload를 loopback으로 전달하고 receiver가 없어도 agent를 block하지 않는다.
+- 두 normalizer 모두 content-bearing field를 decode model/metadata/log에 남기지 않는다.
+- active work를 보고 있을 때 다른 background work 때문에 target을 즉시 바꾸지 않는다.
+- 다른 source의 permission request는 dwell을 깨고 관심을 가져갈 수 있다.
+- routine tool completion마다 축하하거나 monitor를 왕복하지 않는다.
+- Stop/completion은 intensity에 맞는 짧은 반응을 하고 다음 active source가 있으면 이어서 본다.
+- 50개 이상의 pure/transport test와 signed release app build를 통과한다.
+- 실제 Claude와 Codex session에서 각각 start → tool use → completion을 한 번 체감 확인한다.
+
 ## Exit rule
 
-자동 검증과 실제 사용 환경에서 sleep/wake의 timing 및 위치를 확인하기 전에는 MVP 1
-agent integration으로 넘어가지 않는다. timing이나 위치가 어색하면 MVP 0.7 안에서만
-조정한다.
+사용자가 두 실제 session에서 반응 빈도, target 전환, 작업 방해 여부를 확인하기 전에는
+MVP 3 Accessibility/caret tracking으로 넘어가지 않는다. 위치가 부정확한 것은 현재
+permission-free coarse window hint의 알려진 한계로 기록한다. 반복 왕복이나 잦은 반응처럼
+`never annoying` 원칙을 깨는 문제만 MVP 2 안에서 수정한다.

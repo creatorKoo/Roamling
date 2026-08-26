@@ -29,13 +29,18 @@ This repository contains the first working vertical slice:
   wake, and stretch behavior at a reduced sleeping cadence;
 - basic corner/Dock-adjacent placement that stays inside each display's
   visible frame and avoids the pointer;
+- an opt-in Claude Code hook integration with a token-authenticated local
+  receiver, coarse permission-free work-window placement, and start,
+  attention, completion, and failure reactions;
+- an opt-in Codex 0.147+ hook integration that preserves existing hooks and
+  `notify`, plus shared multi-source attention, hysteresis, and reaction policy;
 - a sprite-sized overlay whose input region is enabled only while a catch is
   armed, leaving the underlying app alone during normal operation;
 - pure-logic tests for geometry, display paths, movement, pointer interaction,
   behavior transitions, attention, reactions, and pet animation fallback.
 
-Coding-agent integrations and Accessibility/visual placement are deliberately
-behind the next milestones; the core event vocabulary is not coding-specific.
+Accessibility/caret tracking and visual placement remain behind the next
+milestones; the core event vocabulary is not coding-specific.
 
 ## Build and run
 
@@ -76,11 +81,27 @@ containing packages. A package contains `pet.json` and the referenced PNG or
 WebP atlas. FatMochi is the default. Mochi and discovered Petdex-compatible
 packages can be selected from the menu, and the choice persists across launches.
 
+Claude Code integration is disabled until explicitly installed from
+**Roamling → Claude Code → Install Integration…**. Installation preserves
+existing `~/.claude/settings.json` values and hooks, creates a one-time backup,
+and can be removed from the same menu. The receiver listens only on
+`127.0.0.1` and does not store prompt text, tool input/output, transcripts, or
+source code.
+
+Codex integration is also opt-in at
+**Roamling → Codex → Install Integration…**. It merges only Roamling handlers
+into `~/.codex/hooks.json`, creates a one-time backup, and leaves
+`~/.codex/config.toml`, existing `notify`, and sibling hooks unchanged. Restart
+Codex after installation and approve its hook trust prompt. The Codex receiver
+uses a separate authenticated `127.0.0.1` port and applies the same no-content-
+storage rule.
+
 ## Repository guide
 
 ```text
 Sources/RoamlingCore/   OS-independent geometry, world, behavior, events
 Sources/RoamlingPet/    Petdex/Codex manifests, atlas runtime, fallbacks
+Sources/RoamlingSources/ activity adapters and local hook transport
 Sources/RoamlingMac/    AppKit display, pointer, overlay, and app runtime
 Sources/RoamlingApp/    executable entry point
 Tests/                  pure and loader tests

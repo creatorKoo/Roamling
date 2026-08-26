@@ -358,6 +358,18 @@ func coreLogicTests() -> [LogicTest] {
             )
             try expect(media == .smallCelebrate)
         },
+        LogicTest(name: "reaction policy ignores routine tool completions") {
+            var policy = ReactionPolicy(configuration: ReactionConfiguration(minimumInterval: 0))
+            let routine = testEvent("tool", "codex", .positive, 0.08, 0)
+            let reaction = policy.reaction(
+                for: routine,
+                context: .working,
+                currentBehavior: .work,
+                randomUnit: 0,
+                at: 1
+            )
+            try expect(reaction == nil)
+        },
         LogicTest(name: "candidate scoring prefers stability on a tie") {
             let unstable = PositionCandidate(point: WorldPoint(x: 10, y: 0), visualEmptyScore: 5, stabilityScore: 1)
             let stable = PositionCandidate(point: WorldPoint(x: 20, y: 0), visualEmptyScore: 3, stabilityScore: 3)

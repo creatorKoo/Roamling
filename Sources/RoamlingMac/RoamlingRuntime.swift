@@ -4,6 +4,7 @@
 import AppKit
 import RoamlingCore
 import RoamlingPet
+import RoamlingSources
 
 @MainActor
 public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
@@ -18,6 +19,8 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         static let positionX = "roamling.position.x"
         static let positionY = "roamling.position.y"
         static let hasPosition = "roamling.position.exists"
+        static let claudeCodeHookToken = "roamling.claudeCodeHookToken"
+        static let codexHookToken = "roamling.codexHookToken"
     }
 
     public var isRoamingEnabled: Bool {
@@ -60,15 +63,26 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     public var currentPetPackagePath: String? { asset.packageURL?.standardizedFileURL.path }
     public var petDisplayName: String { asset.manifest.displayName }
     public var scale: Double { overlay.scale }
+    public var claudeCodeIntegrationStatus: ClaudeCodeIntegrationStatus {
+        claudeCodeInstaller.status()
+    }
+    public var claudeCodeReceiverState: ClaudeCodeReceiverState { claudeCodeSource.state }
+    public var codexIntegrationStatus: CodexIntegrationStatus { codexInstaller.status() }
+    public var codexReceiverState: CodexReceiverState { codexSource.state }
 
     private let displayProvider = MacDisplayProvider()
     private let safeZoneProvider = MacBasicSafeZoneProvider()
     private let userIdleProvider = MacUserIdleProvider()
     private let restConfiguration = RestConfiguration.standard
     private var pointerProvider: MacPointerProvider!
+    private var windowProvider: MacWindowProvider!
     private let catalog: PetCatalog
     private let loader = PetLoader()
     private let overlay: MacOverlayProvider
+    private let claudeCodeSource: ClaudeCodeSource
+    private let claudeCodeInstaller: ClaudeCodeHookInstaller
+    private let codexSource: CodexSource
+    private let codexInstaller: CodexHookInstaller
 
     private var displays: [DisplaySnapshot]
     private var coordinateSpace: DesktopCoordinateSpace
@@ -79,6 +93,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     private var animationPlayer: PetAnimationPlayer
 
     private var tickTimer: Timer?
+    private var activityTasks: [Task<Void, Never>] = []
     private var screenObserver: NSObjectProtocol?
     private var lastTickAt: TimeInterval?
     private var nextWanderAt: TimeInterval
@@ -91,6 +106,15 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     private var lastPointerDecision: PointerDecision?
     private var isEvadeTransitioning = false
     private var restDestination: RestDestination?
+    private var activityDestination: InterestDestination?
+    private var pendingActivityEvent: CompanionEvent?
+    private var recentActivityEvents: [String: CompanionEvent] = [:]
+    private var attentionModel = AttentionModel()
+    private var reactionPolicy = ReactionPolicy()
+    private var lastDispatchedActivityEventID: String?
+    private var activeActivitySourceID: String?
+    private var activeActivityReaction: CompanionReaction?
+    private var activityArrivalReaction: CompanionReaction?
     private var running = false
 
     public override init() {
@@ -103,6 +127,8 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
             DefaultsKey.builtInPet: BuiltInPetKind.fatMochi.rawValue
         ])
         let runtimeTuning = Self.loadRuntimeTuning(defaults: defaults)
+        let claudeCodeHookToken = Self.loadOrCreateClaudeCodeHookToken(defaults: defaults)
+        let codexHookToken = Self.loadOrCreateCodexHookToken(defaults: defaults)
 
         let catalog = PetCatalog()
         let descriptors = catalog.discover()
@@ -143,6 +169,18 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
             scale: objectScale,
             hitRegionScale: runtimeTuning.hitRegionScale
         )
+        claudeCodeSource = ClaudeCodeSource(token: claudeCodeHookToken)
+        claudeCodeInstaller = ClaudeCodeHookInstaller(
+            settingsURL: FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".claude/settings.json"),
+            token: claudeCodeHookToken
+        )
+        codexSource = CodexSource(token: codexHookToken)
+        codexInstaller = CodexHookInstaller(
+            hooksURL: FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".codex/hooks.json"),
+            token: codexHookToken
+        )
         movement = MovementController(
             position: initialPosition,
             configuration: MovementConfiguration(
@@ -175,6 +213,9 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         pointerProvider = MacPointerProvider { [weak self] in
             self?.coordinateSpace ?? displaySet.coordinateSpace
         }
+        windowProvider = MacWindowProvider { [weak self] in
+            self?.coordinateSpace ?? displaySet.coordinateSpace
+        }
     }
 
     public func start() {
@@ -192,6 +233,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         ) { [weak self] _ in
             MainActor.assumeIsolated { self?.handleDisplayChange() }
         }
+        startActivitySources()
         scheduleNextTick(after: 0.02)
     }
 
@@ -200,6 +242,10 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         running = false
         tickTimer?.invalidate()
         tickTimer = nil
+        activityTasks.forEach { $0.cancel() }
+        activityTasks.removeAll()
+        claudeCodeSource.stop()
+        codexSource.stop()
         if let screenObserver {
             NotificationCenter.default.removeObserver(screenObserver)
             self.screenObserver = nil
@@ -264,6 +310,77 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
 
     public func resetTuning() {
         applyTuning(.standard)
+    }
+
+    @discardableResult
+    public func installClaudeCodeIntegration() -> Result<Void, Error> {
+        do {
+            try claudeCodeInstaller.install()
+            return .success(())
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    @discardableResult
+    public func removeClaudeCodeIntegration() -> Result<Void, Error> {
+        do {
+            try claudeCodeInstaller.remove()
+            return .success(())
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    @discardableResult
+    public func installCodexIntegration() -> Result<Void, Error> {
+        do {
+            try codexInstaller.install()
+            return .success(())
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    @discardableResult
+    public func removeCodexIntegration() -> Result<Void, Error> {
+        do {
+            try codexInstaller.remove()
+            return .success(())
+        } catch {
+            return .failure(error)
+        }
+    }
+
+    public func testClaudeCodeReaction() {
+        testAgentReaction(sourceID: "claude-code:test")
+    }
+
+    public func testCodexReaction() {
+        testAgentReaction(sourceID: "codex:test")
+    }
+
+    private func testAgentReaction(sourceID: String) {
+        handleActivityEvent(CompanionEvent(
+            sourceID: sourceID,
+            sourceType: .agent,
+            timestamp: ProcessInfo.processInfo.systemUptime,
+            kind: .activityStarted,
+            intensity: 0.55,
+            context: .working,
+            locationHint: windowProvider.currentActivityLocationHint()
+        ))
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            guard let self else { return }
+            self.handleActivityEvent(CompanionEvent(
+                sourceID: sourceID,
+                sourceType: .agent,
+                timestamp: ProcessInfo.processInfo.systemUptime,
+                kind: .achievement,
+                intensity: 0.55,
+                context: .working
+            ))
+        }
     }
 
     /// Exposes the current MVP 0.7 wake animation for feel testing without
@@ -352,6 +469,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         let deltaTime = min(max(now - (lastTickAt ?? now), 0), 0.1)
         lastTickAt = now
         behavior.handle(.tick, at: now)
+        resumePendingActivityIfReady(at: now)
 
         let pointer = pointerProvider.currentPointer(at: now)
         let userIdleDuration = userIdleProvider.idleDuration(at: now)
@@ -407,10 +525,14 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
                     _ = movement.update(deltaTime: deltaTime)
                     nextWanderAt = max(nextWanderAt, now + 0.8)
                 case .far:
-                    updateRoaming(at: now, deltaTime: deltaTime)
+                    if !updateActivityLifecycle(at: now, deltaTime: deltaTime) {
+                        updateRoaming(at: now, deltaTime: deltaTime)
+                    }
                 }
             } else {
-                updateRoaming(at: now, deltaTime: deltaTime)
+                if !updateActivityLifecycle(at: now, deltaTime: deltaTime) {
+                    updateRoaming(at: now, deltaTime: deltaTime)
+                }
             }
         }
 
@@ -458,6 +580,271 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         RunLoop.main.add(timer, forMode: .common)
     }
 
+    private func startActivitySources() {
+        startActivitySource(
+            start: claudeCodeSource.start,
+            stream: claudeCodeSource.makeEventStream()
+        )
+        startActivitySource(
+            start: codexSource.start,
+            stream: codexSource.makeEventStream()
+        )
+    }
+
+    private func startActivitySource(
+        start: () throws -> Void,
+        stream: AsyncStream<CompanionEvent>
+    ) {
+        do {
+            try start()
+            activityTasks.append(Task { [weak self] in
+                for await event in stream {
+                    guard !Task.isCancelled else { break }
+                    self?.handleActivityEvent(event)
+                }
+            })
+        } catch {
+            // Receiver state is shown in the menu. Both integrations swallow
+            // loopback delivery failures and never block agent work.
+        }
+    }
+
+    private func handleActivityEvent(_ event: CompanionEvent) {
+        let now = ProcessInfo.processInfo.systemUptime
+        let shouldLocate = event.kind == .activityStarted
+            || event.kind == .highIntensity
+            || event.kind == .attentionRequired
+        let hint = event.locationHint
+            ?? (shouldLocate ? windowProvider.currentActivityLocationHint() : nil)
+        let located = CompanionEvent(
+            id: event.id,
+            sourceID: event.sourceID,
+            sourceType: event.sourceType,
+            timestamp: event.timestamp,
+            kind: event.kind,
+            intensity: event.intensity,
+            context: event.context,
+            locationHint: hint,
+            metadata: event.metadata
+        )
+
+        // Routine tool completions are useful as adapter-level evidence but do
+        // not deserve attention changes or visible reactions on their own.
+        if located.kind == .positive, located.intensity < 0.15 { return }
+
+        if located.kind == .activityEnded || located.kind == .idle {
+            recentActivityEvents.removeValue(forKey: located.sourceID)
+            if attentionModel.currentSourceID == located.sourceID {
+                attentionModel.clear(at: now)
+                lastDispatchedActivityEventID = nil
+            }
+            if activeActivitySourceID == located.sourceID {
+                clearActiveActivity(at: now)
+                applyActivityReaction(.calm, at: now)
+            }
+            queueNextAttentionCandidate(at: now)
+            return
+        }
+
+        recentActivityEvents[located.sourceID] = located
+        guard let selected = attentionModel.select(
+            from: Array(recentActivityEvents.values),
+            at: now
+        ), selected.id != lastDispatchedActivityEventID else { return }
+
+        if behavior.state == .caught || behavior.state == .dragged {
+            pendingActivityEvent = selected
+            return
+        }
+        if behavior.state.isResting {
+            cancelRestForActivity(at: now)
+            pendingActivityEvent = selected
+            return
+        }
+        dispatchActivityEvent(selected, at: now)
+    }
+
+    private func resumePendingActivityIfReady(at timestamp: TimeInterval) {
+        guard behavior.state == .idle, let event = pendingActivityEvent else { return }
+        pendingActivityEvent = nil
+        dispatchActivityEvent(event, at: timestamp)
+    }
+
+    private func dispatchActivityEvent(_ event: CompanionEvent, at timestamp: TimeInterval) {
+        lastDispatchedActivityEventID = event.id
+        let reaction = reactionPolicy.reaction(
+            for: event,
+            context: event.context ?? .idle,
+            currentBehavior: behavior.state,
+            randomUnit: Double.random(in: 0..<1),
+            at: timestamp
+        )
+
+        switch event.kind {
+        case .activityStarted, .highIntensity:
+            activeActivitySourceID = event.sourceID
+            let sustained = event.kind == .highIntensity || event.intensity >= 0.65
+                ? CompanionReaction.work
+                : .observe
+            activeActivityReaction = sustained
+            beginActivityTravelIfPossible(
+                for: event,
+                arrivalReaction: reaction ?? sustained,
+                at: timestamp
+            )
+
+        case .attentionRequired:
+            activeActivitySourceID = event.sourceID
+            activeActivityReaction = .observe
+            beginActivityTravelIfPossible(
+                for: event,
+                arrivalReaction: reaction ?? .paw,
+                at: timestamp
+            )
+
+        case .positive:
+            if let reaction { applyActivityReaction(reaction, at: timestamp) }
+
+        case .achievement:
+            clearActiveActivity(at: timestamp)
+            applyActivityReaction(reaction ?? .glance, at: timestamp)
+            finishTransientActivityEvent(event, at: timestamp)
+
+        case .negative:
+            clearActiveActivity(at: timestamp)
+            applyActivityReaction(reaction ?? .sad, at: timestamp)
+            finishTransientActivityEvent(event, at: timestamp)
+
+        case .setback:
+            activeActivitySourceID = event.sourceID
+            activeActivityReaction = .observe
+            activityDestination = nil
+            movement.cancelRoute(stop: false)
+            applyActivityReaction(reaction ?? .sad, at: timestamp)
+
+        case .activityEnded, .calm, .idle:
+            if event.kind == .calm,
+               activeActivitySourceID == nil || activeActivitySourceID == event.sourceID {
+                clearActiveActivity(at: timestamp)
+                applyActivityReaction(reaction ?? .calm, at: timestamp)
+            }
+        }
+    }
+
+    private func finishTransientActivityEvent(
+        _ event: CompanionEvent,
+        at timestamp: TimeInterval
+    ) {
+        recentActivityEvents.removeValue(forKey: event.sourceID)
+        attentionModel.clear(at: timestamp)
+        queueNextAttentionCandidate(at: timestamp)
+    }
+
+    private func queueNextAttentionCandidate(at timestamp: TimeInterval) {
+        guard let next = attentionModel.select(
+            from: Array(recentActivityEvents.values),
+            at: timestamp
+        ) else {
+            pendingActivityEvent = nil
+            return
+        }
+        pendingActivityEvent = next.id == lastDispatchedActivityEventID ? nil : next
+    }
+
+    private func beginActivityTravelIfPossible(
+        for event: CompanionEvent,
+        arrivalReaction: CompanionReaction,
+        at timestamp: TimeInterval
+    ) {
+        guard let hint = event.locationHint,
+              let destination = BasicInterestPositionPlanner.destination(
+                for: hint,
+                in: world,
+                currentPosition: movement.position,
+                pointerPosition: pointerProvider.currentPointer(at: timestamp).position,
+                objectSize: overlay.objectSize
+              ) else {
+            applyActivityReaction(arrivalReaction, at: timestamp)
+            return
+        }
+
+        let route = DisplayTopology(displays: displays).route(
+            from: movement.position,
+            to: destination.point
+        )
+        guard !route.waypoints.isEmpty,
+              movement.position.distance(to: destination.point) > 18 else {
+            applyActivityReaction(arrivalReaction, at: timestamp)
+            return
+        }
+        isEvadeTransitioning = false
+        restDestination = nil
+        activityDestination = destination
+        activityArrivalReaction = arrivalReaction
+        movement.configuration.maximumSpeed = tuning.walkingSpeed
+        movement.setRoute(route.waypoints)
+        behavior.handle(.beginInterestTravel, at: timestamp)
+        nextWanderAt = .infinity
+    }
+
+    private func updateActivityLifecycle(
+        at timestamp: TimeInterval,
+        deltaTime: TimeInterval
+    ) -> Bool {
+        if let destination = activityDestination {
+            if !movement.hasRoute {
+                let route = DisplayTopology(displays: displays).route(
+                    from: movement.position,
+                    to: destination.point
+                )
+                movement.setRoute(route.waypoints)
+            }
+            behavior.handle(.beginInterestTravel, at: timestamp)
+            movement.configuration.maximumSpeed = tuning.walkingSpeed
+            let update = movement.update(deltaTime: deltaTime)
+            if update.reachedDestination {
+                activityDestination = nil
+                let reaction = activityArrivalReaction ?? activeActivityReaction ?? .observe
+                activityArrivalReaction = nil
+                applyActivityReaction(reaction, at: timestamp)
+                persistPosition()
+            }
+            return true
+        }
+
+        guard activeActivitySourceID != nil else { return false }
+        movement.cancelRoute(stop: false)
+        movement.configuration.maximumSpeed = tuning.walkingSpeed
+        _ = movement.update(deltaTime: deltaTime)
+        switch behavior.state {
+        case .observe, .work, .waitingForUser, .celebrate, .sad:
+            break
+        case .wake, .stretch, .caught, .dragged:
+            break
+        default:
+            applyActivityReaction(activeActivityReaction ?? .observe, at: timestamp)
+        }
+        return true
+    }
+
+    private func applyActivityReaction(
+        _ reaction: CompanionReaction,
+        at timestamp: TimeInterval
+    ) {
+        behavior.handle(.reaction(reaction), at: timestamp)
+        movement.cancelRoute(stop: false)
+        nextWanderAt = activeActivitySourceID == nil ? timestamp + 2.0 : .infinity
+    }
+
+    private func clearActiveActivity(at timestamp: TimeInterval) {
+        activeActivitySourceID = nil
+        activeActivityReaction = nil
+        activityArrivalReaction = nil
+        activityDestination = nil
+        movement.cancelRoute(stop: false)
+        nextWanderAt = timestamp + 2.0
+    }
+
     private func updateRestLifecycle(
         userIdleDuration: TimeInterval,
         pointerProximity: PointerProximity,
@@ -500,6 +887,8 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         }
 
         guard userIdleDuration >= restConfiguration.idleBeforeRest,
+              activeActivitySourceID == nil,
+              activityDestination == nil,
               pointerProximity == .far,
               behavior.state == .idle || behavior.state == .wander || behavior.state == .dropped else {
             return false
@@ -827,6 +1216,25 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
             return .standard
         }
         return decoded.normalized
+    }
+
+    private static func loadOrCreateClaudeCodeHookToken(defaults: UserDefaults) -> String {
+        loadOrCreateHookToken(key: DefaultsKey.claudeCodeHookToken, defaults: defaults)
+    }
+
+    private static func loadOrCreateCodexHookToken(defaults: UserDefaults) -> String {
+        loadOrCreateHookToken(key: DefaultsKey.codexHookToken, defaults: defaults)
+    }
+
+    private static func loadOrCreateHookToken(key: String, defaults: UserDefaults) -> String {
+        if let existing = defaults.string(forKey: key),
+           existing.count >= 24 {
+            return existing
+        }
+        let token = UUID().uuidString.replacingOccurrences(of: "-", with: "")
+            + UUID().uuidString.replacingOccurrences(of: "-", with: "")
+        defaults.set(token, forKey: key)
+        return token
     }
 
     private static func initialPosition(

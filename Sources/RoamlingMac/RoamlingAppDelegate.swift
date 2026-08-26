@@ -3,6 +3,7 @@
 
 import AppKit
 import RoamlingPet
+import RoamlingSources
 
 @MainActor
 public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -131,6 +132,14 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         stretch.target = self
         menu.addItem(stretch)
 
+        let claude = NSMenuItem(title: "Claude Code", action: nil, keyEquivalent: "")
+        claude.submenu = makeClaudeCodeMenu(runtime: runtime)
+        menu.addItem(claude)
+
+        let codex = NSMenuItem(title: "Codex", action: nil, keyEquivalent: "")
+        codex.submenu = makeCodexMenu(runtime: runtime)
+        menu.addItem(codex)
+
         menu.addItem(.separator())
         let openFolder = NSMenuItem(
             title: "Open Pet Folder…",
@@ -163,6 +172,108 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         item.target = self
         item.state = checked ? .on : .off
         return item
+    }
+
+    private func makeClaudeCodeMenu(runtime: RoamlingRuntime) -> NSMenu {
+        let menu = NSMenu(title: "Claude Code")
+        let integrationText = switch runtime.claudeCodeIntegrationStatus {
+        case .installed: "Hooks: Installed"
+        case .needsRepair: "Hooks: Needs Repair"
+        case .notInstalled: "Hooks: Not Installed"
+        }
+        let receiverText = switch runtime.claudeCodeReceiverState {
+        case .ready: "Receiver: Ready"
+        case .starting: "Receiver: Starting"
+        case .stopped: "Receiver: Stopped"
+        case .failed: "Receiver: Unavailable"
+        }
+        for text in [integrationText, receiverText] {
+            let item = NSMenuItem(title: text, action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+
+        let installTitle = runtime.claudeCodeIntegrationStatus == .notInstalled
+            ? "Install Integration…"
+            : "Repair Integration…"
+        let install = NSMenuItem(
+            title: installTitle,
+            action: #selector(installClaudeCodeIntegration),
+            keyEquivalent: ""
+        )
+        install.target = self
+        menu.addItem(install)
+
+        if runtime.claudeCodeIntegrationStatus != .notInstalled {
+            let remove = NSMenuItem(
+                title: "Remove Integration…",
+                action: #selector(removeClaudeCodeIntegration),
+                keyEquivalent: ""
+            )
+            remove.target = self
+            menu.addItem(remove)
+        }
+
+        let test = NSMenuItem(
+            title: "Test Reaction",
+            action: #selector(testClaudeCodeReaction),
+            keyEquivalent: ""
+        )
+        test.target = self
+        menu.addItem(test)
+        return menu
+    }
+
+    private func makeCodexMenu(runtime: RoamlingRuntime) -> NSMenu {
+        let menu = NSMenu(title: "Codex")
+        let integrationText = switch runtime.codexIntegrationStatus {
+        case .installed: "Hooks: Installed"
+        case .needsRepair: "Hooks: Needs Repair"
+        case .notInstalled: "Hooks: Not Installed"
+        }
+        let receiverText = switch runtime.codexReceiverState {
+        case .ready: "Receiver: Ready"
+        case .starting: "Receiver: Starting"
+        case .stopped: "Receiver: Stopped"
+        case .failed: "Receiver: Unavailable"
+        }
+        for text in [integrationText, receiverText] {
+            let item = NSMenuItem(title: text, action: nil, keyEquivalent: "")
+            item.isEnabled = false
+            menu.addItem(item)
+        }
+        menu.addItem(.separator())
+
+        let installTitle = runtime.codexIntegrationStatus == .notInstalled
+            ? "Install Integration…"
+            : "Repair Integration…"
+        let install = NSMenuItem(
+            title: installTitle,
+            action: #selector(installCodexIntegration),
+            keyEquivalent: ""
+        )
+        install.target = self
+        menu.addItem(install)
+
+        if runtime.codexIntegrationStatus != .notInstalled {
+            let remove = NSMenuItem(
+                title: "Remove Integration…",
+                action: #selector(removeCodexIntegration),
+                keyEquivalent: ""
+            )
+            remove.target = self
+            menu.addItem(remove)
+        }
+
+        let test = NSMenuItem(
+            title: "Test Reaction",
+            action: #selector(testCodexReaction),
+            keyEquivalent: ""
+        )
+        test.target = self
+        menu.addItem(test)
+        return menu
     }
 
     @objc private func toggleRoaming(_ sender: NSMenuItem) {
@@ -204,6 +315,99 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
 
     @objc private func stretchNow() {
         runtime?.stretchNow()
+    }
+
+    @objc private func installClaudeCodeIntegration() {
+        guard let runtime else { return }
+        let alert = NSAlert()
+        alert.messageText = "Install Claude Code integration?"
+        alert.informativeText = """
+        Roamling will add local HTTP lifecycle hooks to ~/.claude/settings.json.
+        Existing settings and hooks are preserved, and a one-time backup is created.
+
+        Prompt text, tool input/output, transcripts, and source code are not stored or logged.
+        """
+        alert.addButton(withTitle: "Install")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        presentIntegrationResult(runtime.installClaudeCodeIntegration(), success: "Claude Code integration installed.")
+        rebuildMenu()
+    }
+
+    @objc private func removeClaudeCodeIntegration() {
+        guard let runtime else { return }
+        let alert = NSAlert()
+        alert.messageText = "Remove Claude Code integration?"
+        alert.informativeText = "Only Roamling's hook handlers will be removed. Other Claude Code settings and hooks stay unchanged."
+        alert.addButton(withTitle: "Remove")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        presentIntegrationResult(runtime.removeClaudeCodeIntegration(), success: "Claude Code integration removed.")
+        rebuildMenu()
+    }
+
+    @objc private func testClaudeCodeReaction() {
+        runtime?.testClaudeCodeReaction()
+    }
+
+    @objc private func installCodexIntegration() {
+        guard let runtime else { return }
+        let alert = NSAlert()
+        alert.messageText = "Install Codex integration?"
+        alert.informativeText = """
+        Roamling will add local lifecycle command hooks to ~/.codex/hooks.json.
+        Existing hooks and config.toml (including notify) are preserved, and a one-time backup is created.
+
+        Prompt text, tool input/output, transcripts, and source code are not stored or logged.
+        Restart Codex after installation and approve the new hook trust prompt.
+        """
+        alert.addButton(withTitle: "Install")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        presentIntegrationResult(
+            runtime.installCodexIntegration(),
+            success: "Codex integration installed.",
+            detail: "Restart Codex and approve its new hook trust prompt."
+        )
+        rebuildMenu()
+    }
+
+    @objc private func removeCodexIntegration() {
+        guard let runtime else { return }
+        let alert = NSAlert()
+        alert.messageText = "Remove Codex integration?"
+        alert.informativeText = "Only Roamling's hook handlers will be removed. Other Codex hooks, config, and notify stay unchanged."
+        alert.addButton(withTitle: "Remove")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        presentIntegrationResult(
+            runtime.removeCodexIntegration(),
+            success: "Codex integration removed.",
+            detail: "Restart Codex sessions to stop using the removed hooks."
+        )
+        rebuildMenu()
+    }
+
+    @objc private func testCodexReaction() {
+        runtime?.testCodexReaction()
+    }
+
+    private func presentIntegrationResult(
+        _ result: Result<Void, Error>,
+        success: String,
+        detail: String = "New or resumed Claude Code sessions will now notify Roamling."
+    ) {
+        let alert = NSAlert()
+        switch result {
+        case .success:
+            alert.messageText = success
+            alert.informativeText = detail
+        case let .failure(error):
+            alert.alertStyle = .warning
+            alert.messageText = "Couldn’t update Claude Code settings"
+            alert.informativeText = error.localizedDescription
+        }
+        alert.runModal()
     }
 
     @objc private func selectInstalledPet(_ sender: NSMenuItem) {

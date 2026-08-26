@@ -63,7 +63,9 @@ public struct ReactionPolicy: Sendable {
         case .negative, .setback:
             result = effectiveIntensity >= 0.2 ? .sad : .glance
         case .achievement, .positive:
-            if effectiveIntensity >= 0.75, roll < effectiveIntensity * 0.7 {
+            if event.kind == .positive, effectiveIntensity < 0.15 {
+                result = nil
+            } else if effectiveIntensity >= 0.75, roll < effectiveIntensity * 0.7 {
                 result = .largeCelebrate
             } else if roll < 0.15 + effectiveIntensity * 0.55 {
                 result = .smallCelebrate
@@ -73,7 +75,7 @@ public struct ReactionPolicy: Sendable {
                 result = nil
             }
         case .activityStarted, .highIntensity:
-            result = effectiveIntensity > 0.65 ? .work : .observe
+            result = effectiveIntensity >= 0.5 ? .work : .observe
         case .calm:
             result = .calm
         case .activityEnded, .idle:

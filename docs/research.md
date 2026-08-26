@@ -1,6 +1,6 @@
 # Roamling upstream research
 
-조사 기준일: **2026-08-25**. README만으로 형식을 추정하지 않고 공개 소스,
+조사 기준일: **2026-08-26**. README만으로 형식을 추정하지 않고 공개 소스,
 설치된 공식 리소스, 생성된 현재 버전 schema를 함께 확인했다. upstream은 계속
 변하므로 아래 commit과 날짜는 compatibility fixture를 갱신할 때의 기준점이다.
 
@@ -228,7 +228,8 @@ pet rectangle 위에서만 input을 켠다. 여러 monitor에서 동작하지만
 ## Claude Code integration
 
 Anthropic의 공식 [Hooks reference](https://code.claude.com/docs/en/hooks)를 기준으로
-한다. 현재 terminal, IDE, desktop, web에서 lifecycle hook을 지원하며 주요 event는
+하고 설치된 `claude 2.1.227`도 확인했다. 현재 terminal, IDE, desktop, web에서
+lifecycle hook을 지원하며 주요 event는
 다음과 같다.
 
 - `SessionStart`, `SessionEnd`, `UserPromptSubmit`
@@ -236,9 +237,12 @@ Anthropic의 공식 [Hooks reference](https://code.claude.com/docs/en/hooks)를 
 - `PermissionRequest`, `Notification`
 - `Stop`, `StopFailure`
 
-command hook은 JSON stdin을 받고, HTTP hook은 같은 JSON을 POST한다. HTTP failure는
-non-blocking이다. payload의 공통 식별자(`session_id`, `prompt_id`, `cwd`)와 event name만
-사용해 다음처럼 normalize할 수 있다.
+command hook은 JSON stdin을 받고, HTTP hook은 같은 JSON을 POST한다. HTTP handler는
+`url`, optional `headers`, `allowedEnvVars`, timeout을 지원한다. 빈 2xx response는 성공이고
+HTTP non-2xx, connection failure, timeout은 agent action을 block하지 않는다. 현재 common
+payload에는 `session_id`, Claude Code 2.1.196+의 optional `prompt_id`, `cwd`,
+`hook_event_name` 등이 있다. Roamling은 session/event name과 notification 분류만 decode해
+다음처럼 normalize한다.
 
 ```text
 PreToolUse              -> activityStarted, low/medium intensity
@@ -250,32 +254,90 @@ StopFailure             -> negative
 SessionEnd              -> activityEnded
 ```
 
-권장 구현은 explicit opt-in으로 설치되는 idempotent hook + token으로 보호된 loopback
-HTTP receiver다. prompt, source, transcript는 읽지 않는다. hook installer는 기존 설정을
-덮어쓰지 않고 backup/removal 경로를 제공해야 한다.
+MVP 1 구현은 explicit opt-in으로 설치되는 idempotent hook + token으로 보호된
+`127.0.0.1` HTTP receiver를 선택했다. prompt, tool input/output, source, transcript path는
+decode model, metadata, disk, log에 넣지 않는다. request는 memory에서 lifecycle field만
+읽은 뒤 폐기한다. hook installer는 기존 설정을 덮어쓰지 않고 one-time backup과 자기
+handler만 제거하는 경로를 제공한다. user-level hook은 `~/.claude/settings.json`에 있으며
+`~/.claude.json`은 hook 설정 위치가 아니다.
 
 ## Codex activity/events
 
-공식 [`codex app-server` README](https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md)는
-JSON-RPC over stdio와 experimental transport를 설명한다. 설치된 `codex-cli 0.147.0`으로
-`codex app-server generate-json-schema`를 실행해 현재 schema도 확인했다.
+조사 기준은 현재 설치된 `codex-cli 0.147.0`과 정확히 대응하는 OpenAI Codex
+[`rust-v0.147.0`](https://github.com/openai/codex/tree/rust-v0.147.0) source다. 로컬
+`codex features list`에서 `hooks`가 `stable: true`임을 확인했다.
 
-관심 notification은 `turn/started`, `turn/completed`, `item/started`,
-`item/completed`, `thread/status/changed`이며 `Turn.status`는 `inProgress`,
-`completed`, `interrupted`, `failed`를 포함한다. server request에는 command/file
-approval, generic tool user-input request, MCP elicitation 등이 있다. 이는
-`attentionRequired`로 normalize할 수 있다.
+### Stable hook surface
 
-app-server protocol은 버전과 함께 진화한다. Roamling은 schema를 vendored truth로
-영구 고정하지 않고 다음 순서를 따른다.
+[`hooks/src/lib.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/hooks/src/lib.rs)는
+이 버전이 다음 11개 event를 registry에 제공한다고 선언한다.
 
-1. 실행 중인 버전의 generated schema와 protocol version 확인.
-2. 알 수 없는 notification은 무시.
-3. product-specific payload는 source adapter 내부에서 버림.
-4. core에는 `CompanionEvent`만 전달.
+- `PreToolUse`, `PermissionRequest`, `PostToolUse`
+- `PreCompact`, `PostCompact`
+- `SessionStart`, `SessionEnd`, `UserPromptSubmit`
+- `SubagentStart`, `SubagentStop`, `Stop`
 
-기존 `notify` 설정을 수정하는 fallback은 표현력이 turn-complete에 치우치고 기존 사용자
-설정과 충돌할 수 있어 기본 경로로 삼지 않는다.
+user-level JSON은 `~/.codex/hooks.json`이며 shape는 다음과 같다. exact config type은
+[`config/src/hook_config.rs`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/config/src/hook_config.rs)의
+`HooksFile`, `MatcherGroup`, tagged `HookHandlerConfig`에서 확인했다.
+
+```json
+{
+  "hooks": {
+    "SessionStart": [{
+      "hooks": [{
+        "type": "command",
+        "command": "...",
+        "timeout": 2,
+        "statusMessage": "Notifying Roamling"
+      }]
+    }]
+  }
+}
+```
+
+command handler는 event JSON을 stdin으로 받는다. OpenAI의
+[`core hook integration tests`](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/core/tests/suite/hooks.rs)도
+user home의 `hooks.json`을 만들고 Python command가 `json.load(sys.stdin)`으로 읽는 경로를
+검증한다. payload schema/source에서 확인한 공통 관심 field는 `session_id`, optional
+`turn_id`, `hook_event_name`이다. event에 따라 cwd, transcript path, prompt, model,
+tool input/output, last assistant message도 포함되지만 Roamling은 이를 decode하지 않는다.
+
+MVP 2는 11개를 전부 등록하지 않고 companion state가 달라지는 7개만 쓴다.
+
+```text
+SessionStart / UserPromptSubmit -> activityStarted
+PreToolUse                     -> activityStarted (work intensity)
+PostToolUse                    -> positive (routine, no visible reaction)
+PermissionRequest              -> attentionRequired
+Stop                           -> achievement
+SessionEnd                     -> activityEnded
+```
+
+Codex hook은 새롭거나 변경되면 startup trust review를 요구한다. Roamling은 이 승인을
+자동화하거나 `--dangerously-bypass-hook-trust`를 사용하지 않는다. installer success 안내에서
+Codex를 restart하고 trust prompt를 승인하도록 명시한다.
+
+### Rejected primary transports
+
+공식 [`codex app-server` README](https://github.com/openai/codex/blob/rust-v0.147.0/codex-rs/app-server/README.md)는
+JSON-RPC transport와 rich turn/item/approval event를 제공한다. 그러나 Roamling이 시작하지
+않은 기존 CLI/Desktop session에 안정적으로 observer로 attach하는 public contract는 아니다.
+Roamling이 agent runtime을 소유하게 되므로 기본 desktop companion transport로 선택하지
+않았다.
+
+legacy `notify`는 turn completion 위주이고 사용자 `~/.codex/config.toml`에 이미 다른
+command가 설정되어 있을 수 있다. 실제 개발 환경에도 기존 `notify` key가 있었으므로
+Roamling은 이를 읽어 복제하거나 덮어쓰지 않는다. 별도 `hooks.json` 병합이 기존 설정과
+안전하게 공존한다.
+
+### Architectural implications
+
+- Codex hook schema는 version과 함께 변할 수 있어 adapter에만 event name을 둔다.
+- unknown/unused lifecycle event는 무시한다.
+- source-specific payload는 receiver 직후 폐기하고 core에는 `CompanionEvent`만 전달한다.
+- hook install/repair/remove는 idempotent하며 Roamling marker가 있는 handler만 수정한다.
+- transport 실패는 shell에서 성공으로 바꿔 agent work를 절대 block하지 않는다.
 
 ## macOS platform APIs
 
@@ -359,7 +421,7 @@ fallback을 쓴다.
 - Codex/Petdex manifest field와 v1/v2 atlas layout
 - canonical state timing과 animation alias/fallback 개념
 - Petdex가 이미 설치한 local package directory
-- Claude Code 공식 hook event와 Codex app-server protocol
+- Claude Code 공식 hook event와 Codex stable hook/app-server protocol
 - AppKit/ApplicationServices/ScreenCaptureKit public API
 
 ### Roamling이 직접 구현할 것
@@ -390,6 +452,7 @@ fallback을 쓴다.
 | custom `animations` | 아직 널리 쓰이지 않는 선택 surface | unknown key 보존 불필요, invalid track만 격리/fallback |
 | Petdex API redirect/snapshot | cache/CDN schema 변경 가능 | API는 installer에만 사용, runtime은 local package 중심 |
 | Codex app-server | generated schema가 버전별 변경 | capability negotiation, unknown event 무시 |
+| Codex command hooks | event/config/trust contract가 버전별 변경 가능 | 설치된 CLI tag source 확인, 최소 event만 등록, opt-in repair/remove |
 | Claude hooks | event 추가/field 변경 | event name + 최소 식별자만 consume |
 | AX caret | 앱별 지원 편차 | confidence가 낮으면 focused window/corner fallback |
 | ScreenCaptureKit | permission/OS version | opt-in provider, basic mode가 항상 완전 동작 |

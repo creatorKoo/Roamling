@@ -14,7 +14,8 @@ let package = Package(
         .executable(name: "Roamling", targets: ["RoamlingApp"]),
         .executable(name: "RoamlingLogicTests", targets: ["RoamlingLogicTests"]),
         .library(name: "RoamlingCore", targets: ["RoamlingCore"]),
-        .library(name: "RoamlingPet", targets: ["RoamlingPet"])
+        .library(name: "RoamlingPet", targets: ["RoamlingPet"]),
+        .library(name: "RoamlingSources", targets: ["RoamlingSources"])
     ],
     targets: [
         .target(name: "RoamlingCore"),
@@ -31,11 +32,18 @@ let package = Package(
         ),
         .target(
             name: "RoamlingMac",
-            dependencies: ["RoamlingCore", "RoamlingPet"],
+            dependencies: ["RoamlingCore", "RoamlingPet", "RoamlingSources"],
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("CoreGraphics"),
                 .linkedFramework("SwiftUI")
+            ]
+        ),
+        .target(
+            name: "RoamlingSources",
+            dependencies: ["RoamlingCore"],
+            linkerSettings: [
+                .linkedFramework("Network")
             ]
         ),
         .executableTarget(
@@ -44,7 +52,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "RoamlingLogicTests",
-            dependencies: ["RoamlingCore", "RoamlingPet"],
+            dependencies: ["RoamlingCore", "RoamlingPet", "RoamlingSources"],
             path: "Tests/RoamlingLogicTests",
             linkerSettings: [
                 .linkedFramework("ImageIO"),

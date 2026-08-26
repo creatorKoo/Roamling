@@ -42,6 +42,7 @@ public enum BehaviorInput: Equatable, Sendable {
     case seekSleepSpot
     case sleepSpotReached
     case beginStretch
+    case beginInterestTravel
     case pointer(PointerProximity)
     case catchBegan
     case dragMoved
@@ -85,6 +86,10 @@ public struct BehaviorController: Sendable {
             if state == .findSleepSpot { transition(to: .sleep, at: timestamp) }
         case .beginStretch:
             if state != .caught && state != .dragged { transition(to: .stretch, at: timestamp) }
+        case .beginInterestTravel:
+            if state != .caught && state != .dragged {
+                transition(to: .travelToInterest, at: timestamp)
+            }
         case let .pointer(proximity):
             handlePointer(proximity, at: timestamp)
         case .catchBegan:
