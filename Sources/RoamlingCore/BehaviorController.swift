@@ -144,7 +144,7 @@ public struct BehaviorController: Sendable {
             transition(to: .stretch, at: timestamp)
         case .stretch where age >= 1.0:
             transition(to: .idle, at: timestamp)
-        case .celebrate where age >= 1.4:
+        case .celebrate where age >= 2.2:
             transition(to: .idle, at: timestamp)
         case .sad where age >= 1.5:
             transition(to: .idle, at: timestamp)

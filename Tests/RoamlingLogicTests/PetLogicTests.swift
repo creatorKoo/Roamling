@@ -206,6 +206,19 @@ func petLogicTests() -> [LogicTest] {
             try expect(left.frames.map(\.index) == [9, 10, 11, 12, 13, 12, 11, 10])
             try expect(sleep.frames.map(\.index) == [14, 15, 16, 15])
         },
+        LogicTest(name: "built-in completion tracks animate through the full reaction") {
+            for kind in [BuiltInPetKind.fatMochi, .mochi] {
+                let pet = MascotPetFactory.make(kind)
+                let celebration = try require(pet.tracks["jumping"])
+                let duration = celebration.frames.reduce(0) { $0 + $1.duration }
+
+                try expect(!celebration.loops)
+                try expect(duration >= 2.19)
+                try expect(duration <= 2.21)
+                try expect(Set(celebration.frames.map(\.index)).count >= 4)
+                try expect(celebration.frames.last?.index == (kind == .fatMochi ? 48 : 0))
+            }
+        },
         LogicTest(name: "loader keeps valid custom animation and isolates invalid track") {
             let fixture = try FixturePackage(frameWidth: 1, frameHeight: 1, rows: 9)
             defer { fixture.remove() }

@@ -107,7 +107,14 @@ public enum MascotPetFactory {
             "failed": track("failed", frames: [(24, 0.8)]),
             "jumping": track(
                 "jumping",
-                frames: [(48, 0.10), (49, 0.10), (50, 0.10), (52, 0.22)],
+                frames: [
+                    // Two complete, reversible hops keep moving for the full
+                    // completion reaction instead of freezing on the apex.
+                    (48, 0.10), (49, 0.09), (50, 0.10), (52, 0.18),
+                    (51, 0.08), (50, 0.08), (49, 0.10), (48, 0.22),
+                    (49, 0.09), (50, 0.10), (52, 0.18), (51, 0.08),
+                    (50, 0.08), (49, 0.10), (48, 0.62)
+                ],
                 loops: false
             ),
             "stretching": track(
@@ -196,7 +203,13 @@ public enum MascotPetFactory {
             "failed": track("failed", frames: [(23, 0.8)]),
             "jumping": track(
                 "jumping",
-                frames: [(24, 0.12), (21, 0.10), (3, 0.08), (0, 0.28)],
+                frames: [
+                    // Mochi uses the approved caught/idle poses for three
+                    // small hops, returning to the exact resting silhouette.
+                    (24, 0.14), (21, 0.12), (3, 0.10), (0, 0.22),
+                    (24, 0.14), (21, 0.12), (3, 0.10), (0, 0.22),
+                    (24, 0.14), (21, 0.12), (3, 0.10), (0, 0.68)
+                ],
                 loops: false
             ),
             "stretching": track(

@@ -62,8 +62,16 @@ public struct ReactionPolicy: Sendable {
             result = roll < 0.65 ? .paw : .observe
         case .negative, .setback:
             result = effectiveIntensity >= 0.2 ? .sad : .glance
-        case .achievement, .positive:
-            if event.kind == .positive, effectiveIntensity < 0.15 {
+        case .achievement:
+            if effectiveIntensity >= 0.75, roll < effectiveIntensity * 0.7 {
+                result = .largeCelebrate
+            } else {
+                // An achievement is a meaningful completion. Keep the size
+                // probabilistic, but always make the acknowledgement visible.
+                result = .smallCelebrate
+            }
+        case .positive:
+            if effectiveIntensity < 0.15 {
                 result = nil
             } else if effectiveIntensity >= 0.75, roll < effectiveIntensity * 0.7 {
                 result = .largeCelebrate

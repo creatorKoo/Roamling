@@ -261,6 +261,15 @@ func coreLogicTests() -> [LogicTest] {
             behavior.handle(.beginStretch, at: 3.2)
             try expect(behavior.state == .dragged)
         },
+        LogicTest(name: "completion celebration remains visible for its animation") {
+            var behavior = BehaviorController(state: .idle, enteredAt: 0)
+            behavior.handle(.reaction(.smallCelebrate), at: 1)
+            try expect(behavior.state == .celebrate)
+            behavior.handle(.tick, at: 3.19)
+            try expect(behavior.state == .celebrate)
+            behavior.handle(.tick, at: 3.21)
+            try expect(behavior.state == .idle)
+        },
         LogicTest(name: "basic safe zones honor visible frame and Dock inset") {
             let display = DisplaySnapshot(
                 id: "main",
@@ -369,6 +378,20 @@ func coreLogicTests() -> [LogicTest] {
                 at: 1
             )
             try expect(reaction == nil)
+        },
+        LogicTest(name: "reaction policy always acknowledges achievements") {
+            let achievement = testEvent("done", "codex", .achievement, 0.2, 0)
+            for roll in [0.0, 0.5, 0.999_999] {
+                var policy = ReactionPolicy(configuration: ReactionConfiguration(minimumInterval: 0))
+                let reaction = policy.reaction(
+                    for: achievement,
+                    context: .working,
+                    currentBehavior: .work,
+                    randomUnit: roll,
+                    at: 1
+                )
+                try expect(reaction == .smallCelebrate)
+            }
         },
         LogicTest(name: "candidate scoring prefers stability on a tie") {
             let unstable = PositionCandidate(point: WorldPoint(x: 10, y: 0), visualEmptyScore: 5, stabilityScore: 1)

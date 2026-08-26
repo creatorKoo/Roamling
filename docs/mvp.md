@@ -205,8 +205,17 @@ Codex command hooks -------+--> authenticated loopback receivers
 - minimum dwell, priority, hysteresis, revisit cooldown
 - event kind/intensity/context/cooldown을 사용하는 `ReactionPolicy` runtime wiring
 - routine low-intensity tool completion을 visible reaction/attention switch에서 제외
+- meaningful completion은 확률에 묻히지 않고 최소 작은 축하로 acknowledge
+- FatMochi와 Mochi 모두 completion state 전체 약 2.2초 동안 실제 frame motion을 유지하고
+  승인된 idle silhouette로 복귀
 - source별 menu status, install/remove, `Test Reaction`
 - 두 integration 모두 pointer evade/catch/drag보다 낮은 우선순위 유지
+
+Paseo 0.5.2는 설치된 Claude Code/Codex CLI를 그대로 실행하므로 같은 user hook 설정을
+사용한다. 2026-08-26에 Paseo daemon과 두 provider가 Ready인 상태, Roamling의 두 loopback
+listener, Claude/Codex 완료 payload의 HTTP 204 수신을 확인했다. hook 설치 전에 이미 실행
+중이던 agent에는 시작 event가 소급되지 않으므로 실제 체감 검증은 설치 후 새 Paseo agent로
+수행한다.
 
 ### Explicitly out of scope for this gate
 
@@ -228,8 +237,8 @@ Codex command hooks -------+--> authenticated loopback receivers
 - active work를 보고 있을 때 다른 background work 때문에 target을 즉시 바꾸지 않는다.
 - 다른 source의 permission request는 dwell을 깨고 관심을 가져갈 수 있다.
 - routine tool completion마다 축하하거나 monitor를 왕복하지 않는다.
-- Stop/completion은 intensity에 맞는 짧은 반응을 하고 다음 active source가 있으면 이어서 본다.
-- 50개 이상의 pure/transport test와 signed release app build를 통과한다.
+- Stop/completion은 intensity에 맞는 약 2.2초 반응을 하고 다음 active source가 있으면 이어서 본다.
+- 53개의 pure/transport test와 signed release app build를 통과한다.
 - 실제 Claude와 Codex session에서 각각 start → tool use → completion을 한 번 체감 확인한다.
 
 ## Exit rule
