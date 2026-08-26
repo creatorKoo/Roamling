@@ -210,6 +210,13 @@ Codex command hooks -------+--> authenticated loopback receivers
   승인된 idle silhouette로 복귀
 - 사용자 피드백에 따라 Mochi도 FatMochi와 같은 7-row authored capability set으로 교체:
   idle blink, four-paw walk left/right, sleep breathing, caught/drag, feline stretch, landing/celebrate
+
+2026-08-27 실사용 검토에서 이 첫 Mochi authored atlas는 승인되지 않았다. 생성 strip을
+균등 분할하면서 다른 frame의 작은 조각이 함께 잘려 들어갔고, idle blink에는 eye-region
+patch 합성이 사용됐다. 56 frame 중 22 frame에서 detached alpha component를 확인했다.
+현재 asset은 replacement 전까지 개발 참고본이며, 이후 제작은 `docs/art/mochi-animation-handoff.md`
+규격에 따라 frame마다 완전한 고양이를 그린 source만 받는다. 허용되는 local 처리는
+complete-frame chroma removal, uniform scale/center, full-frame mirror, atlas packing뿐이다.
 - source별 menu status, install/remove, `Test Reaction`
 - 두 integration 모두 pointer evade/catch/drag보다 낮은 우선순위 유지
 
