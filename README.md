@@ -15,8 +15,9 @@ This repository contains the first working vertical slice:
 - a native AppKit menu-bar app and transparent, non-activating overlay;
 - Codex/Petdex v1 (8×9) and v2 (8×11) pet loading, plus custom animation
   definitions and graceful capability fallback;
-- two original built-in mascot auditions, **Mochi** and **FatMochi**, selectable
-  from the menu, plus a code-drawn emergency fallback;
+- two original built-in mascots, **Mochi** and **FatMochi**, with authored
+  idle/walk/sleep/caught/stretch/landing animation sets, selectable from the
+  menu, plus a code-drawn emergency fallback;
 - global desktop coordinates, display topology, hot-plug handling, and
   continuous cross-display paths;
 - calmer wandering with visible idle pauses, shorter local trips, and more

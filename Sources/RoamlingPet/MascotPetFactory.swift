@@ -26,14 +26,14 @@ public enum BuiltInPetKind: String, CaseIterable, Codable, Sendable {
     }
 }
 
-/// Loads the authored FatMochi runtime atlas, or derives a lightweight evaluation atlas
+/// Loads an authored built-in runtime atlas, or derives a lightweight evaluation atlas
 /// from a mascot's four approved key poses when no authored atlas is available.
 public enum MascotPetFactory {
     private static let cellWidth = 192
     private static let cellHeight = 208
     private static let columns = 8
     private static let poseDerivedRows = 4
-    private static let authoredFatMochiRows = 7
+    private static let authoredRows = 7
 
     private enum Pose: Int {
         case idle
@@ -50,14 +50,109 @@ public enum MascotPetFactory {
     }
 
     public static func make(_ kind: BuiltInPetKind = .fatMochi) -> PetAsset {
-        if kind == .fatMochi,
-           let atlas = loadSheet(named: "fat-mochi-runtime-atlas"),
-           atlas.width == cellWidth * columns,
-           atlas.height == cellHeight * authoredFatMochiRows {
-            return makeAuthoredFatMochi(atlas: atlas)
+        switch kind {
+        case .mochi:
+            if let atlas = loadSheet(named: "mochi-runtime-atlas"),
+               atlas.width == cellWidth * columns,
+               atlas.height == cellHeight * authoredRows {
+                return makeAuthoredMochi(atlas: atlas)
+            }
+        case .fatMochi:
+            if let atlas = loadSheet(named: "fat-mochi-runtime-atlas"),
+               atlas.width == cellWidth * columns,
+               atlas.height == cellHeight * authoredRows {
+                return makeAuthoredFatMochi(atlas: atlas)
+            }
         }
 
         return makePoseDerivedPet(kind)
+    }
+
+    private static func makeAuthoredMochi(atlas: CGImage) -> PetAsset {
+        let manifest = PetManifest(
+            id: BuiltInPetKind.mochi.manifestID,
+            displayName: BuiltInPetKind.mochi.displayName,
+            description: "Roamling's built-in Mochi mascot.",
+            spritesheetPath: "builtin://mochi",
+            frame: PetFrameManifest(
+                width: cellWidth,
+                height: cellHeight,
+                columns: columns,
+                rows: authoredRows
+            )
+        )
+
+        let idleFrames: [(Int, TimeInterval)] = [
+            (0, 1.45), (1, 0.08), (2, 0.07), (3, 0.10),
+            (4, 0.07), (5, 0.08), (6, 0.12), (7, 0.20)
+        ]
+        let walkRightFrames = (8...15).map { ($0, 0.09) }
+        let walkLeftFrames = (16...23).map { ($0, 0.09) }
+        let hop: [(Int, TimeInterval)] = [
+            (48, 0.09), (49, 0.08), (50, 0.10),
+            (51, 0.14), (52, 0.10), (53, 0.17)
+        ]
+
+        let tracks = [
+            "idle": track("idle", frames: idleFrames),
+            "running-right": track("running-right", frames: walkRightFrames),
+            "running-left": track("running-left", frames: walkLeftFrames),
+            "sleeping": track(
+                "sleeping",
+                frames: [(24, 0.55), (25, 0.55), (26, 0.55), (27, 0.55)]
+            ),
+            "caught": track(
+                "caught",
+                frames: [(32, 0.04), (33, 0.08), (34, 0.09), (35, 0.11)],
+                loops: false
+            ),
+            "dragged": track(
+                "dragged",
+                frames: [(36, 0.10), (37, 0.10), (38, 0.10), (39, 0.10)]
+            ),
+            "sitting": track("sitting", frames: [(0, 0.8)]),
+            "landing": track(
+                "landing",
+                frames: [(48, 0.08), (49, 0.08), (50, 0.10),
+                         (51, 0.14), (52, 0.10), (53, 0.22)],
+                loops: false
+            ),
+            "watching": track("watching", frames: idleFrames),
+            "failed": track("failed", frames: [(24, 0.8)]),
+            "jumping": track(
+                "jumping",
+                frames: hop + hop + hop + [(53, 0.16)],
+                loops: false
+            ),
+            "stretching": track(
+                "stretching",
+                frames: [(40, 0.14), (41, 0.15), (42, 0.18),
+                         (43, 0.20), (44, 0.15), (45, 0.18)],
+                loops: false
+            ),
+            "waiting": track(
+                "waiting",
+                frames: [(36, 0.13), (37, 0.13), (38, 0.13), (39, 0.13)]
+            ),
+            "working": track("working", frames: walkRightFrames),
+            "running": track("running", frames: walkRightFrames),
+            "waving": track(
+                "waving",
+                frames: [(36, 0.13), (37, 0.13), (38, 0.13), (39, 0.13)]
+            ),
+            "review": track("review", frames: idleFrames)
+        ]
+
+        return PetAsset(
+            manifest: manifest,
+            packageURL: nil,
+            atlas: atlas,
+            frameWidth: cellWidth,
+            frameHeight: cellHeight,
+            columns: columns,
+            rows: authoredRows,
+            tracks: tracks
+        )
     }
 
     private static func makeAuthoredFatMochi(atlas: CGImage) -> PetAsset {
@@ -70,7 +165,7 @@ public enum MascotPetFactory {
                 width: cellWidth,
                 height: cellHeight,
                 columns: columns,
-                rows: authoredFatMochiRows
+                rows: authoredRows
             )
         )
 
@@ -143,7 +238,7 @@ public enum MascotPetFactory {
             frameWidth: cellWidth,
             frameHeight: cellHeight,
             columns: columns,
-            rows: authoredFatMochiRows,
+            rows: authoredRows,
             tracks: tracks
         )
     }

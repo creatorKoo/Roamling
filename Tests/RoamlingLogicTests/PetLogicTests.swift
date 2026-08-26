@@ -60,7 +60,7 @@ func petLogicTests() -> [LogicTest] {
             try expect(MascotPetFactory.make().manifest.displayName == "FatMochi")
             for kind in BuiltInPetKind.allCases {
                 let pet = MascotPetFactory.make(kind)
-                let expectedRows = kind == .fatMochi ? 7 : 4
+                let expectedRows = 7
                 try expect(pet.manifest.displayName == kind.displayName)
                 try expect(pet.manifest.id == "roamling-\(kind.rawValue)")
                 try expect(pet.columns == 8)
@@ -194,17 +194,67 @@ func petLogicTests() -> [LogicTest] {
             player.update(deltaTime: 0.27)
             try expect(player.currentFrameIndex == 36)
         },
-        LogicTest(name: "Mochi pose-derived cycles remain reversible") {
+        LogicTest(name: "Mochi uses authored creature animation cycles") {
             let pet = MascotPetFactory.make(.mochi)
             let idle = try require(pet.tracks["idle"])
             let right = try require(pet.tracks["running-right"])
             let left = try require(pet.tracks["running-left"])
             let sleep = try require(pet.tracks["sleeping"])
+            let caught = try require(pet.tracks["caught"])
+            let dragged = try require(pet.tracks["dragged"])
+            let stretch = try require(pet.tracks["stretching"])
+            let landing = try require(pet.tracks["landing"])
 
-            try expect(idle.frames.map(\.index) == [0, 1, 2, 3, 2, 1])
-            try expect(right.frames.map(\.index) == [4, 5, 6, 7, 8, 7, 6, 5])
-            try expect(left.frames.map(\.index) == [9, 10, 11, 12, 13, 12, 11, 10])
-            try expect(sleep.frames.map(\.index) == [14, 15, 16, 15])
+            try expect(pet.rows == 7)
+            try expect(idle.frames.map(\.index) == Array(0...7))
+            try expect(right.frames.map(\.index) == Array(8...15))
+            try expect(left.frames.map(\.index) == Array(16...23))
+            try expect(sleep.frames.map(\.index) == [24, 25, 26, 27])
+            try expect(caught.frames.map(\.index) == [32, 33, 34, 35])
+            try expect(!caught.loops)
+            try expect(dragged.frames.map(\.index) == [36, 37, 38, 39])
+            try expect(stretch.frames.map(\.index) == Array(40...45))
+            try expect(!stretch.loops)
+            try expect(landing.frames.map(\.index) == Array(48...53))
+            try expect(!landing.loops)
+
+            let idleSignatures = try Array(0...7).map {
+                try require(imageSignature(try require(pet.frameImage(at: $0))))
+            }
+            let walkSignatures = try Array(8...15).map {
+                try require(imageSignature(try require(pet.frameImage(at: $0))))
+            }
+            let sleepSignatures = try Array(24...27).map {
+                try require(imageSignature(try require(pet.frameImage(at: $0))))
+            }
+            let draggedSignatures = try Array(36...39).map {
+                try require(imageSignature(try require(pet.frameImage(at: $0))))
+            }
+            let walkMetrics = try Array(8...15).map {
+                try require(alphaMetrics(try require(pet.frameImage(at: $0))))
+            }
+            try expect(Set(idleSignatures).count >= 4)
+            try expect(Set(walkSignatures).count == 8)
+            try expect(Set(sleepSignatures).count >= 3)
+            try expect(Set(draggedSignatures).count == 4)
+            let walkCenters = walkMetrics.map(\.boundsCenterX)
+            let minimumWalkCenter = try require(walkCenters.min())
+            let maximumWalkCenter = try require(walkCenters.max())
+            try expect(
+                maximumWalkCenter - minimumWalkCenter <= 1,
+                "Mochi walk frames must remain centered while the runtime moves the sprite"
+            )
+
+            let idleSignature = try require(imageSignature(try require(pet.frameImage(at: 0))))
+            for index in [32, 40, 45, 48, 53] {
+                let signature = try require(imageSignature(try require(pet.frameImage(at: index))))
+                try expect(signature == idleSignature, "Mochi transition frame \(index) must match idle")
+            }
+
+            for index in 0..<pet.frameCount {
+                let metrics = alphaMetrics(try require(pet.frameImage(at: index)))
+                try expect(metrics != nil)
+            }
         },
         LogicTest(name: "built-in completion tracks animate through the full reaction") {
             for kind in [BuiltInPetKind.fatMochi, .mochi] {
@@ -216,7 +266,7 @@ func petLogicTests() -> [LogicTest] {
                 try expect(duration >= 2.19)
                 try expect(duration <= 2.21)
                 try expect(Set(celebration.frames.map(\.index)).count >= 4)
-                try expect(celebration.frames.last?.index == (kind == .fatMochi ? 48 : 0))
+                try expect(celebration.frames.last?.index == (kind == .fatMochi ? 48 : 53))
             }
         },
         LogicTest(name: "loader keeps valid custom animation and isolates invalid track") {

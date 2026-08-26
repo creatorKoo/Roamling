@@ -10,11 +10,11 @@ and converted locally from a flat chroma-key background to PNG alpha. No
 third-party pet artwork is included in these files.
 
 The pose sheets contain four key poses: idle, walking, sleeping, and caught.
-Mochi still uses a reversible transform sequence derived from those poses for
-evaluation at actual desktop size.
+Both mascots now have authored runtime atlases; the pose sheets remain the
+identity references and the fallback source if a bundled atlas cannot load.
 
-`fat-mochi-runtime-atlas.png` is the authored runtime asset for the default
-FatMochi. It has 8 columns of 192×208 cells and seven internal rows: idle,
+`fat-mochi-runtime-atlas.png` and `mochi-runtime-atlas.png` are the authored
+runtime assets. Each has 8 columns of 192×208 cells and seven internal rows: idle,
 running right, running left, sleeping, caught, stretching, and landing. Walk
 frames articulate diagonal front/hind pairs and add restrained body/tail
 follow-through; the other current-MVP states use blink, breathing, a compact
@@ -25,6 +25,18 @@ upright, human-like arms-up draft was explicitly rejected and is not included.
 This seven-row layout is an internal built-in asset, not a new Petdex package
 version. Imported Petdex pets still use their v1/v2 manifest and atlas layouts
 without modification.
+
+Mochi's authored pass was produced with OpenAI's built-in image-generation
+mode on 2026-08-26 using the approved four-pose sheet as the identity reference.
+Separate prompts requested an eight-frame four-beat walk, eight-frame idle
+blink, four-frame sleeping breath, caught-to-four-paw drag sequence, six-frame
+feline forward stretch, and six-frame compact hop/landing. The left walk is an
+exact local mirror of the right walk. Chroma removal, 192×208 frame fitting,
+ground alignment, transition endpoints, and atlas assembly were performed
+locally with nearest-neighbor sampling. Generated idle bodies were rejected:
+the approved idle body remains pixel-identical and only the two interior eye
+regions provide the blink. Caught, stretch, and landing begin or end on that
+same approved idle frame so state changes do not replace the resting character.
 
 Core prompt, Mochi:
 

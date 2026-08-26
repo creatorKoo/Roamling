@@ -52,7 +52,7 @@ module만 추출할 수 있다. 선행 Rust/C ABI는 만들지 않는다.
 - `AnimationResolver`: custom mapping -> aliases -> standard fallback
 - `PetAnimationPlayer`: timing only; no source/platform knowledge
 - `PetCatalog`: local read-only discovery
-- `MascotPetFactory`: authored FatMochi atlas 선택 + Mochi key-pose evaluation fallback
+- `MascotPetFactory`: authored FatMochi/Mochi atlas 선택 + key-pose emergency fallback
 - `PlaceholderPetFactory`: resource failure에도 앱이 뜨는 procedural emergency fallback
 
 ### RoamlingSources
@@ -209,8 +209,8 @@ idle을 사용한다. v1 pet은 look row가 없어도 idle/review fallback으로
 Petdex row는 완성 동작을 담는 frame slot이다. renderer가 한 장을 위아래로 흔들어 걷는
 규격이 아니므로, 발·몸통·꼬리의 변화는 pet 제작자가 각 frame에 그린다. Roamling의
 standard package loader도 atlas frame을 그대로 재생하며 임의 관절 animation을 합성하지
-않는다. Built-in FatMochi의 7-row atlas는 현재 MVP에서 필요한 authored 동작을 담는 내부
-resource이고, 외부 Petdex v1/v2 package 계약을 바꾸지 않는다.
+않는다. Built-in FatMochi와 Mochi의 7-row atlas는 현재 MVP에서 필요한 authored 동작을
+담는 내부 resource이고, 외부 Petdex v1/v2 package 계약을 바꾸지 않는다.
 
 ### Optional Roamling extension
 
@@ -375,7 +375,7 @@ drag는 mouseUp까지 loop를 반복한다. 이동 없는 click은 panel ownersh
 짧은 팔다리만 움직이며, 앞·뒤의 대각선 발 쌍을 빠르게 교대한다. caught intro 32–35는
 dragged asset을 수정해도 별도 track으로 그대로 유지한다.
 
-현재 authored mascot은 독립 effect layer를 쓰지 않으므로 각 atlas frame의 visible alpha는
+현재 FatMochi authored atlas는 독립 effect layer를 쓰지 않으므로 각 frame의 visible alpha는
 하나의 8-connected component여야 한다. asset test가 detached pixels와 다른 cell에서 잘려
 들어온 debris를 검사한다. 향후 sparkle/Z 같은 분리 effect가 필요하면 pet body atlas에
 섞지 않고 renderer effect layer로 추가한다.
@@ -477,19 +477,18 @@ frame swap에 scene graph가 필요하지 않다. particle/effect가 복잡해�
 **Chosen:** local discovery. existing CLI와 Codex가 설치한 package를 modification 없이
 읽고, network/gallery는 별도 installer milestone로 둔다.
 
-### Authored default mascot with pose-derived fallback
+### Authored built-in mascots with pose-derived fallback
 
 **Options:** gallery pet 번들, 빈 화면, generated key-pose sheets, code-drawn cat.
 
-**Chosen:** 실제 96×104pt overlay에서 승인된 FatMochi의 얼굴과 silhouette을 고정한 뒤,
-MVP 0.7에서 보이는 walk/idle/sleep/caught/stretch/landing만 authored atlas로 교체한다.
-고양이식 forward stretch를 사용하며 인간처럼 앞발을 드는 후보는 폐기했다. Mochi는
-key-pose 기반 evaluation atlas를 유지하고 code-drawn cat은 resource failure 전용 fallback이다.
-후속 agent reaction row를 미리 만들지 않아 milestone 범위를 지키며, third-party asset
-license에 의존하지 않고 Petdex loader는 사용자 package와 fixtures로 계속 검증한다. 모든
-동작의 identity 기준은 idle이며, walk/caught/dragged는 크기·중심·얼굴·목선 invariant를
-asset test로 고정한다. dragged는 이전 belly-facing silhouette을 유지하면서 긴 limb만
-짧은 네 발 교대 동작으로 교체한다.
+**Chosen:** 실제 96×104pt overlay에서 승인된 얼굴과 silhouette을 identity 기준으로 고정하고,
+현재 gate에서 보이는 walk/idle/sleep/caught/stretch/landing을 built-in별 authored atlas로
+제공한다. FatMochi는 MVP 0.7에서 먼저 교체했고 Mochi는 사용자 피드백에 따라 MVP 2 안에서
+같은 capability surface로 교체했다. 고양이식 forward stretch를 사용하며 인간처럼 앞발을
+드는 후보는 폐기했다. Mochi의 왼쪽 walk는 오른쪽 authored strip의 exact mirror이고 idle
+몸체는 원본을 유지한 채 눈 영역만 blink한다. code-drawn cat과 four-pose derivation은 resource
+failure 전용 fallback이다. 이 내부 atlas는 third-party asset license에 의존하지 않으며
+Petdex loader는 사용자 package와 fixtures로 계속 검증한다.
 
 ## Future migration
 

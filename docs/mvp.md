@@ -56,12 +56,12 @@ travel slowly -> sleep
 - pure-logic tests for rest timing, placement, and behavior transitions
 
 표준 pet에 sleep/sit animation이 없으면 pet 사용을 막지 않고 idle로 fallback한다.
-기본 캐릭터 FatMochi는 현재 gate에서 실제 보이는 동작만 authored frame으로 다듬었다.
+기본 캐릭터 FatMochi는 이 gate에서 실제 보이는 동작을 authored frame으로 다듬었다.
 walk는 8장 동안 앞·뒤의 대각선 발이 교차하고 몸통과 꼬리가 작게 따라오며, idle blink,
 sleep breathing, caught paw wiggle, drop landing, 고양이식 forward stretch도 각각 독립
 frame을 쓴다. stretch는
 앞발을 뻗고 가슴을 낮추며 엉덩이를 드는 자세이고 사람처럼 앞발을 위로 드는 pose는 쓰지
-않는다. Mochi는 아직 네 key pose에서 만든 reversible evaluation cycle을 유지한다.
+않는다. 당시 Mochi는 네 key pose에서 만든 reversible evaluation cycle을 유지했다.
 active travel만 60Hz로 갱신하며 idle/sleep의 저전력 cadence는 그대로다. 이는 MVP 0.7의
 creature-quality polish이며 이후 agent integration용 animation이나 source는 미리 만들지 않는다.
 
@@ -208,6 +208,8 @@ Codex command hooks -------+--> authenticated loopback receivers
 - meaningful completion은 확률에 묻히지 않고 최소 작은 축하로 acknowledge
 - FatMochi와 Mochi 모두 completion state 전체 약 2.2초 동안 실제 frame motion을 유지하고
   승인된 idle silhouette로 복귀
+- 사용자 피드백에 따라 Mochi도 FatMochi와 같은 7-row authored capability set으로 교체:
+  idle blink, four-paw walk left/right, sleep breathing, caught/drag, feline stretch, landing/celebrate
 - source별 menu status, install/remove, `Test Reaction`
 - 두 integration 모두 pointer evade/catch/drag보다 낮은 우선순위 유지
 
