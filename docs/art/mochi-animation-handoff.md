@@ -4,6 +4,11 @@
 `mochi-runtime-atlas.png`는 승인본이 아니라 결함 참고 자료다. 새 결과를 받기 전까지
 그 파일의 픽셀을 새 원화의 일부로 재사용하지 않는다.
 
+실제 복사·붙여넣기에는 한글로 정리한
+[`mochi-animation-prompts-ko.md`](./mochi-animation-prompts-ko.md)를 사용한다. 각 동작
+prompt에 필수 규칙과 금지사항을 반복해서 넣었으므로 해당 동작의 코드 블록 하나만 붙여
+넣으면 된다. 아래 영문 prompt는 제작 의도를 기록한 원본 spec으로 유지한다.
+
 ## 첨부할 파일과 역할
 
 1. `mochi-poses.png` — **identity source of truth**
