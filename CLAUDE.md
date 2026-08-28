@@ -16,9 +16,15 @@ swift run Roamling
 ./scripts/build-app.sh release # build/Roamling.app (ad-hoc codesign)
 ```
 
-`build-app.sh`는 `ROAMLING_CODESIGN_IDENTITY`가 있으면 그 identity로 서명하고 없으면
-ad-hoc으로 떨어진다. ad-hoc은 designated requirement가 cdhash라서 빌드할 때마다 macOS가
-다른 앱으로 보고 Accessibility 권한을 잊는다. AX 작업을 할 때는 반드시 identity를 지정한다.
+`build-app.sh`는 시작할 때 git-ignore된 `scripts/signing.env`가 있으면 source한다.
+거기에 `ROAMLING_CODESIGN_IDENTITY`를 넣어 두면 매번 환경변수를 지정하지 않아도 된다.
+설정 방법은 저장소에 있는 `scripts/signing.env.example`에 적혀 있다. identity 이름은
+머신의 keychain에 종속되므로 script에 하드코딩하지 않는다 — 기여자의 빌드가 그 이름을
+찾지 못해 실패한다.
+
+identity 없이 빌드하면 ad-hoc이 되고 designated requirement가 cdhash로 고정된다. 빌드할
+때마다 macOS가 다른 앱으로 보기 때문에 Accessibility 권한이 사라진다. AX 관련 작업은
+반드시 identity로 서명한 빌드에서 확인한다.
 
 XCTest 대신 dependency-free executable harness를 쓴다. Command Line Tools의
 compiler/SDK mismatch가 나면 두 script 모두 `ROAMLING_SWIFT_SDK=/path/to/MacOSX.sdk`

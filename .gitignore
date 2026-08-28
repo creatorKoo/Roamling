@@ -6,3 +6,4 @@ DerivedData/
 .swiftpm/xcode/package.xcworkspace/xcuserdata/
 output/
 *.p12
+scripts/signing.env

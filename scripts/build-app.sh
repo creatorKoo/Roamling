@@ -6,6 +6,13 @@ set -euo pipefail
 
 CONFIGURATION="${1:-release}"
 REPOSITORY_DIR="${0:A:h:h}"
+
+# Optional, git-ignored local settings. A signing identity name is specific to
+# one machine's keychain, so it lives here instead of in the script. See
+# scripts/signing.env.example.
+if [[ -f "$REPOSITORY_DIR/scripts/signing.env" ]]; then
+  source "$REPOSITORY_DIR/scripts/signing.env"
+fi
 mkdir -p "$REPOSITORY_DIR/.build/cache" "$REPOSITORY_DIR/.build/config" \
   "$REPOSITORY_DIR/.build/security" "$REPOSITORY_DIR/.build/module-cache"
 export CLANG_MODULE_CACHE_PATH="${CLANG_MODULE_CACHE_PATH:-$REPOSITORY_DIR/.build/module-cache}"
