@@ -26,6 +26,11 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         // Starts the complete AppKit lifecycle for automated packaging checks,
         // then exits cleanly without needing a synthetic user interaction.
         if ProcessInfo.processInfo.environment["ROAMLING_SMOKE_TEST"] == "1" {
+            // A missing CFBundleLocalizations pins the whole process to English
+            // no matter what ships in the module bundle, and nothing crashes to
+            // say so. Print what actually resolved.
+            let resolved = Bundle.module.preferredLocalizations.first ?? "none"
+            print("smoke.localization=\(resolved) sample=\(localized("menu.quit"))")
             perform(#selector(finishSmokeTest), with: nil, afterDelay: 0.4)
         }
     }

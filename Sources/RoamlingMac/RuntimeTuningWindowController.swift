@@ -162,6 +162,23 @@ private struct RuntimeTuningView: View {
                 step: 0.01,
                 style: .multiplier
             )
+            Divider()
+            // Parked here until the real options window exists; this panel is
+            // the only surface that can carry it today.
+            Text(localized("tuning.section.advanced"))
+                .font(.headline)
+            TuningSliderRow(
+                title: localized("tuning.gaitCadence"),
+                value: model.binding(\.gaitCadence),
+                range: 0.5...3.2,
+                step: 0.05,
+                style: .multiplier
+            )
+            Text(localized("tuning.gaitCadenceNote"))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
             Text(localized("tuning.pointerNote"))
                 .font(.caption)
                 .foregroundStyle(.secondary)

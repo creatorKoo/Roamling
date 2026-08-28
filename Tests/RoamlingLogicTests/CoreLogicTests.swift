@@ -273,24 +273,26 @@ func coreLogicTests() -> [LogicTest] {
             try expectNear(RuntimeTuning.standard.wanderDelay(randomUnit: 0), 8.4)
             try expectNear(RuntimeTuning.standard.wanderDelay(randomUnit: 1), 17.4)
         },
-        LogicTest(name: "gait cadence follows the tuned walking speed") {
-            // Authored frame durations assume the standard speed, so the
-            // standard tuning must not retime anything.
+        LogicTest(name: "gait cadence stays opt-in and independent of walking speed") {
+            // The authored motion is the default. Raising the walking speed must
+            // not retime the walk cycle on its own.
             try expectNear(RuntimeTuning.standard.locomotionAnimationRate, 1)
 
-            var faster = RuntimeTuning.standard
-            faster.walkingSpeed = 80
-            try expectNear(faster.normalized.locomotionAnimationRate, 2)
+            var fast = RuntimeTuning.standard
+            fast.walkingSpeed = 160
+            try expectNear(fast.normalized.locomotionAnimationRate, 1)
 
-            // The ceiling keeps a sprint readable rather than a blur, and the
-            // floor keeps a slow stroll from turning into a shuffle.
-            var fastest = RuntimeTuning.standard
-            fastest.walkingSpeed = 160
-            try expectNear(fastest.normalized.locomotionAnimationRate, 3.2)
+            var doubled = RuntimeTuning.standard
+            doubled.gaitCadence = 2
+            try expectNear(doubled.normalized.locomotionAnimationRate, 2)
 
-            var slowest = RuntimeTuning.standard
-            slowest.walkingSpeed = 20
-            try expectNear(slowest.normalized.locomotionAnimationRate, 0.6)
+            var beyond = RuntimeTuning.standard
+            beyond.gaitCadence = 9
+            try expectNear(beyond.normalized.locomotionAnimationRate, 3.2)
+
+            var below = RuntimeTuning.standard
+            below.gaitCadence = 0
+            try expectNear(below.normalized.locomotionAnimationRate, 0.5)
         },
         LogicTest(name: "look angles match Codex v2 clock convention") {
             let pet = WorldPoint.zero

@@ -15,6 +15,7 @@ public struct RuntimeTuning: Codable, Equatable, Sendable {
     public var catchApproachSpeed: Double
     public var catchWindow: Double
     public var hitRegionScale: Double
+    public var gaitCadence: Double
 
     public init(
         walkingSpeed: Double = 40,
@@ -24,7 +25,8 @@ public struct RuntimeTuning: Codable, Equatable, Sendable {
         catchArmDistance: Double = 74,
         catchApproachSpeed: Double = 380,
         catchWindow: Double = 0.35,
-        hitRegionScale: Double = 1.12
+        hitRegionScale: Double = 1.12,
+        gaitCadence: Double = 1
     ) {
         self.walkingSpeed = walkingSpeed.clamped(to: 20...160)
         self.wanderPause = wanderPause.clamped(to: 2...40)
@@ -36,6 +38,7 @@ public struct RuntimeTuning: Codable, Equatable, Sendable {
         self.catchApproachSpeed = catchApproachSpeed.clamped(to: 150...900)
         self.catchWindow = catchWindow.clamped(to: 0.15...1.2)
         self.hitRegionScale = hitRegionScale.clamped(to: 0.75...1.3)
+        self.gaitCadence = gaitCadence.clamped(to: 0.5...3.2)
     }
 
     public static let standard = RuntimeTuning()
@@ -50,18 +53,18 @@ public struct RuntimeTuning: Codable, Equatable, Sendable {
             catchArmDistance: catchArmDistance,
             catchApproachSpeed: catchApproachSpeed,
             catchWindow: catchWindow,
-            hitRegionScale: hitRegionScale
+            hitRegionScale: hitRegionScale,
+            gaitCadence: gaitCadence
         )
     }
 
-    /// Authored walk frames carry fixed durations tuned for `standard`. Playing
-    /// them at a fixed rate while the pet covers more ground per cycle is
-    /// exactly the sliding the authored gait exists to remove, so locomotion
-    /// scales the cycle with the tuned speed. The ceiling keeps a sprint
-    /// readable instead of a blur.
-    public var locomotionAnimationRate: Double {
-        (walkingSpeed / RuntimeTuning.standard.walkingSpeed).clamped(to: 0.6...3.2)
-    }
+    /// How fast the authored walk cycle plays while travelling.
+    ///
+    /// Deriving this from `walkingSpeed` was tried and rejected: the authored
+    /// gait reads correctly at its own cadence even when the pet moves faster,
+    /// and retiming it made the walk look busy. It stays a deliberate opt-in at
+    /// 1.0 so the default motion is untouched.
+    public var locomotionAnimationRate: Double { gaitCadence }
 
     public var pointerConfiguration: PointerInteractionConfiguration {
         PointerInteractionConfiguration(

@@ -8,6 +8,11 @@
 <dict>
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
+    <key>CFBundleLocalizations</key>
+    <array>
+        <string>en</string>
+        <string>ko</string>
+    </array>
     <key>CFBundleExecutable</key>
     <string>Roamling</string>
     <key>CFBundleIdentifier</key>
@@ -36,7 +41,5 @@
     <true/>
     <key>NSScreenCaptureUsageDescription</key>
     <string>Roamling can optionally inspect a local, temporary snapshot to find an unobtrusive resting place. This feature is off by default.</string>
-    <key>NSHumanReadableCopyright</key>
-    <string>Copyright © 2026 Roamling contributors</string>
 </dict>
 </plist>

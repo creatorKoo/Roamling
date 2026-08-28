@@ -76,3 +76,6 @@
 "unit.multiplier" = "%.2f×";
 "button.ok" = "OK";
 "alert.about.body" = "A tiny companion that actually lives on your desktop.\n\nCopyright © 2026 GooBeom Jeoung\nLicensed under GNU GPL v3.0 only.\nThis program comes with absolutely no warranty.\n\nInstalled pet packages remain subject to their authors’ licenses.";
+"tuning.section.advanced" = "Advanced";
+"tuning.gaitCadence" = "Gait cadence";
+"tuning.gaitCadenceNote" = "How fast the walk cycle plays while travelling. 1.00× is the authored motion and the recommended setting; raise it only if faster walking speeds look like sliding to you.";
