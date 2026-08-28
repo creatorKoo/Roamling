@@ -44,9 +44,9 @@ public final class MacFocusProvider: FocusProviding {
         let application = AXUIElementCreateApplication(app.processIdentifier)
         AXUIElementSetMessagingTimeout(application, Self.messagingTimeout)
 
-        guard let element = Self.copyElement(application, kAXFocusedUIElementAttribute) else {
-            return nil
-        }
+        let element = Self.copyElement(application, kAXFocusedUIElementAttribute)
+        let window = Self.copyElement(application, kAXFocusedWindowAttribute)
+        guard element != nil || window != nil else { return nil }
 
         let primaryTop = Double(NSScreen.screens.first?.frame.maxY ?? 0)
         let space = coordinateSpace()
@@ -63,17 +63,25 @@ public final class MacFocusProvider: FocusProviding {
             )
         }
 
-        let elementFrame = Self.frame(of: element).flatMap(convert)
-        let caretFrame = Self.caretRect(of: element).flatMap(convert)
-        guard elementFrame != nil || caretFrame != nil else { return nil }
+        let windowFrame = window.flatMap(Self.frame).flatMap(convert)
+        let elementFrame = element.flatMap(Self.frame).flatMap(convert)
+        let caretFrame = element.flatMap(Self.caretRect).flatMap(convert)
+        guard windowFrame != nil || elementFrame != nil || caretFrame != nil else { return nil }
 
-        // windowID stays nil until the focused window can be matched to a
-        // CGWindowNumber without private API. The planner then keeps using the
-        // coarse hint region, which is already the focused window's frame.
+        // Confidence rises with how precisely the answer locates the work: a
+        // window beats the frontmost-process guess, a caret beats the window.
+        let confidence: Double = if caretFrame != nil {
+            0.9
+        } else if elementFrame != nil {
+            0.8
+        } else {
+            0.7
+        }
         return FocusSnapshot(
+            windowFrame: windowFrame,
             focusedElementFrame: elementFrame,
             caretFrame: caretFrame,
-            confidence: caretFrame == nil ? 0.7 : 0.9
+            confidence: confidence
         )
     }
 

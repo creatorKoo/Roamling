@@ -386,20 +386,37 @@ func sourceLogicTests() -> [LogicTest] {
         },
         LogicTest(name: "focus placement prefers the focused window over the coarse hint") {
             let fixture = FocusPlacementFixture()
-            // The coarse hint points at a small stale region in the corner.
+            // The coarse hint only knows the frontmost process, so it can point
+            // at a stale region while accessibility knows the real window.
             let stale = LocationHint(
                 approximateRegion: WorldRect(x: 0, y: 24, width: 100, height: 100),
                 confidence: 0.55
             )
             let focused = try require(fixture.destination(
                 hint: stale,
-                focus: FocusSnapshot(windowID: "w1", confidence: 0.9)
+                focus: FocusSnapshot(windowFrame: fixture.window, confidence: 0.9)
             ))
             try expect(focused.point.y == 726)
 
             // Same stale hint without accessibility still lands in the corner.
             let coarse = try require(fixture.destination(hint: stale, focus: nil))
             try expect(coarse.point.y < 200)
+        },
+        LogicTest(name: "focus placement falls back when accessibility gives no window") {
+            let fixture = FocusPlacementFixture()
+            let stale = LocationHint(
+                approximateRegion: WorldRect(x: 0, y: 24, width: 100, height: 100),
+                confidence: 0.55
+            )
+            // A collapsed window rect means the query answered without a usable
+            // bound, so the coarse hint has to stay in charge of the region.
+            let collapsed = FocusSnapshot(
+                windowFrame: WorldRect(x: 300, y: 300, width: 0, height: 0),
+                confidence: 0.7
+            )
+            try expect(collapsed.windowFrame == nil)
+            let placed = try require(fixture.destination(hint: stale, focus: collapsed))
+            try expect(placed.point.y < 200)
         },
         LogicTest(name: "behavior enters interest travel without overriding drag") {
             var behavior = BehaviorController(state: .idle, enteredAt: 0)

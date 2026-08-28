@@ -60,18 +60,21 @@ public struct PointerSnapshot: Codable, Hashable, Sendable {
 }
 
 public struct FocusSnapshot: Codable, Hashable, Sendable {
-    public let windowID: String?
+    /// Exact frame of the focused window. `MacWindowProvider`'s permission-free
+    /// path can only guess this from the frontmost process, so an accessibility
+    /// answer supersedes it wherever both exist.
+    public let windowFrame: WorldRect?
     public let focusedElementFrame: WorldRect?
     public let caretFrame: WorldRect?
     public let confidence: Double
 
     public init(
-        windowID: String? = nil,
+        windowFrame: WorldRect? = nil,
         focusedElementFrame: WorldRect? = nil,
         caretFrame: WorldRect? = nil,
         confidence: Double = 0
     ) {
-        self.windowID = windowID
+        self.windowFrame = windowFrame.flatMap { $0.isEmpty ? nil : $0 }
         self.focusedElementFrame = focusedElementFrame.flatMap { $0.isEmpty ? nil : $0 }
         self.caretFrame = Self.usableCaret(caretFrame)
         self.confidence = confidence.clamped(to: 0...1)

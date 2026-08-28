@@ -32,9 +32,7 @@ public enum BasicInterestPositionPlanner {
         let focus = world.focus.flatMap { $0.confidence > 0 ? $0 : nil }
         // The focused window frame is exact where the coarse hint only knows
         // the frontmost process, so it wins when accessibility supplied one.
-        let focusedWindowFrame = focus?.windowID.flatMap { id in
-            world.windows.first { $0.id == id }?.frame
-        }
+        let focusedWindowFrame = focus?.windowFrame
         let confidence = max(hint.confidence, focus?.confidence ?? 0)
         guard confidence > 0,
               let region = focusedWindowFrame ?? hint.approximateRegion,
