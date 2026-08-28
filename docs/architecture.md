@@ -111,12 +111,16 @@ Roamling response는 빈 204라 agent decision에 관여하지 않는다.
 
 HTTP body에는 Claude Code가 event별 상세 payload를 함께 보낼 수 있지만 decoder가 읽는
 필드는 `session_id`, optional `prompt_id`, `hook_event_name`, notification 분류뿐이다.
-request buffer는 256 KiB로 제한하고 event 생성 직후 폐기하며 disk/log/metadata에는
-원문을 남기지 않는다.
+request buffer는 1 MiB로 제한하고 event 생성 직후 폐기하며 disk/log/metadata에는
+원문을 남기지 않는다. 이 상한은 속도가 아니라 인증 전 메모리 바운드다. token 검사는
+body가 다 도착한 뒤에 하므로, 상한이 없으면 token을 모르는 local 프로세스도 임의 크기
+버퍼를 잡게 만들 수 있다. 1 MiB는 curl이 `Expect: 100-continue`를 붙이기 시작하는
+지점이기도 하다. receiver는 `100 Continue`를 보내지 않으므로 그보다 큰 payload는
+상한을 올려도 어차피 도착하지 않는다.
 
 MVP 2의 Codex transport는 user가 명시적으로 설치한 `~/.codex/hooks.json` command
 handler가 stdin JSON을 `/usr/bin/curl`로 `127.0.0.1:47832`에 전달한다. 별도 token,
-동일한 256 KiB request limit, 빈 204 response를 쓴다. 0.15초 connect timeout과 0.3초
+동일한 1 MiB request limit, 빈 204 response를 쓴다. 0.15초 connect timeout과 0.3초
 total timeout 뒤 실패를 삼키므로 Roamling이 꺼져 있어도 Codex turn을 중단하지 않는다.
 installer는 `config.toml`을 열거나 수정하지 않으므로 이미 설정된 legacy `notify`와
 공존한다. Codex의 hook trust prompt는 자동 승인하지 않는다.

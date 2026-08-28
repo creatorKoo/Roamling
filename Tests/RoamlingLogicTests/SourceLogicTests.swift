@@ -279,6 +279,58 @@ func sourceLogicTests() -> [LogicTest] {
             try expect(received.value?.sourceID == "codex:command-session")
             try expect(received.value?.kind == .achievement)
         },
+        LogicTest(name: "Loopback receiver accepts a large tool payload") {
+            let port = UInt16.random(in: 49_000...59_000)
+            let token = "codex-large-payload-token"
+            let source = CodexSource(token: token, port: port)
+            defer { source.stop() }
+            try source.start()
+            for _ in 0..<50 where source.state != .ready {
+                Thread.sleep(forTimeInterval: 0.02)
+            }
+            try expect(source.state == .ready, "Receiver state: \(source.state)")
+
+            let received = LockedBox<CompanionEvent?>(nil)
+            let eventSignal = DispatchSemaphore(value: 0)
+            let streamTask = Task.detached {
+                for await event in source.makeEventStream() {
+                    received.set(event)
+                    eventSignal.signal()
+                    break
+                }
+            }
+            defer { streamTask.cancel() }
+
+            let installer = CodexHookInstaller(
+                hooksURL: FileManager.default.temporaryDirectory.appendingPathComponent("unused-hooks.json"),
+                token: token,
+                port: port
+            )
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/sh")
+            process.arguments = ["-c", installer.command]
+            let input = Pipe()
+            process.standardInput = input
+            try process.run()
+
+            // A real PostToolUse can carry a large tool_response. curl still
+            // frames it with Content-Length below 1 MiB, so the receiver has to
+            // accept it instead of rejecting it as oversized.
+            let filler = String(repeating: "x", count: 800 * 1_024)
+            let payload = "{\"session_id\":\"large-session\",\"turn_id\":\"turn-1\","
+                + "\"hook_event_name\":\"Stop\",\"tool_input\":{\"cmd\":\"\(filler)\"}}"
+            try expect(payload.utf8.count > 512 * 1_024)
+            input.fileHandleForWriting.write(Data(payload.utf8))
+            try input.fileHandleForWriting.close()
+            process.waitUntilExit()
+
+            try expect(process.terminationStatus == 0)
+            try expect(eventSignal.wait(timeout: .now() + 5) == .success)
+            try expect(received.value?.sourceID == "codex:large-session")
+            try expect(received.value?.kind == .achievement)
+            // The oversized field must not survive into the domain event.
+            try expect(received.value?.metadata.isEmpty == true)
+        },
         LogicTest(name: "interest placement stays near window edge and avoids pointer") {
             let display = DisplaySnapshot(
                 id: "main",

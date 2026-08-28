@@ -19,7 +19,11 @@ final class LoopbackHookReceiver: @unchecked Sendable {
         lock.withLock { receiverState }
     }
 
-    private static let maximumRequestBytes = 256 * 1_024
+    /// Bounds how much an unauthenticated local sender can make Roamling
+    /// buffer, since the token is only checked once the body is complete.
+    /// 1 MiB is where curl starts sending `Expect: 100-continue`, which this
+    /// receiver never answers, so a larger cap could not accept more anyway.
+    private static let maximumRequestBytes = 1_024 * 1_024
     private let token: String
     private let tokenHeader: String
     private let path: String
