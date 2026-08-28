@@ -22,7 +22,7 @@ public final class RuntimeTuningWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "Roamling Behavior Tuning"
+        window.title = localized("tuning.window.title")
         window.isReleasedWhenClosed = false
         window.center()
         window.setFrameAutosaveName("RoamlingBehaviorTuning")
@@ -92,32 +92,32 @@ private struct RuntimeTuningView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("MVP 0 / 0.5 feel lab")
+            Text(localized("tuning.header"))
                 .font(.title2.weight(.semibold))
-            Text("Changes apply immediately and are saved. This panel tunes roaming and pointer interaction only; MVP 0.7 rest timing stays fixed during its first validation pass.")
+            Text(localized("tuning.footer"))
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             Divider()
-            Text("Movement")
+            Text(localized("tuning.section.movement"))
                 .font(.headline)
             TuningSliderRow(
-                title: "Walk speed",
+                title: localized("tuning.walkSpeed"),
                 value: model.binding(\.walkingSpeed),
                 range: 20...160,
                 step: 1,
                 style: .pointsPerSecond
             )
             TuningSliderRow(
-                title: "Pause between walks",
+                title: localized("tuning.wanderPause"),
                 value: model.binding(\.wanderPause),
                 range: 2...40,
                 step: 1,
                 style: .seconds
             )
             TuningSliderRow(
-                title: "Other-display trips",
+                title: localized("tuning.crossDisplay"),
                 value: model.binding(\.crossDisplayWanderChance),
                 range: 0...1,
                 step: 0.01,
@@ -125,53 +125,53 @@ private struct RuntimeTuningView: View {
             )
 
             Divider()
-            Text("Pointer & Catch")
+            Text(localized("tuning.section.pointer"))
                 .font(.headline)
             TuningSliderRow(
-                title: "Notice distance",
+                title: localized("tuning.noticeDistance"),
                 value: model.binding(\.pointerAwarenessDistance),
                 range: 140...360,
                 step: 5,
                 style: .points
             )
             TuningSliderRow(
-                title: "Catch arm radius",
+                title: localized("tuning.catchArm"),
                 value: model.binding(\.catchArmDistance),
                 range: 40...140,
                 step: 2,
                 style: .points
             )
             TuningSliderRow(
-                title: "Catch speed needed",
+                title: localized("tuning.catchSpeed"),
                 value: model.binding(\.catchApproachSpeed),
                 range: 150...900,
                 step: 10,
                 style: .pointsPerSecond
             )
             TuningSliderRow(
-                title: "Catch window",
+                title: localized("tuning.catchWindow"),
                 value: model.binding(\.catchWindow),
                 range: 0.15...1.2,
                 step: 0.05,
                 style: .secondsDecimal
             )
             TuningSliderRow(
-                title: "Hit region",
+                title: localized("tuning.hitRegion"),
                 value: model.binding(\.hitRegionScale),
                 range: 0.75...1.3,
                 step: 0.01,
                 style: .multiplier
             )
-            Text("A lower catch-speed requirement and a larger arm radius/window make trackpad catching easier. Normal UI remains click-through until a fast approach is detected over the pet.")
+            Text(localized("tuning.pointerNote"))
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
             Spacer(minLength: 0)
             HStack {
-                Button("Reset Defaults") { model.reset() }
+                Button(localized("button.resetDefaults")) { model.reset() }
                 Spacer()
-                Button("Done", action: onDone)
+                Button(localized("button.done"), action: onDone)
                     .keyboardShortcut(.defaultAction)
             }
         }
@@ -210,17 +210,17 @@ private enum TuningValueStyle {
     func string(for value: Double) -> String {
         switch self {
         case .pointsPerSecond:
-            "\(Int(value.rounded())) pt/s"
+            localizedFormat("unit.speed", Int(value.rounded()))
         case .seconds:
-            "\(Int(value.rounded())) s"
+            localizedFormat("unit.seconds", Int(value.rounded()))
         case .secondsDecimal:
-            String(format: "%.2f s", value)
+            localizedFormat("unit.secondsPrecise", value)
         case .percent:
             "\(Int((value * 100).rounded()))%"
         case .points:
-            "\(Int(value.rounded())) pt"
+            localizedFormat("unit.points", Int(value.rounded()))
         case .multiplier:
-            String(format: "%.2f×", value)
+            localizedFormat("unit.multiplier", value)
         }
     }
 }

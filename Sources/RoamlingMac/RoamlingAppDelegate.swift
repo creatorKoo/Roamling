@@ -55,16 +55,16 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         guard let runtime, let menu = statusItem?.menu else { return }
         menu.removeAllItems()
 
-        let title = NSMenuItem(title: "Roamling — \(runtime.petDisplayName)", action: nil, keyEquivalent: "")
+        let title = NSMenuItem(title: localizedFormat("menu.title", runtime.petDisplayName), action: nil, keyEquivalent: "")
         title.isEnabled = false
         menu.addItem(title)
         menu.addItem(.separator())
 
-        let petItem = NSMenuItem(title: "Pet", action: nil, keyEquivalent: "")
-        let petMenu = NSMenu(title: "Pet")
+        let petItem = NSMenuItem(title: localized("menu.pet"), action: nil, keyEquivalent: "")
+        let petMenu = NSMenu(title: localized("menu.pet"))
         for kind in BuiltInPetKind.allCases {
             let builtIn = NSMenuItem(
-                title: "\(kind.displayName) (Built-in)",
+                title: localizedFormat("menu.pet.builtin", kind.displayName),
                 action: #selector(selectBuiltInPet(_:)),
                 keyEquivalent: ""
             )
@@ -88,8 +88,8 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         petItem.submenu = petMenu
         menu.addItem(petItem)
 
-        let sizeItem = NSMenuItem(title: "Size", action: nil, keyEquivalent: "")
-        let sizeMenu = NSMenu(title: "Size")
+        let sizeItem = NSMenuItem(title: localized("menu.size"), action: nil, keyEquivalent: "")
+        let sizeMenu = NSMenu(title: localized("menu.size"))
         for (label, value) in [("0.75×", 0.75), ("1.0×", 1.0), ("1.25×", 1.25), ("1.5×", 1.5)] {
             let item = NSMenuItem(title: label, action: #selector(selectSize(_:)), keyEquivalent: "")
             item.target = self
@@ -102,23 +102,23 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         menu.addItem(.separator())
 
         menu.addItem(toggleItem(
-            title: "Roaming",
+            title: localized("menu.roaming"),
             checked: runtime.isRoamingEnabled,
             action: #selector(toggleRoaming(_:))
         ))
         menu.addItem(toggleItem(
-            title: "Avoid Pointer",
+            title: localized("menu.avoidPointer"),
             checked: runtime.isPointerAvoidanceEnabled,
             action: #selector(togglePointerAvoidance(_:))
         ))
         menu.addItem(toggleItem(
-            title: "Catch & Drag",
+            title: localized("menu.catchDrag"),
             checked: runtime.areInteractionsEnabled,
             action: #selector(toggleInteractions(_:))
         ))
 
         let tuning = NSMenuItem(
-            title: "Behavior Tuning…",
+            title: localized("menu.tuning"),
             action: #selector(showBehaviorTuning),
             keyEquivalent: ","
         )
@@ -126,7 +126,7 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         menu.addItem(tuning)
 
         let stretch = NSMenuItem(
-            title: "Stretch Now",
+            title: localized("menu.stretch"),
             action: #selector(stretchNow),
             keyEquivalent: ""
         )
@@ -141,33 +141,33 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         codex.submenu = makeCodexMenu(runtime: runtime)
         menu.addItem(codex)
 
-        let accessibility = NSMenuItem(title: "Accessibility", action: nil, keyEquivalent: "")
+        let accessibility = NSMenuItem(title: localized("menu.accessibility"), action: nil, keyEquivalent: "")
         accessibility.submenu = makeAccessibilityMenu(runtime: runtime)
         menu.addItem(accessibility)
 
         menu.addItem(.separator())
         let openFolder = NSMenuItem(
-            title: "Open Pet Folder…",
+            title: localized("menu.openPetFolder"),
             action: #selector(openPetFolder),
             keyEquivalent: ""
         )
         openFolder.target = self
         menu.addItem(openFolder)
 
-        let reload = NSMenuItem(title: "Reload Pets", action: #selector(reloadPets), keyEquivalent: "r")
+        let reload = NSMenuItem(title: localized("menu.reloadPets"), action: #selector(reloadPets), keyEquivalent: "r")
         reload.target = self
         menu.addItem(reload)
         menu.addItem(.separator())
 
         let about = NSMenuItem(
-            title: "About Roamling",
+            title: localized("menu.about"),
             action: #selector(showAbout),
             keyEquivalent: ""
         )
         about.target = self
         menu.addItem(about)
 
-        let quit = NSMenuItem(title: "Quit Roamling", action: #selector(quit), keyEquivalent: "q")
+        let quit = NSMenuItem(title: localized("menu.quit"), action: #selector(quit), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
     }
@@ -182,15 +182,15 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
     private func makeClaudeCodeMenu(runtime: RoamlingRuntime) -> NSMenu {
         let menu = NSMenu(title: "Claude Code")
         let integrationText = switch runtime.claudeCodeIntegrationStatus {
-        case .installed: "Hooks: Installed"
-        case .needsRepair: "Hooks: Needs Repair"
-        case .notInstalled: "Hooks: Not Installed"
+        case .installed: localized("status.hooks.installed")
+        case .needsRepair: localized("status.hooks.needsRepair")
+        case .notInstalled: localized("status.hooks.notInstalled")
         }
         let receiverText = switch runtime.claudeCodeReceiverState {
-        case .ready: "Receiver: Ready"
-        case .starting: "Receiver: Starting"
-        case .stopped: "Receiver: Stopped"
-        case .failed: "Receiver: Unavailable"
+        case .ready: localized("status.receiver.ready")
+        case .starting: localized("status.receiver.starting")
+        case .stopped: localized("status.receiver.stopped")
+        case .failed: localized("status.receiver.unavailable")
         }
         for text in [integrationText, receiverText] {
             let item = NSMenuItem(title: text, action: nil, keyEquivalent: "")
@@ -200,8 +200,8 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         menu.addItem(.separator())
 
         let installTitle = runtime.claudeCodeIntegrationStatus == .notInstalled
-            ? "Install Integration…"
-            : "Repair Integration…"
+            ? localized("action.install")
+            : localized("action.repair")
         let install = NSMenuItem(
             title: installTitle,
             action: #selector(installClaudeCodeIntegration),
@@ -212,7 +212,7 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
 
         if runtime.claudeCodeIntegrationStatus != .notInstalled {
             let remove = NSMenuItem(
-                title: "Remove Integration…",
+                title: localized("action.remove"),
                 action: #selector(removeClaudeCodeIntegration),
                 keyEquivalent: ""
             )
@@ -221,7 +221,7 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         }
 
         let test = NSMenuItem(
-            title: "Test Reaction",
+            title: localized("action.testReaction"),
             action: #selector(testClaudeCodeReaction),
             keyEquivalent: ""
         )
@@ -231,10 +231,10 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
     }
 
     private func makeAccessibilityMenu(runtime: RoamlingRuntime) -> NSMenu {
-        let menu = NSMenu(title: "Accessibility")
+        let menu = NSMenu(title: localized("menu.accessibility"))
         let authorized = runtime.isAccessibilityAuthorized
         let status = NSMenuItem(
-            title: authorized ? "Caret Awareness: On" : "Caret Awareness: Off",
+            title: authorized ? localized("accessibility.status.on") : localized("accessibility.status.off"),
             action: nil,
             keyEquivalent: ""
         )
@@ -246,7 +246,7 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
             // macOS owns revocation; pointing at it beats a button that cannot
             // actually take the permission back.
             let hint = NSMenuItem(
-                title: "Turn off in System Settings › Privacy & Security",
+                title: localized("accessibility.revoke.hint"),
                 action: nil,
                 keyEquivalent: ""
             )
@@ -254,7 +254,7 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
             menu.addItem(hint)
         } else {
             let enable = NSMenuItem(
-                title: "Enable Caret Awareness…",
+                title: localized("accessibility.enable"),
                 action: #selector(enableAccessibility),
                 keyEquivalent: ""
             )
@@ -267,15 +267,15 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
     private func makeCodexMenu(runtime: RoamlingRuntime) -> NSMenu {
         let menu = NSMenu(title: "Codex")
         let integrationText = switch runtime.codexIntegrationStatus {
-        case .installed: "Hooks: Installed"
-        case .needsRepair: "Hooks: Needs Repair"
-        case .notInstalled: "Hooks: Not Installed"
+        case .installed: localized("status.hooks.installed")
+        case .needsRepair: localized("status.hooks.needsRepair")
+        case .notInstalled: localized("status.hooks.notInstalled")
         }
         let receiverText = switch runtime.codexReceiverState {
-        case .ready: "Receiver: Ready"
-        case .starting: "Receiver: Starting"
-        case .stopped: "Receiver: Stopped"
-        case .failed: "Receiver: Unavailable"
+        case .ready: localized("status.receiver.ready")
+        case .starting: localized("status.receiver.starting")
+        case .stopped: localized("status.receiver.stopped")
+        case .failed: localized("status.receiver.unavailable")
         }
         for text in [integrationText, receiverText] {
             let item = NSMenuItem(title: text, action: nil, keyEquivalent: "")
@@ -285,8 +285,8 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         menu.addItem(.separator())
 
         let installTitle = runtime.codexIntegrationStatus == .notInstalled
-            ? "Install Integration…"
-            : "Repair Integration…"
+            ? localized("action.install")
+            : localized("action.repair")
         let install = NSMenuItem(
             title: installTitle,
             action: #selector(installCodexIntegration),
@@ -297,7 +297,7 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
 
         if runtime.codexIntegrationStatus != .notInstalled {
             let remove = NSMenuItem(
-                title: "Remove Integration…",
+                title: localized("action.remove"),
                 action: #selector(removeCodexIntegration),
                 keyEquivalent: ""
             )
@@ -306,7 +306,7 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         }
 
         let test = NSMenuItem(
-            title: "Test Reaction",
+            title: localized("action.testReaction"),
             action: #selector(testCodexReaction),
             keyEquivalent: ""
         )
@@ -359,29 +359,24 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
     @objc private func installClaudeCodeIntegration() {
         guard let runtime else { return }
         let alert = NSAlert()
-        alert.messageText = "Install Claude Code integration?"
-        alert.informativeText = """
-        Roamling will add local lifecycle command hooks to ~/.claude/settings.json.
-        Existing settings and hooks are preserved, and a one-time backup is created.
-
-        Prompt text, tool input/output, transcripts, and source code are not stored or logged.
-        """
-        alert.addButton(withTitle: "Install")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = localized("alert.claude.install.title")
+        alert.informativeText = localized("alert.claude.install.body")
+        alert.addButton(withTitle: localized("button.install"))
+        alert.addButton(withTitle: localized("button.cancel"))
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        presentIntegrationResult(runtime.installClaudeCodeIntegration(), success: "Claude Code integration installed.")
+        presentIntegrationResult(runtime.installClaudeCodeIntegration(), success: localized("result.claude.installed"))
         rebuildMenu()
     }
 
     @objc private func removeClaudeCodeIntegration() {
         guard let runtime else { return }
         let alert = NSAlert()
-        alert.messageText = "Remove Claude Code integration?"
-        alert.informativeText = "Only Roamling's hook handlers will be removed. Other Claude Code settings and hooks stay unchanged."
-        alert.addButton(withTitle: "Remove")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = localized("alert.claude.remove.title")
+        alert.informativeText = localized("alert.claude.remove.body")
+        alert.addButton(withTitle: localized("button.remove"))
+        alert.addButton(withTitle: localized("button.cancel"))
         guard alert.runModal() == .alertFirstButtonReturn else { return }
-        presentIntegrationResult(runtime.removeClaudeCodeIntegration(), success: "Claude Code integration removed.")
+        presentIntegrationResult(runtime.removeClaudeCodeIntegration(), success: localized("result.claude.removed"))
         rebuildMenu()
     }
 
@@ -392,21 +387,15 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
     @objc private func installCodexIntegration() {
         guard let runtime else { return }
         let alert = NSAlert()
-        alert.messageText = "Install Codex integration?"
-        alert.informativeText = """
-        Roamling will add local lifecycle command hooks to ~/.codex/hooks.json.
-        Existing hooks and config.toml (including notify) are preserved, and a one-time backup is created.
-
-        Prompt text, tool input/output, transcripts, and source code are not stored or logged.
-        Restart Codex after installation and approve the new hook trust prompt.
-        """
-        alert.addButton(withTitle: "Install")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = localized("alert.codex.install.title")
+        alert.informativeText = localized("alert.codex.install.body")
+        alert.addButton(withTitle: localized("button.install"))
+        alert.addButton(withTitle: localized("button.cancel"))
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         presentIntegrationResult(
             runtime.installCodexIntegration(),
-            success: "Codex integration installed.",
-            detail: "Restart Codex and approve its new hook trust prompt."
+            success: localized("result.codex.installed"),
+            detail: localized("result.detail.codex.installed")
         )
         rebuildMenu()
     }
@@ -414,15 +403,15 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
     @objc private func removeCodexIntegration() {
         guard let runtime else { return }
         let alert = NSAlert()
-        alert.messageText = "Remove Codex integration?"
-        alert.informativeText = "Only Roamling's hook handlers will be removed. Other Codex hooks, config, and notify stay unchanged."
-        alert.addButton(withTitle: "Remove")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = localized("alert.codex.remove.title")
+        alert.informativeText = localized("alert.codex.remove.body")
+        alert.addButton(withTitle: localized("button.remove"))
+        alert.addButton(withTitle: localized("button.cancel"))
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         presentIntegrationResult(
             runtime.removeCodexIntegration(),
-            success: "Codex integration removed.",
-            detail: "Restart Codex sessions to stop using the removed hooks."
+            success: localized("result.codex.removed"),
+            detail: localized("result.detail.codex.removed")
         )
         rebuildMenu()
     }
@@ -430,16 +419,10 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
     @objc private func enableAccessibility() {
         guard let runtime else { return }
         let alert = NSAlert()
-        alert.messageText = "Enable caret awareness?"
-        alert.informativeText = """
-        macOS will ask you to allow Roamling under Accessibility. Roamling then reads \
-        the focused control's position and the text cursor's position so the pet can sit \
-        near your work without covering it.
-
-        It never reads what you type, the text you select, window titles, or document contents.
-        """
-        alert.addButton(withTitle: "Open System Settings")
-        alert.addButton(withTitle: "Cancel")
+        alert.messageText = localized("accessibility.alert.title")
+        alert.informativeText = localized("accessibility.alert.body")
+        alert.addButton(withTitle: localized("button.openSystemSettings"))
+        alert.addButton(withTitle: localized("button.cancel"))
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         runtime.requestAccessibilityAuthorization()
         rebuildMenu()
@@ -452,7 +435,7 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
     private func presentIntegrationResult(
         _ result: Result<Void, Error>,
         success: String,
-        detail: String = "New or resumed Claude Code sessions will now notify Roamling."
+        detail: String = localized("result.detail.claude")
     ) {
         let alert = NSAlert()
         switch result {
@@ -461,7 +444,7 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
             alert.informativeText = detail
         case let .failure(error):
             alert.alertStyle = .warning
-            alert.messageText = "Couldn’t update Claude Code settings"
+            alert.messageText = localized("error.claude.settings")
             alert.informativeText = error.localizedDescription
         }
         alert.runModal()
@@ -475,7 +458,7 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         case let .failure(error):
             let alert = NSAlert()
             alert.alertStyle = .warning
-            alert.messageText = "Couldn’t load this pet"
+            alert.messageText = localized("error.pet.load")
             alert.informativeText = error.localizedDescription
             alert.runModal()
         }
@@ -506,17 +489,9 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
     @objc private func showAbout() {
         let alert = NSAlert()
         alert.messageText = "Roamling"
-        alert.informativeText = """
-        A tiny companion that actually lives on your desktop.
-
-        Copyright © 2026 GooBeom Jeoung
-        Licensed under GNU GPL v3.0 only.
-        This program comes with absolutely no warranty.
-
-        Installed pet packages remain subject to their authors’ licenses.
-        """
-        alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "View Source")
+        alert.informativeText = localized("alert.about.body")
+        alert.addButton(withTitle: localized("button.ok"))
+        alert.addButton(withTitle: localized("menu.viewSource"))
         if alert.runModal() == .alertSecondButtonReturn,
            let sourceURL = URL(string: "https://github.com/creatorKoo/Roamling") {
             NSWorkspace.shared.open(sourceURL)

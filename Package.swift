@@ -7,6 +7,7 @@ import PackageDescription
 
 let package = Package(
     name: "Roamling",
+    defaultLocalization: "en",
     platforms: [
         .macOS(.v13)
     ],
@@ -33,6 +34,9 @@ let package = Package(
         .target(
             name: "RoamlingMac",
             dependencies: ["RoamlingCore", "RoamlingPet", "RoamlingSources"],
+            resources: [
+                .process("Resources")
+            ],
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("CoreGraphics"),

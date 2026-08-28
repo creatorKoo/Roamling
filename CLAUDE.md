@@ -24,6 +24,19 @@ XCTest 대신 dependency-free executable harness를 쓴다. Command Line Tools�
 compiler/SDK mismatch가 나면 두 script 모두 `ROAMLING_SWIFT_SDK=/path/to/MacOSX.sdk`
 로 우회한다. 새 Swift 파일에는 기존 파일과 같은 2줄 SPDX 헤더를 넣는다.
 
+## 사용자에게 보이는 문자열
+
+menu, alert, tuning panel copy는 전부 `Sources/RoamlingMac/Resources/{en,ko}.lproj/
+Localizable.strings`에 있고 `localized(_:)` / `localizedFormat(_:_:)`로 읽는다. 새 UI
+문자열을 넣을 때는 **두 파일에 같은 key를 넣는다.** en이 base라 ko를 빠뜨리면 조용히
+영어로 나온다. 언어 분기 코드는 쓰지 않는다 — 한국어는 ko.lproj, 나머지는 bundle이
+알아서 en으로 떨어진다.
+
+제품명(`Roamling`, `Claude Code`, `Codex`)은 번역하지 않는다.
+
+`RoamlingMac`도 resource bundle을 가지므로 `scripts/build-app.sh`가 `$BIN_DIR/*.bundle`을
+전부 복사한다. 빠지면 `Bundle.module`이 런타임에 trap한다.
+
 ## 모듈 경계
 
 ```text

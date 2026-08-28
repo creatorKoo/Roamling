@@ -33,9 +33,12 @@ APP_DIR="$REPOSITORY_DIR/build/Roamling.app"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 cp "$BIN_DIR/Roamling" "$APP_DIR/Contents/MacOS/Roamling"
 cp "$REPOSITORY_DIR/Support/Info.plist" "$APP_DIR/Contents/Info.plist"
-if [[ -d "$BIN_DIR/Roamling_RoamlingPet.bundle" ]]; then
-  cp -R "$BIN_DIR/Roamling_RoamlingPet.bundle" "$APP_DIR/Contents/Resources/"
-fi
+# Every target with resources produces its own bundle, and Bundle.module traps
+# at runtime when one is missing. Copy them all rather than naming each.
+for module_bundle in "$BIN_DIR"/*.bundle; do
+  [[ -d "$module_bundle" ]] || continue
+  cp -R "$module_bundle" "$APP_DIR/Contents/Resources/"
+done
 
 # A stable identity keeps the designated requirement pointed at a certificate
 # instead of the binary's cdhash, so macOS keeps a granted Accessibility
