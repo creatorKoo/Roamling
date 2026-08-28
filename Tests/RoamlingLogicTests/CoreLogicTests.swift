@@ -6,6 +6,44 @@ import RoamlingCore
 
 func coreLogicTests() -> [LogicTest] {
     [
+        LogicTest(name: "wander entry never strands the pet in another state") {
+            for state in BehaviorState.allCases {
+                var behavior = BehaviorController(state: state, enteredAt: 0)
+                let transition = behavior.handle(.beginWander, at: 1)
+                let expected = BehaviorController.wanderEntryStates.contains(state)
+                    ? BehaviorState.wander
+                    : state
+                try expect(
+                    transition.to == expected,
+                    "\(state) + beginWander produced \(transition.to)"
+                )
+            }
+        },
+        LogicTest(name: "wander entry set covers the sustained reaction states") {
+            // Stop hooks park the pet in .observe (via .glance) or .work. Both
+            // must be able to start roaming again, or the next route is walked
+            // wearing observe frames.
+            try expect(BehaviorController.wanderEntryStates.contains(.observe))
+            try expect(BehaviorController.wanderEntryStates.contains(.work))
+            try expect(BehaviorController.wanderEntryStates.contains(.wander))
+            for blocked in [BehaviorState.caught, .dragged, .sleep, .sit, .travelToInterest] {
+                try expect(
+                    !BehaviorController.wanderEntryStates.contains(blocked),
+                    "\(blocked) must not start a wander"
+                )
+            }
+        },
+        LogicTest(name: "observing pet roams and settles back to idle") {
+            var behavior = BehaviorController(state: .idle, enteredAt: 0)
+            behavior.handle(.reaction(.glance), at: 1)
+            try expect(behavior.state == .observe)
+
+            behavior.handle(.beginWander, at: 2)
+            try expect(behavior.state == .wander)
+
+            behavior.handle(.arrived, at: 3)
+            try expect(behavior.state == .idle)
+        },
         LogicTest(name: "coordinate transform round-trips complex layouts") {
             let frames = [
                 WorldRect(x: 0, y: 0, width: 1920, height: 1080),

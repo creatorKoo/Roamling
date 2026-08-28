@@ -991,11 +991,18 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
             nextWanderAt = timestamp + 2
             return
         }
+        // Claim the walking state before laying a route. Setting the route
+        // first left it in place when the state machine refused the
+        // transition, so the pet walked the whole leg animated as whatever it
+        // had been doing -- observe frames, which are the idle frames.
+        guard behavior.handle(.beginWander, at: timestamp).to == .wander else {
+            nextWanderAt = timestamp + 2
+            return
+        }
         let topology = DisplayTopology(displays: displays)
         let route = topology.route(from: movement.position, to: destination)
         movement.configuration.maximumSpeed = tuning.walkingSpeed
         movement.setRoute(route.waypoints)
-        behavior.handle(.beginWander, at: timestamp)
         if !movement.hasRoute { nextWanderAt = timestamp + 2 }
     }
 
@@ -1109,37 +1116,11 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     }
 
     private func updateAnimation(pointerDegrees: Double?) {
-        let capability: PetCapability
-        switch behavior.state {
-        case .wander, .evadePointer, .findSleepSpot:
-            capability = movement.velocity.dx < 0 ? .moveLeft : .moveRight
-        case .sit:
-            capability = .sit
-        case .lookAtPointer, .observe:
-            capability = .observe
-        case .caught:
-            capability = .caught
-        case .dragged:
-            capability = ProcessInfo.processInfo.systemUptime < caughtAnimationUntil
-                ? .caught
-                : .dragged
-        case .dropped:
-            capability = .landing
-        case .work:
-            capability = .work
-        case .waitingForUser:
-            capability = .paw
-        case .celebrate:
-            capability = .celebrate
-        case .sad:
-            capability = .fail
-        case .sleep:
-            capability = .sleep
-        case .stretch, .wake:
-            capability = .stretch
-        default:
-            capability = .idle
-        }
+        let capability = PetCapabilityMapping.capability(
+            for: behavior.state,
+            velocityDX: movement.velocity.dx,
+            isCaughtTransitionActive: ProcessInfo.processInfo.systemUptime < caughtAnimationUntil
+        )
         animationPlayer.setCapability(capability)
         animationPlayer.setLookDirection(degrees: pointerDegrees)
     }

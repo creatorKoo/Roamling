@@ -3,7 +3,7 @@
 
 import Foundation
 
-public enum BehaviorState: String, Codable, Hashable, Sendable {
+public enum BehaviorState: String, CaseIterable, Codable, Hashable, Sendable {
     case idle
     case wander
     case lookAtPointer
@@ -59,6 +59,17 @@ public struct BehaviorTransition: Equatable, Sendable {
 }
 
 public struct BehaviorController: Sendable {
+    /// States that `.beginWander` may start roaming from.
+    ///
+    /// `.observe` and `.work` belong here because the activity that parked the
+    /// pet in them is already cleared before roaming runs, and `.wander` because
+    /// a route can be cancelled without ever arriving. Omitting any of them
+    /// strands the pet: the caller lays a route the state machine refuses, and
+    /// the pet walks it wearing the wrong animation.
+    public static let wanderEntryStates: Set<BehaviorState> = [
+        .idle, .dropped, .wander, .observe, .work
+    ]
+
     public private(set) var state: BehaviorState
     public private(set) var enteredAt: TimeInterval
 
@@ -73,7 +84,9 @@ public struct BehaviorController: Sendable {
 
         switch input {
         case .beginWander:
-            if state == .idle || state == .dropped { transition(to: .wander, at: timestamp) }
+            if BehaviorController.wanderEntryStates.contains(state) {
+                transition(to: .wander, at: timestamp)
+            }
         case .arrived:
             if state == .wander || state == .travelToInterest { transition(to: .idle, at: timestamp) }
         case .beginRest:

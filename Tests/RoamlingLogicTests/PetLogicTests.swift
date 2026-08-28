@@ -4,11 +4,84 @@
 import CoreGraphics
 import Foundation
 import ImageIO
+import RoamlingCore
 import RoamlingPet
 import UniformTypeIdentifiers
 
 func petLogicTests() -> [LogicTest] {
     [
+        LogicTest(name: "only idle behavior maps to the idle capability") {
+            for state in BehaviorState.allCases {
+                for velocityDX in [-12.0, 0.0, 12.0] {
+                    let capability = PetCapabilityMapping.capability(
+                        for: state,
+                        velocityDX: velocityDX,
+                        isCaughtTransitionActive: false
+                    )
+                    try expect(
+                        capability != .idle || state == .idle,
+                        "\(state) fell back to the idle capability"
+                    )
+                }
+            }
+        },
+        LogicTest(name: "every walking behavior animates directionally") {
+            for state in PetCapabilityMapping.movingStates {
+                let left = PetCapabilityMapping.capability(
+                    for: state,
+                    velocityDX: -12,
+                    isCaughtTransitionActive: false
+                )
+                let right = PetCapabilityMapping.capability(
+                    for: state,
+                    velocityDX: 12,
+                    isCaughtTransitionActive: false
+                )
+                try expect(left == .moveLeft, "\(state) must walk left")
+                try expect(right == .moveRight, "\(state) must walk right")
+            }
+            // Hook-driven travel used to slide across the desktop on idle frames.
+            try expect(PetCapabilityMapping.movingStates.contains(.travelToInterest))
+        },
+        LogicTest(name: "drag keeps the caught animation during its transition") {
+            try expect(
+                PetCapabilityMapping.capability(
+                    for: .dragged,
+                    velocityDX: 0,
+                    isCaughtTransitionActive: true
+                ) == .caught
+            )
+            try expect(
+                PetCapabilityMapping.capability(
+                    for: .dragged,
+                    velocityDX: 0,
+                    isCaughtTransitionActive: false
+                ) == .dragged
+            )
+        },
+        LogicTest(name: "every behavior resolves to a built-in track") {
+            for kind in [BuiltInPetKind.fatMochi, .mochi] {
+                let resolver = MascotPetFactory.make(kind).resolver
+                for state in BehaviorState.allCases {
+                    let capability = PetCapabilityMapping.capability(
+                        for: state,
+                        velocityDX: -12,
+                        isCaughtTransitionActive: false
+                    )
+                    let track = try require(
+                        resolver.resolve(capability),
+                        "\(kind) has no track for \(state)"
+                    )
+                    try expect(!track.frames.isEmpty, "\(kind) track for \(state) is empty")
+                    if PetCapabilityMapping.movingStates.contains(state) {
+                        try expect(
+                            track.name != "idle",
+                            "\(kind) resolved \(state) to the idle track"
+                        )
+                    }
+                }
+            }
+        },
         LogicTest(name: "official minimal v2 manifest decodes") {
             let json = """
             {
