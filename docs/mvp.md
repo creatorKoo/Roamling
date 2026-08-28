@@ -247,7 +247,7 @@ listener, Claude/Codex 완료 payload의 HTTP 204 수신을 확인했다. hook �
 - 다른 source의 permission request는 dwell을 깨고 관심을 가져갈 수 있다.
 - routine tool completion마다 축하하거나 monitor를 왕복하지 않는다.
 - Stop/completion은 intensity에 맞는 약 2.2초 반응을 하고 다음 active source가 있으면 이어서 본다.
-- 53개의 pure/transport test와 signed release app build를 통과한다.
+- 54개의 pure/transport test와 signed release app build를 통과한다.
 - 실제 Claude와 Codex session에서 각각 start → tool use → completion을 한 번 체감 확인한다.
 
 ## Exit rule

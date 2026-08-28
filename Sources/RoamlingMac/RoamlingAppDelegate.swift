@@ -20,6 +20,7 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         let runtime = RoamlingRuntime()
         self.runtime = runtime
         runtime.start()
+        runtime.repairClaudeCodeIntegrationIfNeeded()
         setupMenuBar()
 
         // Starts the complete AppKit lifecycle for automated packaging checks,
@@ -322,7 +323,7 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         let alert = NSAlert()
         alert.messageText = "Install Claude Code integration?"
         alert.informativeText = """
-        Roamling will add local HTTP lifecycle hooks to ~/.claude/settings.json.
+        Roamling will add local lifecycle command hooks to ~/.claude/settings.json.
         Existing settings and hooks are preserved, and a one-time backup is created.
 
         Prompt text, tool input/output, transcripts, and source code are not stored or logged.

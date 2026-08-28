@@ -322,6 +322,15 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         }
     }
 
+    /// Upgrades an existing install to the current handler shape without asking
+    /// again. Returns nil when there is nothing to repair, so a machine that
+    /// never opted in keeps an untouched `settings.json`.
+    @discardableResult
+    public func repairClaudeCodeIntegrationIfNeeded() -> Result<Void, Error>? {
+        guard claudeCodeInstaller.status() == .needsRepair else { return nil }
+        return installClaudeCodeIntegration()
+    }
+
     @discardableResult
     public func removeClaudeCodeIntegration() -> Result<Void, Error> {
         do {

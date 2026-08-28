@@ -109,8 +109,11 @@ func sourceLogicTests() -> [LogicTest] {
             let hooks = try require(installed["hooks"] as? [String: Any])
             let preToolGroups = try require(hooks["PreToolUse"] as? [[String: Any]])
             let handlers = preToolGroups.flatMap { $0["hooks"] as? [[String: Any]] ?? [] }
-            try expect(handlers.filter { $0["type"] as? String == "command" }.count == 1)
-            try expect(handlers.filter { $0["url"] as? String == installer.endpoint.absoluteString }.count == 1)
+            try expect(handlers.count == 2)
+            try expect(handlers.filter {
+                ($0["command"] as? String)?.contains(ClaudeCodeHookInstaller.marker) == true
+            }.count == 1)
+            try expect(handlers.contains { $0["command"] as? String == "true" })
 
             try installer.remove()
             try expect(installer.status() == .notInstalled)
@@ -120,6 +123,46 @@ func sourceLogicTests() -> [LogicTest] {
             let remaining = remainingGroups.flatMap { $0["hooks"] as? [[String: Any]] ?? [] }
             try expect(remaining.count == 1)
             try expect(remaining[0]["command"] as? String == "true")
+        },
+        LogicTest(name: "Claude hook install replaces the legacy http handler") {
+            let folder = FileManager.default.temporaryDirectory
+                .appendingPathComponent("roamling-claude-legacy-\(UUID().uuidString)", isDirectory: true)
+            defer { try? FileManager.default.removeItem(at: folder) }
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let settings = folder.appendingPathComponent("settings.json")
+            let installer = ClaudeCodeHookInstaller(settingsURL: settings, token: "test-token")
+            let legacy = Data(#"""
+            {
+              "hooks":{"SessionEnd":[{"hooks":[{
+                "type":"http",
+                "url":"http://127.0.0.1:47831/v1/hooks/claude-code",
+                "timeout":2,
+                "headers":{"X-Roamling-Token":"test-token"}
+              }]}]}
+            }
+            """#.utf8)
+            try legacy.write(to: settings)
+
+            // A pre-command install is stale, not absent, so launch repair can
+            // upgrade it without asking the user to opt in again.
+            try expect(installer.status() == .needsRepair)
+
+            try installer.install()
+            try expect(installer.status() == .installed)
+
+            let repaired = try jsonRoot(at: settings)
+            let hooks = try require(repaired["hooks"] as? [String: Any])
+            let groups = try require(hooks["SessionEnd"] as? [[String: Any]])
+            let handlers = groups.flatMap { $0["hooks"] as? [[String: Any]] ?? [] }
+            try expect(handlers.count == 1)
+            try expect(handlers[0]["type"] as? String == "command")
+            try expect(!handlers.contains { $0["url"] is String })
+
+            let command = try require(handlers[0]["command"] as? String)
+            try expect(command.contains(ClaudeCodeHookInstaller.marker))
+            try expect(command.contains(ClaudeCodeHookInstaller.tokenHeader))
+            // Swallowed failure is the whole point of the migration.
+            try expect(command.contains(">/dev/null 2>&1 || true"))
         },
         LogicTest(name: "Codex hook normalizes lifecycle without content metadata") {
             let data = Data(#"""

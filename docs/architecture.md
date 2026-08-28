@@ -101,10 +101,13 @@ Claude/Codex payload를 일반 event로 정규화한다. `ActivitySource`는 eve
 
 MVP 1의 Claude transport는 `127.0.0.1:47831`에만 bind하고 임의 생성 token을
 `X-Roamling-Token` header로 확인한다. user가 menu에서 설치를 선택하기 전에는 Claude
-settings를 변경하지 않는다. installer는 각 event에 동일한 HTTP handler를 병합하고
-재설치 때 자기 handler만 교체한다. 제거도 URL signature가 일치하는 Roamling handler만
-삭제한다. HTTP connection failure와 timeout은 Claude Code 공식 계약에서 non-blocking이며,
-Roamling response도 빈 204라 agent decision에 관여하지 않는다.
+settings를 변경하지 않는다. installer는 각 event에 Codex 쪽과 같은 모양의 command
+handler를 병합한다. handler는 stdin payload를 curl로 loopback에 넘기고 `|| true`로
+실패를 삼킨다. 처음 쓰던 native `http` handler는 Roamling이 꺼져 있을 때 session 종료마다
+hook error를 노출했고, command handler는 companion이 없어도 agent에게 아무것도 보이지
+않는다. 재설치는 자기 handler만 교체하고 제거도 signature가 일치하는 Roamling handler만
+삭제한다. 옛 `http` handler도 같은 signature로 인식하므로 실행 시 조용히 교체된다.
+Roamling response는 빈 204라 agent decision에 관여하지 않는다.
 
 HTTP body에는 Claude Code가 event별 상세 payload를 함께 보낼 수 있지만 decoder가 읽는
 필드는 `session_id`, optional `prompt_id`, `hook_event_name`, notification 분류뿐이다.

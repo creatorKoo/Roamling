@@ -13,6 +13,7 @@ public struct ClaudeCodeHookInstaller: Sendable {
     public static let defaultPort: UInt16 = 47_831
     public static let path = "/v1/hooks/claude-code"
     public static let tokenHeader = "X-Roamling-Token"
+    public static let marker = "roamling-claude-code-hook"
 
     public let settingsURL: URL
     public let endpoint: URL
@@ -78,27 +79,46 @@ public struct ClaudeCodeHookInstaller: Sendable {
         return root
     }
 
+    /// Claude Code command hooks receive JSON on stdin. curl forwards that byte
+    /// stream only to Roamling's authenticated loopback receiver. Failure is
+    /// swallowed so a closed companion can never surface a hook error, which a
+    /// native `http` handler did on every session that outlived the app.
+    public var command: String {
+        "/usr/bin/curl --silent --connect-timeout 0.15 --max-time 0.3 "
+            + "--request POST --header 'Content-Type: application/json' "
+            + "--header '\(Self.tokenHeader): \(token)' --data-binary @- "
+            + "'\(endpoint.absoluteString)' >/dev/null 2>&1 || true # \(Self.marker)"
+    }
+
     private func currentHandler() -> [String: Any] {
         [
-            "type": "http",
-            "url": endpoint.absoluteString,
-            "timeout": 2,
-            "headers": [Self.tokenHeader: token]
+            "type": "command",
+            "command": command,
+            "timeout": 2
         ]
     }
 
     private func handlerIsCurrent(_ handler: [String: Any]) -> Bool {
-        guard isRoamlingHandler(handler),
-              let headers = handler["headers"] as? [String: Any],
-              headers[Self.tokenHeader] as? String == token else { return false }
+        guard handler["type"] as? String == "command",
+              handler["command"] as? String == command else { return false }
         return (handler["timeout"] as? NSNumber)?.intValue == 2
     }
 
+    /// Also matches the legacy `http` handler so an existing install can be
+    /// repaired or removed instead of being stranded in the user's settings.
     private func isRoamlingHandler(_ handler: [String: Any]) -> Bool {
-        guard handler["type"] as? String == "http",
-              let url = handler["url"] as? String else { return false }
-        return url == endpoint.absoluteString
-            || (url.hasPrefix("http://127.0.0.1:") && url.hasSuffix(Self.path))
+        switch handler["type"] as? String {
+        case "command":
+            guard let command = handler["command"] as? String else { return false }
+            return command.contains(Self.marker)
+                || (command.contains(Self.path) && command.contains(Self.tokenHeader))
+        case "http":
+            guard let url = handler["url"] as? String else { return false }
+            return url == endpoint.absoluteString
+                || (url.hasPrefix("http://127.0.0.1:") && url.hasSuffix(Self.path))
+        default:
+            return false
+        }
     }
 
     private func matchingHandlers(in hooks: [String: Any]) -> [[String: Any]] {
