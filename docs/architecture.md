@@ -116,7 +116,10 @@ request buffer는 1 MiB로 제한하고 event 생성 직후 폐기하며 disk/lo
 body가 다 도착한 뒤에 하므로, 상한이 없으면 token을 모르는 local 프로세스도 임의 크기
 버퍼를 잡게 만들 수 있다. 1 MiB는 curl이 `Expect: 100-continue`를 붙이기 시작하는
 지점이기도 하다. receiver는 `100 Continue`를 보내지 않으므로 그보다 큰 payload는
-상한을 올려도 어차피 도착하지 않는다.
+상한을 올려도 어차피 도착하지 않는다. 나중에 1 MiB보다 큰 payload가 필요해지면 상한만
+올려서는 안 된다. header 단계에서 token을 먼저 검증하도록 `parse`를 둘로 나눠 인증 전
+버퍼링을 없애고, installer의 curl에 `--header 'Expect:'`를 추가해야 한다. 이때 Codex는
+hook trust 재승인이 필요하다.
 
 MVP 2의 Codex transport는 user가 명시적으로 설치한 `~/.codex/hooks.json` command
 handler가 stdin JSON을 `/usr/bin/curl`로 `127.0.0.1:47832`에 전달한다. 별도 token,
