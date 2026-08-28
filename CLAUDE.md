@@ -1,0 +1,102 @@
+# Roamling agent guide
+
+macOS desktop companion runtime. Swift 6 / AppKit / SwiftPM, GPL-3.0-only.
+제품 원칙은 하나다 — **Cute first. Useful second. Never annoying.** 반응 빈도나
+움직임을 늘리는 변경은 이 원칙을 먼저 통과해야 한다.
+
+이 파일은 `AGENTS.md`로도 심볼릭 링크돼 있어서 Claude Code와 Codex가 같은 규칙을 읽는다.
+규칙이 갈라지지 않도록 수정은 항상 `CLAUDE.md`에서 한다.
+
+## Build, test, run
+
+```sh
+swift build                    # 약 5초
+./scripts/test.sh              # RoamlingLogicTests, 실패 시 non-zero
+swift run Roamling
+./scripts/build-app.sh release # build/Roamling.app (ad-hoc codesign)
+```
+
+XCTest 대신 dependency-free executable harness를 쓴다. Command Line Tools의
+compiler/SDK mismatch가 나면 두 script 모두 `ROAMLING_SWIFT_SDK=/path/to/MacOSX.sdk`
+로 우회한다. 새 Swift 파일에는 기존 파일과 같은 2줄 SPDX 헤더를 넣는다.
+
+## 모듈 경계
+
+```text
+RoamlingCore/     OS 비의존. geometry, world, behavior, attention, reaction
+RoamlingPet/      Petdex manifest, atlas runtime, built-in mascot, fallback
+RoamlingSources/  ClaudeCode / Codex activity adapter + loopback transport
+RoamlingMac/      AppKit display, pointer, overlay, app runtime
+RoamlingApp/      entry point
+```
+
+의존 방향은 항상 바깥 → Core다. Core에 AppKit이나 agent-specific 타입을 넣지 않는다.
+자세한 근거는 `docs/architecture.md`, 현재 게이트와 acceptance criteria는
+`docs/mvp.md`(현재 **MVP 2: Claude + Codex**)에 있다. exit rule이 있으므로 사용자가
+실사용 확인을 하기 전에 다음 MVP로 넘어가지 않는다.
+
+## Atlas 규격은 두 종류다 — 절대 섞지 말 것
+
+| | 내장 마스코트 | Petdex/Codex pet package |
+|---|---|---|
+| 파일 | `Sources/RoamlingPet/Resources/BuiltInPets/*-runtime-atlas.png` | `~/.codex/pets/<id>/spritesheet.webp` + `pet.json` |
+| 배치 | 8열 × **7행**, cell 192×208 (1536×1456) | v1 8×**9**, v2 8×**11** |
+| 행 순서 | idle, running right, running left, sleeping, caught, stretching, landing | `docs/art` 및 pet manifest 참조 |
+
+내장 7행 레이아웃은 Roamling 내부 asset이지 새 Petdex 규격이 아니다. 현재 Mochi
+pet package는 8×9(1536×1872)이고 내장 Mochi atlas와 별개로 관리된다.
+
+pet 탐색 순서: `$ROAMLING_PET_PATH` → `~/Library/Application Support/Roamling/Pets`
+→ `~/.codex/pets` → `~/.petdex/pets`.
+
+## 아트 불변식 (`docs/art/mochi-animation-handoff.md`)
+
+프레임 결함의 원인이 기록돼 있다. 이 규칙을 완화하는 제안을 먼저 하지 않는다.
+
+- 프레임마다 머리부터 꼬리·네 발까지 **전신을 한 장으로** 새로 그린다.
+- 눈/발/얼굴만 생성해 붙이는 patch, cut-and-paste, inpainting fragment,
+  이전 프레임 조각 재사용 금지.
+- 한 strip 안에서 canvas, scale, ground line, body center가 고정된다.
+- 프레임의 visible pixel은 모두 하나의 connected component여야 한다. 떨어진
+  수염·털·발 조각이 있으면 수선하지 말고 해당 전신 프레임을 재제작한다.
+- 생성 배경은 flat `#00FF00`. chroma 제거·축소·중앙 정렬·mirror·packing은 Roamling
+  쪽에서 **완성된 전체 프레임 단위로만** 한다. 왼쪽 걷기는 승인된 오른쪽의 full-frame
+  mirror다.
+
+## 이미지 생성 경로
+
+Claude Code에는 이미지 생성 툴이 없다. 새 sprite가 필요하면 직접 만들려 하지 말고
+사용자에게 경로를 확인한다. 생성 이후가 Claude의 몫이다 — frame 추출, alpha/identity
+검증, atlas 합성, QA, packaging, Swift 런타임 작업. PNG는 직접 읽어 육안 QA할 수 있다.
+
+- **Mochi v1은 Codex의 `hatch-pet` 스킬로 완결한다.** 스킬 본체는
+  `~/.agents/skills/hatch-pet`에 있고 Codex 내장 `$imagegen`을 쓴다. Claude 쪽에는
+  설치하지 않기로 했다. 수동 경로가 필요하면 `docs/art/mochi-animation-prompts-ko.md`의
+  코드블록을 ChatGPT 이미지에 그대로 복붙한다.
+- **다음 펫부터는 PixelLab 이전을 검토한다.** 프레임 단위 sprite/animation을 직접
+  받으므로 지금의 strip 분할 → 재중앙정렬 단계가 사라진다. 이 단계가 기록된 detached
+  alpha component 결함의 원인이다. API는 구독 없이 USD credit 종량제로 쓸 수 있고
+  (`GET /balance`가 credits와 subscription을 따로 돌려준다), 무료 티어는 40 fast
+  generation에 생성 해상도 상한이 200×200이라 192×208 cell에는 padding이 필요하다.
+  Tier 1($12/월)부터 320×320.
+
+## Python
+
+시스템·Homebrew python3 어디에도 Pillow가 없다. 이미지 처리 script는 반드시
+`./scripts/pyimg.sh <script.py|-c '...'>` 로 실행한다 (uv의 임시 환경 경유).
+
+## 작업 중 상태와 output/
+
+`output/`은 git 미추적이고 `.gitignore`에 있다(수백 MB의 중간 산출물). **커밋에
+포함하지 않는다.** `git add -A` 대신 대상 경로를 명시한다.
+
+진행 중인 sprite 작업의 승인 상태는
+`output/hatch-pet/mochi-row-review/run/qa/approvals.json` 이 유일한 기록이다. 어떤
+row가 approved/pending인지 판단할 때 이 파일을 먼저 읽는다. 승인 근거는 notes 한
+줄뿐이므로, 반려된 후보를 다시 제안하기 전에 사용자에게 확인한다.
+
+## Commit
+
+영어 명령형 제목. 최근 이력은 `Add …` / `Document …` / `Improve …` 형태이고 이전
+이력에는 `feat:` `fix:` `tune:` `polish:` prefix가 섞여 있다. 새 커밋은 접두사 없는
+명령형 문장을 쓴다. 커밋과 push는 사용자가 요청할 때만 한다.
