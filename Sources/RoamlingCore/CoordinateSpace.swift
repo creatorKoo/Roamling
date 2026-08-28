@@ -33,6 +33,19 @@ public struct DesktopCoordinateSpace: Codable, Hashable, Sendable {
         )
     }
 
+    /// `CGWindowListCopyWindowInfo` and the accessibility APIs both report
+    /// top-left origin rects on a plane anchored to the primary display, which
+    /// is not the same anchor as the world plane once a second display sits
+    /// above it. Both adapters must fold them in through here.
+    public func rectFromCoreGraphics(_ rect: WorldRect, primaryTop: Double) -> WorldRect {
+        rectFromAppKit(WorldRect(
+            x: rect.minX,
+            y: primaryTop - rect.maxY,
+            width: rect.size.width,
+            height: rect.size.height
+        ))
+    }
+
     public func rectToAppKit(_ rect: WorldRect) -> WorldRect {
         WorldRect(
             x: rect.minX,

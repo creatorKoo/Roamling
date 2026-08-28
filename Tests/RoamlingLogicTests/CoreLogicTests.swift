@@ -57,6 +57,31 @@ func coreLogicTests() -> [LogicTest] {
             let rect = WorldRect(x: -750, y: 1200, width: 500, height: 400)
             try expect(space.rectToAppKit(space.rectFromAppKit(rect)) == rect)
         },
+        LogicTest(name: "CoreGraphics rects fold in from the primary display anchor") {
+            // Secondary display sits above the primary, so the world plane's top
+            // is not the primary display's top. CGWindowList and accessibility
+            // both measure down from the primary, and the gap between the two
+            // anchors is exactly what this conversion has to absorb.
+            let space = DesktopCoordinateSpace.fromAppKitFrames([
+                WorldRect(x: 0, y: 0, width: 1_200, height: 800),
+                WorldRect(x: 0, y: 800, width: 1_200, height: 600)
+            ])
+            try expect(space.worldTop == 1_400)
+
+            let onPrimary = space.rectFromCoreGraphics(
+                WorldRect(x: 100, y: 50, width: 400, height: 300),
+                primaryTop: 800
+            )
+            try expect(onPrimary == WorldRect(x: 100, y: 650, width: 400, height: 300))
+
+            // A window on the upper display reports negative CoreGraphics y and
+            // has to land near the top of the world plane, not off it.
+            let abovePrimary = space.rectFromCoreGraphics(
+                WorldRect(x: 0, y: -500, width: 200, height: 100),
+                primaryTop: 800
+            )
+            try expect(abovePrimary == WorldRect(x: 0, y: 100, width: 200, height: 100))
+        },
         LogicTest(name: "world clamp accounts for pet size") {
             let display = testDisplay("A", WorldRect(x: 0, y: 0, width: 1000, height: 800))
             let world = DesktopWorldSnapshot(displays: [display])

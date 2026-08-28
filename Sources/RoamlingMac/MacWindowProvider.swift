@@ -35,18 +35,20 @@ public final class MacWindowProvider: WindowProviding {
                   cgRect.width >= 120,
                   cgRect.height >= 100 else { return nil }
 
-            let appKitRect = WorldRect(
-                x: Double(cgRect.minX),
-                y: Double(primaryTop - cgRect.maxY),
-                width: Double(cgRect.width),
-                height: Double(cgRect.height)
-            )
             let app = NSRunningApplication(processIdentifier: pid)
             return WindowSnapshot(
                 id: String(number),
                 applicationIdentifier: app?.bundleIdentifier,
                 title: nil,
-                frame: space.rectFromAppKit(appKitRect),
+                frame: space.rectFromCoreGraphics(
+                    WorldRect(
+                        x: Double(cgRect.minX),
+                        y: Double(cgRect.minY),
+                        width: Double(cgRect.width),
+                        height: Double(cgRect.height)
+                    ),
+                    primaryTop: Double(primaryTop)
+                ),
                 isFocused: pid == frontmostPID
             )
         }
