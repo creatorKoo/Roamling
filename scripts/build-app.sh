@@ -48,7 +48,8 @@ if command -v codesign >/dev/null 2>&1; then
   else
     echo "Signed with identity: $CODESIGN_IDENTITY"
   fi
-  codesign -d -r- "$APP_DIR" 2>&1 | sed -n 's/^# designated => /Designated requirement: /p' || true
+  # codesign prefixes the line with '#' for ad-hoc but not for a real identity.
+  codesign -d -r- "$APP_DIR" 2>&1 | sed -n 's/^#* *designated => /Designated requirement: /p' || true
 fi
 
 echo "Built $APP_DIR"
