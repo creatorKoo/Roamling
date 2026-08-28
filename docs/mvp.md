@@ -180,7 +180,7 @@ Codex 0.147.0의 stable hook registry를 사용해 Claude와 Codex를 같은 gen
 관찰하는 안정적인 attach surface가 아니기 때문이다.
 
 ```text
-Claude HTTP hooks ---------+
+Claude command hooks ------+
                            |
 Codex command hooks -------+--> authenticated loopback receivers
                                       |
