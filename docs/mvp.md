@@ -172,7 +172,7 @@ CompanionEvent
 - 추가 macOS permission prompt 없이 동작한다.
 - 전체 automated test suite를 통과한다.
 
-## Current gate — MVP 2: Claude + Codex
+## Completed — MVP 2: Claude + Codex
 
 Codex 0.147.0의 stable hook registry를 사용해 Claude와 Codex를 같은 generic event path로
 연결한다. `notify`나 app-server를 기본 transport로 쓰지 않는다. `notify`는 완료 event만
@@ -247,12 +247,72 @@ listener, Claude/Codex 완료 payload의 HTTP 204 수신을 확인했다. hook �
 - 다른 source의 permission request는 dwell을 깨고 관심을 가져갈 수 있다.
 - routine tool completion마다 축하하거나 monitor를 왕복하지 않는다.
 - Stop/completion은 intensity에 맞는 약 2.2초 반응을 하고 다음 active source가 있으면 이어서 본다.
-- 55개의 pure/transport test와 signed release app build를 통과한다.
+- 62개의 pure/transport test와 signed release app build를 통과한다.
 - 실제 Claude와 Codex session에서 각각 start → tool use → completion을 한 번 체감 확인한다.
+
+2026-08-28 실사용 확인을 마치고 사용자가 다음 단계 진행을 승인했다. gate 안에서 세 가지를
+고쳤다. Claude handler를 Codex와 같은 command hook으로 바꿔 Roamling이 꺼져 있을 때 session
+종료마다 노출되던 hook error를 없앴고, loopback request 상한을 256 KiB에서 1 MiB로 올려 큰
+tool payload가 거절되지 않게 했으며, agent hook으로 이동하는 동안 idle frame으로 미끄러지던
+animation 두 경로를 고쳤다. 1 MiB보다 큰 payload가 필요해지면 상한만 올려서는 안 된다는
+점은 `docs/architecture.md`에 기록했다.
+
+## Current gate — MVP 3: It Watches Where You Work
+
+MVP 1/2의 coarse window hint는 frontmost process의 layer-0 bounds만 알기 때문에 창 아래쪽
+어딘가로만 갈 수 있었다. 이 gate는 Accessibility로 focused window, focused element, caret
+위치를 얻어 펫이 실제 작업 지점 근처에 자리잡되 그 지점을 가리지 않게 한다.
+
+permission은 사용자가 menu에서 켠 순간에만 설명과 함께 요청한다. 승인하지 않으면 MVP 2까지의
+동작이 그대로 유지된다.
+
+```text
+AXUIElement
+   |
+   +-- focused window / element bounds
+   +-- AXSelectedTextRange -> AXBoundsForRange -> caret rect
+                |
+                v
+          FocusSnapshot (OS 비의존 domain value)
+                |
+                v
+   BasicInterestPositionPlanner + BasicSafeZoneProvider
+                |
+                v
+          caret을 피해 앉는 destination
+```
+
+### In scope
+
+- `MacFocusProvider` — focused app/window/element bounds와 caret rect 조회
+- `FocusSnapshot` domain 타입과 이를 obstacle로 받는 pure planner 확장
+- `MacWindowProvider`의 AX detail 승격, 권한이 없으면 기존 `CGWindowList` coarse path 유지
+- AX 경로일 때 `LocationHint.confidence` 상향
+- menu에서 켤 때만 제시하는 permission 설명과 요청
+- 권한 거부·철회 시 즉시 coarse path 복귀
+- 개발과 배포 모두에서 TCC grant를 유지하는 stable code signing identity
+
+### Explicitly out of scope for this gate
+
+- ScreenCaptureKit / `VisualSafeZoneProvider` — MVP 4
+- OCR, 연속 capture, cloud vision
+- text 값, window title, document 내용 읽기
+- 정확한 terminal tab, IDE pane mapping
+- game/media source
+
+### Acceptance criteria
+
+- Accessibility 권한 없이 실행하면 MVP 2와 동일하게 동작한다.
+- 권한 승인 후 caret과 focused control을 가리지 않는 위치에 앉는다.
+- text 값, window title, document 내용을 model/metadata/log에 남기지 않는다.
+- 권한을 철회하면 다음 event부터 coarse path로 돌아간다.
+- AX 조회가 실패하거나 응답하지 않아도 pet 동작이 멈추지 않는다.
+- planner 확장을 pure test로 검증하고 전체 suite를 통과한다.
+- `ROAMLING_CODESIGN_IDENTITY`로 서명한 빌드에서 리빌드 후에도 권한이 유지된다.
 
 ## Exit rule
 
-사용자가 두 실제 session에서 반응 빈도, target 전환, 작업 방해 여부를 확인하기 전에는
-MVP 3 Accessibility/caret tracking으로 넘어가지 않는다. 위치가 부정확한 것은 현재
-permission-free coarse window hint의 알려진 한계로 기록한다. 반복 왕복이나 잦은 반응처럼
-`never annoying` 원칙을 깨는 문제만 MVP 2 안에서 수정한다.
+사용자가 실제 편집 session에서 펫이 caret을 가리지 않는지, 위치가 MVP 2보다 나아졌는지
+확인하기 전에는 MVP 4 visual placement로 넘어가지 않는다. AX 조회 비용이나 응답 지연으로
+펫 동작이 끊기는 문제는 MVP 3 안에서 수정한다. 권한을 주지 않은 사용자의 경험을 나쁘게
+만드는 변경은 이 gate에서 받지 않는다.
