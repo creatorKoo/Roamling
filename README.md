@@ -62,6 +62,11 @@ Create a local `.app` bundle:
 open build/Roamling.app
 ```
 
+The bundle is signed ad-hoc by default, which makes macOS treat every rebuild as
+a different app and forget granted permissions. Set
+`ROAMLING_CODESIGN_IDENTITY` to a code signing identity to keep those grants
+across builds.
+
 The tests use a dependency-free executable harness so they also run on minimal
 Command Line Tools installations that do not ship a compatible XCTest runner.
 They exit non-zero on any failed unit case. If a local CLT installation has a

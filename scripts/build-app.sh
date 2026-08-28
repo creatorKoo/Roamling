@@ -37,10 +37,18 @@ if [[ -d "$BIN_DIR/Roamling_RoamlingPet.bundle" ]]; then
   cp -R "$BIN_DIR/Roamling_RoamlingPet.bundle" "$APP_DIR/Contents/Resources/"
 fi
 
-# Bind Info.plist and resources into a valid local bundle signature. Release
-# distribution will replace this ad-hoc identity with Developer ID signing.
+# A stable identity keeps the designated requirement pointed at a certificate
+# instead of the binary's cdhash, so macOS keeps a granted Accessibility
+# permission across rebuilds. Ad-hoc resets it on every build.
+CODESIGN_IDENTITY="${ROAMLING_CODESIGN_IDENTITY:--}"
 if command -v codesign >/dev/null 2>&1; then
-  codesign --force --deep --sign - "$APP_DIR"
+  codesign --force --deep --sign "$CODESIGN_IDENTITY" "$APP_DIR"
+  if [[ "$CODESIGN_IDENTITY" == "-" ]]; then
+    echo "Signed ad-hoc. Set ROAMLING_CODESIGN_IDENTITY to keep TCC grants across builds."
+  else
+    echo "Signed with identity: $CODESIGN_IDENTITY"
+  fi
+  codesign -d -r- "$APP_DIR" 2>&1 | sed -n 's/^# designated => /Designated requirement: /p' || true
 fi
 
 echo "Built $APP_DIR"

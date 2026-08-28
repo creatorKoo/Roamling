@@ -5,3 +5,4 @@ DerivedData/
 *.xcuserstate
 .swiftpm/xcode/package.xcworkspace/xcuserdata/
 output/
+*.p12
