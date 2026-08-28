@@ -34,6 +34,7 @@ public enum MascotPetFactory {
     private static let columns = 8
     private static let poseDerivedRows = 4
     private static let authoredRows = 7
+    private static let standardRows = 9
 
     private enum Pose: Int {
         case idle
@@ -52,10 +53,10 @@ public enum MascotPetFactory {
     public static func make(_ kind: BuiltInPetKind = .fatMochi) -> PetAsset {
         switch kind {
         case .mochi:
-            if let atlas = loadSheet(named: "mochi-runtime-atlas"),
+            if let atlas = loadSheet(named: "mochi-standard-atlas"),
                atlas.width == cellWidth * columns,
-               atlas.height == cellHeight * authoredRows {
-                return makeAuthoredMochi(atlas: atlas)
+               atlas.height == cellHeight * standardRows {
+                return makeStandardMochi(atlas: atlas)
             }
         case .fatMochi:
             if let atlas = loadSheet(named: "fat-mochi-runtime-atlas"),
@@ -66,6 +67,56 @@ public enum MascotPetFactory {
         }
 
         return makePoseDerivedPet(kind)
+    }
+
+    /// Mochi ships the standard 8x9 Codex/Petdex row set rather than the
+    /// seven-row layout the other built-in uses. Every row is authored art, and
+    /// `AnimationResolver` already maps this taxonomy: work resolves to running,
+    /// observe to review, paw to waving, celebrate and landing to jumping, fail
+    /// to failed, caught and dragged to waiting. Only sit, sleep, and stretch
+    /// have no row here and fall back to idle.
+    private static func makeStandardMochi(atlas: CGImage) -> PetAsset {
+        let manifest = PetManifest(
+            id: BuiltInPetKind.mochi.manifestID,
+            displayName: BuiltInPetKind.mochi.displayName,
+            description: "Roamling's built-in Mochi mascot.",
+            spritesheetPath: "builtin://mochi",
+            frame: PetFrameManifest(
+                width: cellWidth,
+                height: cellHeight,
+                columns: columns,
+                rows: standardRows
+            )
+        )
+        var tracks = StandardPetAnimations.tracks(columns: columns)
+        let jumpRow = 4 * columns
+
+        // MVP 2 asks a completion to hold real motion for about 2.2 seconds and
+        // end at rest. The standard jumping track is a short loop, so the
+        // celebration plays the arc out and back and settles on the neutral pose.
+        tracks["jumping"] = track("jumping", frames: [
+            (jumpRow, 0.16), (jumpRow + 1, 0.14), (jumpRow + 2, 0.18),
+            (jumpRow + 3, 0.16), (jumpRow + 4, 0.20), (jumpRow + 3, 0.16),
+            (jumpRow + 2, 0.18), (jumpRow + 1, 0.14), (jumpRow, 0.88)
+        ], loops: false)
+
+        // Without this, `.landing` falls through to jumping and the pet throws a
+        // full celebration every time it is dropped.
+        tracks["landing"] = track("landing", frames: [
+            (jumpRow + 4, 0.10), (jumpRow + 3, 0.12),
+            (jumpRow + 2, 0.10), (jumpRow, 0.18)
+        ], loops: false)
+
+        return PetAsset(
+            manifest: manifest,
+            packageURL: nil,
+            atlas: atlas,
+            frameWidth: cellWidth,
+            frameHeight: cellHeight,
+            columns: columns,
+            rows: standardRows,
+            tracks: tracks
+        )
     }
 
     private static func makeAuthoredMochi(atlas: CGImage) -> PetAsset {
@@ -346,11 +397,12 @@ public enum MascotPetFactory {
     }
 
     private static func loadSheet(named name: String) -> CGImage? {
-        let resourceURL = Bundle.module.url(
-            forResource: name,
-            withExtension: "png",
-            subdirectory: "BuiltInPets"
-        ) ?? Bundle.module.url(forResource: name, withExtension: "png")
+        // WebP keeps the nine-row Mochi atlas under a megabyte and half the
+        // size of the equivalent PNG, and ImageIO decodes both.
+        let resourceURL = ["png", "webp"].lazy.compactMap { ext in
+            Bundle.module.url(forResource: name, withExtension: ext, subdirectory: "BuiltInPets")
+                ?? Bundle.module.url(forResource: name, withExtension: ext)
+        }.first
         guard let resourceURL,
               let source = CGImageSourceCreateWithURL(resourceURL as CFURL, nil) else { return nil }
         return CGImageSourceCreateImageAtIndex(source, 0, nil)

@@ -13,8 +13,8 @@ The pose sheets contain four key poses: idle, walking, sleeping, and caught.
 Both mascots now have authored runtime atlases; the pose sheets remain the
 identity references and the fallback source if a bundled atlas cannot load.
 
-`fat-mochi-runtime-atlas.png` and `mochi-runtime-atlas.png` are the authored
-runtime assets. Each has 8 columns of 192×208 cells and seven internal rows: idle,
+`fat-mochi-runtime-atlas.png` is FatMochi's authored runtime asset. It has
+8 columns of 192×208 cells and seven internal rows: idle,
 running right, running left, sleeping, caught, stretching, and landing. Walk
 frames articulate diagonal front/hind pairs and add restrained body/tail
 follow-through; the other current-MVP states use blink, breathing, a compact
@@ -26,17 +26,20 @@ This seven-row layout is an internal built-in asset, not a new Petdex package
 version. Imported Petdex pets still use their v1/v2 manifest and atlas layouts
 without modification.
 
-Mochi's authored pass was produced with OpenAI's built-in image-generation
-mode on 2026-08-26 using the approved four-pose sheet as the identity reference.
-Separate prompts requested an eight-frame four-beat walk, eight-frame idle
-blink, four-frame sleeping breath, caught-to-four-paw drag sequence, six-frame
-feline forward stretch, and six-frame compact hop/landing. The left walk is an
-exact local mirror of the right walk. Chroma removal, 192×208 frame fitting,
-ground alignment, transition endpoints, and atlas assembly were performed
-locally with nearest-neighbor sampling. Generated idle bodies were rejected:
-the approved idle body remains pixel-identical and only the two interior eye
-regions provide the blink. Caught, stretch, and landing begin or end on that
-same approved idle frame so state changes do not replace the resting character.
+`mochi-standard-atlas.webp` is Mochi's runtime asset and uses the standard
+8×9 Codex/Petdex row set instead: idle, running right, running left, waving,
+jumping, failed, waiting, running, review. It was produced with the `hatch-pet`
+workflow on 2026-08-29, one animation row at a time, with every row reviewed and
+approved before the next. It replaces an earlier seven-row Mochi atlas that was
+rejected on 2026-08-27 for detached alpha fragments left by slicing a generated
+strip that was not on an exact equal-cell grid.
+
+Mochi therefore has no sit, sleep, or stretch row; `AnimationResolver` falls those
+back to idle. Every other capability lands on real art: work on running, observe
+on review, paw on waving, fail on failed, caught and dragged on waiting. The
+factory overrides two tracks from the standard set — a 2.2 second one-shot
+celebration built from the jumping row, and a short landing built from the same
+row so a drop does not replay the celebration.
 
 Core prompt, Mochi:
 

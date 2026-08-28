@@ -214,9 +214,10 @@ Codex command hooks -------+--> authenticated loopback receivers
 2026-08-27 실사용 검토에서 이 첫 Mochi authored atlas는 승인되지 않았다. 생성 strip을
 균등 분할하면서 다른 frame의 작은 조각이 함께 잘려 들어갔고, idle blink에는 eye-region
 patch 합성이 사용됐다. 56 frame 중 22 frame에서 detached alpha component를 확인했다.
-현재 asset은 replacement 전까지 개발 참고본이며, 이후 제작은 `docs/art/mochi-animation-handoff.md`
-규격에 따라 frame마다 완전한 고양이를 그린 source만 받는다. 허용되는 local 처리는
-complete-frame chroma removal, uniform scale/center, full-frame mirror, atlas packing뿐이다.
+2026-08-29에 `hatch-pet` workflow로 9개 row를 한 줄씩 승인받아 다시 만든 8×9 standard
+atlas가 그 자리를 대신했고, rejected asset은 저장소에서 제거했다. 새 Mochi에는 sit,
+sleep, stretch row가 없어 `AnimationResolver`가 idle로 fallback한다. 그 세 동작은 다음
+remaster 때 채운다.
 - source별 menu status, install/remove, `Test Reaction`
 - 두 integration 모두 pointer evade/catch/drag보다 낮은 우선순위 유지
 

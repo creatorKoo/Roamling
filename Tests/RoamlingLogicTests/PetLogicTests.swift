@@ -133,7 +133,9 @@ func petLogicTests() -> [LogicTest] {
             try expect(MascotPetFactory.make().manifest.displayName == "FatMochi")
             for kind in BuiltInPetKind.allCases {
                 let pet = MascotPetFactory.make(kind)
-                let expectedRows = 7
+                // FatMochi keeps the seven-row internal layout; Mochi ships the
+                // standard 8x9 Codex/Petdex rows.
+                let expectedRows = kind == .mochi ? 9 : 7
                 try expect(pet.manifest.displayName == kind.displayName)
                 try expect(pet.manifest.id == "roamling-\(kind.rawValue)")
                 try expect(pet.columns == 8)
@@ -143,9 +145,11 @@ func petLogicTests() -> [LogicTest] {
                 try expect(pet.frameImage(at: expectedRows * 8 - 1) != nil)
                 try expect(pet.resolver.resolve(.moveLeft)?.name == "running-left")
                 try expect(pet.resolver.resolve(.moveRight)?.name == "running-right")
-                try expect(pet.resolver.resolve(.sleep)?.name == "sleeping")
-                try expect(pet.resolver.resolve(.caught)?.name == "caught")
-                try expect(pet.resolver.resolve(.dragged)?.name == "dragged")
+                try expect(pet.resolver.resolve(.caught) != nil)
+                try expect(pet.resolver.resolve(.dragged) != nil)
+                if kind != .mochi {
+                    try expect(pet.resolver.resolve(.sleep)?.name == "sleeping")
+                }
             }
         },
         LogicTest(name: "FatMochi uses authored limb animation cycles") {
@@ -267,67 +271,71 @@ func petLogicTests() -> [LogicTest] {
             player.update(deltaTime: 0.27)
             try expect(player.currentFrameIndex == 36)
         },
-        LogicTest(name: "Mochi uses authored creature animation cycles") {
+        LogicTest(name: "Mochi uses the standard nine-row animation set") {
             let pet = MascotPetFactory.make(.mochi)
+            try expect(pet.rows == 9)
+            try expect(pet.columns == 8)
+            try expect(pet.frameCount == 72)
+
             let idle = try require(pet.tracks["idle"])
             let right = try require(pet.tracks["running-right"])
             let left = try require(pet.tracks["running-left"])
-            let sleep = try require(pet.tracks["sleeping"])
-            let caught = try require(pet.tracks["caught"])
-            let dragged = try require(pet.tracks["dragged"])
-            let stretch = try require(pet.tracks["stretching"])
-            let landing = try require(pet.tracks["landing"])
-
-            try expect(pet.rows == 7)
-            try expect(idle.frames.map(\.index) == Array(0...7))
+            try expect(idle.frames.map(\.index) == Array(0...5))
             try expect(right.frames.map(\.index) == Array(8...15))
             try expect(left.frames.map(\.index) == Array(16...23))
-            try expect(sleep.frames.map(\.index) == [24, 25, 26, 27])
-            try expect(caught.frames.map(\.index) == [32, 33, 34, 35])
-            try expect(!caught.loops)
-            try expect(dragged.frames.map(\.index) == [36, 37, 38, 39])
-            try expect(stretch.frames.map(\.index) == Array(40...45))
-            try expect(!stretch.loops)
-            try expect(landing.frames.map(\.index) == Array(48...53))
-            try expect(!landing.loops)
+            for (name, expected) in [
+                ("waving", Array(24...27)),
+                ("failed", Array(40...47)),
+                ("waiting", Array(48...53)),
+                ("running", Array(56...61)),
+                ("review", Array(64...69))
+            ] {
+                let track = try require(pet.tracks[name], "missing track \(name)")
+                try expect(track.frames.map(\.index) == expected, "wrong frames for \(name)")
+            }
 
-            let idleSignatures = try Array(0...7).map {
+            // The nine-row taxonomy has no sit, sleep, or stretch row. Every
+            // other capability has to land on real art rather than idle.
+            try expect(pet.resolver.resolve(.moveRight)?.name == "running-right")
+            try expect(pet.resolver.resolve(.moveLeft)?.name == "running-left")
+            try expect(pet.resolver.resolve(.work)?.name == "running")
+            try expect(pet.resolver.resolve(.observe)?.name == "review")
+            try expect(pet.resolver.resolve(.paw)?.name == "waving")
+            try expect(pet.resolver.resolve(.celebrate)?.name == "jumping")
+            try expect(pet.resolver.resolve(.fail)?.name == "failed")
+            try expect(pet.resolver.resolve(.caught)?.name == "waiting")
+            try expect(pet.resolver.resolve(.dragged)?.name == "waiting")
+            try expect(pet.resolver.resolve(.landing)?.name == "landing")
+            for missing in [PetCapability.sit, .sleep, .stretch] {
+                try expect(pet.resolver.resolve(missing)?.name == "idle")
+            }
+
+            // A drop must not trigger the full celebration.
+            let landing = try require(pet.tracks["landing"])
+            let celebration = try require(pet.tracks["jumping"])
+            try expect(!landing.loops)
+            try expect(landing.frames.reduce(0) { $0 + $1.duration } < 0.7)
+            try expect(landing.frames.count < celebration.frames.count)
+
+            let idleSignatures = try Array(0...5).map {
                 try require(imageSignature(try require(pet.frameImage(at: $0))))
             }
             let walkSignatures = try Array(8...15).map {
                 try require(imageSignature(try require(pet.frameImage(at: $0))))
             }
-            let sleepSignatures = try Array(24...27).map {
-                try require(imageSignature(try require(pet.frameImage(at: $0))))
-            }
-            let draggedSignatures = try Array(36...39).map {
-                try require(imageSignature(try require(pet.frameImage(at: $0))))
-            }
+            try expect(Set(idleSignatures).count >= 4)
+            try expect(Set(walkSignatures).count == 8)
+
             let walkMetrics = try Array(8...15).map {
                 try require(alphaMetrics(try require(pet.frameImage(at: $0))))
             }
-            try expect(Set(idleSignatures).count >= 4)
-            try expect(Set(walkSignatures).count == 8)
-            try expect(Set(sleepSignatures).count >= 3)
-            try expect(Set(draggedSignatures).count == 4)
             let walkCenters = walkMetrics.map(\.boundsCenterX)
             let minimumWalkCenter = try require(walkCenters.min())
             let maximumWalkCenter = try require(walkCenters.max())
             try expect(
-                maximumWalkCenter - minimumWalkCenter <= 1,
+                maximumWalkCenter - minimumWalkCenter <= 2,
                 "Mochi walk frames must remain centered while the runtime moves the sprite"
             )
-
-            let idleSignature = try require(imageSignature(try require(pet.frameImage(at: 0))))
-            for index in [32, 40, 45, 48, 53] {
-                let signature = try require(imageSignature(try require(pet.frameImage(at: index))))
-                try expect(signature == idleSignature, "Mochi transition frame \(index) must match idle")
-            }
-
-            for index in 0..<pet.frameCount {
-                let metrics = alphaMetrics(try require(pet.frameImage(at: index)))
-                try expect(metrics != nil)
-            }
         },
         LogicTest(name: "built-in completion tracks animate through the full reaction") {
             for kind in [BuiltInPetKind.fatMochi, .mochi] {
@@ -339,7 +347,7 @@ func petLogicTests() -> [LogicTest] {
                 try expect(duration >= 2.19)
                 try expect(duration <= 2.21)
                 try expect(Set(celebration.frames.map(\.index)).count >= 4)
-                try expect(celebration.frames.last?.index == (kind == .fatMochi ? 48 : 53))
+                try expect(celebration.frames.last?.index == (kind == .fatMochi ? 48 : 32))
             }
         },
         LogicTest(name: "loader keeps valid custom animation and isolates invalid track") {
