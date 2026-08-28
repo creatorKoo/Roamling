@@ -76,6 +76,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     private let restConfiguration = RestConfiguration.standard
     private var pointerProvider: MacPointerProvider!
     private var windowProvider: MacWindowProvider!
+    private var focusProvider: MacFocusProvider!
     private let catalog: PetCatalog
     private let loader = PetLoader()
     private let overlay: MacOverlayProvider
@@ -107,6 +108,15 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     private var isEvadeTransitioning = false
     private var restDestination: RestDestination?
     private var activityDestination: InterestDestination?
+    private var activityHint: LocationHint?
+    private var cachedFocus: FocusSnapshot?
+    private var focusQueriedAt: TimeInterval = -.infinity
+    /// The accessibility query is synchronous, so it runs only when placement
+    /// can act on the answer: when an event picks a seat, and on a slow beat
+    /// while walking there. A seated pet waits for the next event.
+    private static let focusRefreshInterval: TimeInterval = 0.5
+    /// Re-routing for anything smaller than this would read as jitter.
+    private static let focusReseatThreshold = 24.0
     private var pendingActivityEvent: CompanionEvent?
     private var recentActivityEvents: [String: CompanionEvent] = [:]
     private var attentionModel = AttentionModel()
@@ -214,6 +224,9 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
             self?.coordinateSpace ?? displaySet.coordinateSpace
         }
         windowProvider = MacWindowProvider { [weak self] in
+            self?.coordinateSpace ?? displaySet.coordinateSpace
+        }
+        focusProvider = MacFocusProvider { [weak self] in
             self?.coordinateSpace ?? displaySet.coordinateSpace
         }
     }
@@ -728,6 +741,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
             activeActivitySourceID = event.sourceID
             activeActivityReaction = .observe
             activityDestination = nil
+            activityHint = nil
             movement.cancelRoute(stop: false)
             applyActivityReaction(reaction ?? .sad, at: timestamp)
 
@@ -749,6 +763,57 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         queueNextAttentionCandidate(at: timestamp)
     }
 
+    /// Accessibility stays off until the user turns it on from the menu, so the
+    /// app never prompts merely because it launched.
+    public var isAccessibilityAuthorized: Bool { focusProvider?.isAuthorized ?? false }
+
+    @discardableResult
+    public func requestAccessibilityAuthorization() -> Bool {
+        focusProvider?.requestAuthorization() ?? false
+    }
+
+    private func refreshedFocus(at timestamp: TimeInterval, force: Bool) -> FocusSnapshot? {
+        guard focusProvider?.isAuthorized == true else {
+            // Revoking the permission has to take effect on the next event, not
+            // leave a stale caret behind.
+            cachedFocus = nil
+            return nil
+        }
+        guard force || timestamp - focusQueriedAt >= Self.focusRefreshInterval else {
+            return cachedFocus
+        }
+        focusQueriedAt = timestamp
+        cachedFocus = focusProvider.currentFocus()
+        return cachedFocus
+    }
+
+    private func planningWorld(focus: FocusSnapshot?) -> DesktopWorldSnapshot {
+        guard let focus else { return world }
+        return DesktopWorldSnapshot(displays: world.displays, focus: focus)
+    }
+
+    /// Walking to a seat takes a moment and the caret can move while it does.
+    private func reseatForFocusIfNeeded(at timestamp: TimeInterval) {
+        guard timestamp - focusQueriedAt >= Self.focusRefreshInterval,
+              let hint = activityHint,
+              let current = activityDestination,
+              let focus = refreshedFocus(at: timestamp, force: true),
+              let updated = BasicInterestPositionPlanner.destination(
+                for: hint,
+                in: planningWorld(focus: focus),
+                currentPosition: movement.position,
+                pointerPosition: pointerProvider.currentPointer(at: timestamp).position,
+                objectSize: overlay.objectSize
+              ),
+              updated.point.distance(to: current.point) > Self.focusReseatThreshold else { return }
+
+        activityDestination = updated
+        movement.setRoute(DisplayTopology(displays: displays).route(
+            from: movement.position,
+            to: updated.point
+        ).waypoints)
+    }
+
     private func queueNextAttentionCandidate(at timestamp: TimeInterval) {
         guard let next = attentionModel.select(
             from: Array(recentActivityEvents.values),
@@ -768,7 +833,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         guard let hint = event.locationHint,
               let destination = BasicInterestPositionPlanner.destination(
                 for: hint,
-                in: world,
+                in: planningWorld(focus: refreshedFocus(at: timestamp, force: true)),
                 currentPosition: movement.position,
                 pointerPosition: pointerProvider.currentPointer(at: timestamp).position,
                 objectSize: overlay.objectSize
@@ -789,6 +854,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         isEvadeTransitioning = false
         restDestination = nil
         activityDestination = destination
+        activityHint = hint
         activityArrivalReaction = arrivalReaction
         movement.configuration.maximumSpeed = tuning.walkingSpeed
         movement.setRoute(route.waypoints)
@@ -800,6 +866,10 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         at timestamp: TimeInterval,
         deltaTime: TimeInterval
     ) -> Bool {
+        if activityDestination != nil {
+            reseatForFocusIfNeeded(at: timestamp)
+        }
+
         if let destination = activityDestination {
             if !movement.hasRoute {
                 let route = DisplayTopology(displays: displays).route(
@@ -813,6 +883,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
             let update = movement.update(deltaTime: deltaTime)
             if update.reachedDestination {
                 activityDestination = nil
+                activityHint = nil
                 let reaction = activityArrivalReaction ?? activeActivityReaction ?? .observe
                 activityArrivalReaction = nil
                 applyActivityReaction(reaction, at: timestamp)
@@ -850,6 +921,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         activeActivityReaction = nil
         activityArrivalReaction = nil
         activityDestination = nil
+        activityHint = nil
         movement.cancelRoute(stop: false)
         nextWanderAt = timestamp + 2.0
     }

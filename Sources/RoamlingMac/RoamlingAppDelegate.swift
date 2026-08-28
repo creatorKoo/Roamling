@@ -141,6 +141,10 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         codex.submenu = makeCodexMenu(runtime: runtime)
         menu.addItem(codex)
 
+        let accessibility = NSMenuItem(title: "Accessibility", action: nil, keyEquivalent: "")
+        accessibility.submenu = makeAccessibilityMenu(runtime: runtime)
+        menu.addItem(accessibility)
+
         menu.addItem(.separator())
         let openFolder = NSMenuItem(
             title: "Open Pet Folder…",
@@ -223,6 +227,40 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         )
         test.target = self
         menu.addItem(test)
+        return menu
+    }
+
+    private func makeAccessibilityMenu(runtime: RoamlingRuntime) -> NSMenu {
+        let menu = NSMenu(title: "Accessibility")
+        let authorized = runtime.isAccessibilityAuthorized
+        let status = NSMenuItem(
+            title: authorized ? "Caret Awareness: On" : "Caret Awareness: Off",
+            action: nil,
+            keyEquivalent: ""
+        )
+        status.isEnabled = false
+        menu.addItem(status)
+        menu.addItem(.separator())
+
+        if authorized {
+            // macOS owns revocation; pointing at it beats a button that cannot
+            // actually take the permission back.
+            let hint = NSMenuItem(
+                title: "Turn off in System Settings › Privacy & Security",
+                action: nil,
+                keyEquivalent: ""
+            )
+            hint.isEnabled = false
+            menu.addItem(hint)
+        } else {
+            let enable = NSMenuItem(
+                title: "Enable Caret Awareness…",
+                action: #selector(enableAccessibility),
+                keyEquivalent: ""
+            )
+            enable.target = self
+            menu.addItem(enable)
+        }
         return menu
     }
 
@@ -386,6 +424,24 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
             success: "Codex integration removed.",
             detail: "Restart Codex sessions to stop using the removed hooks."
         )
+        rebuildMenu()
+    }
+
+    @objc private func enableAccessibility() {
+        guard let runtime else { return }
+        let alert = NSAlert()
+        alert.messageText = "Enable caret awareness?"
+        alert.informativeText = """
+        macOS will ask you to allow Roamling under Accessibility. Roamling then reads \
+        the focused control's position and the text cursor's position so the pet can sit \
+        near your work without covering it.
+
+        It never reads what you type, the text you select, window titles, or document contents.
+        """
+        alert.addButton(withTitle: "Open System Settings")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        runtime.requestAccessibilityAuthorization()
         rebuildMenu()
     }
 
