@@ -105,7 +105,7 @@ private struct RuntimeTuningView: View {
             TuningSliderRow(
                 title: "Walk speed",
                 value: model.binding(\.walkingSpeed),
-                range: 20...80,
+                range: 20...160,
                 step: 1,
                 style: .pointsPerSecond
             )

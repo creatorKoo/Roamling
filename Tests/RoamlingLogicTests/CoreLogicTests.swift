@@ -262,7 +262,7 @@ func coreLogicTests() -> [LogicTest] {
                 catchWindow: 3,
                 hitRegionScale: 4
             )
-            try expect(tuning.walkingSpeed == 80)
+            try expect(tuning.walkingSpeed == 160)
             try expect(tuning.wanderPause == 2)
             try expect(tuning.crossDisplayWanderChance == 1)
             try expect(tuning.pointerAwarenessDistance == 140)
@@ -272,6 +272,25 @@ func coreLogicTests() -> [LogicTest] {
             try expect(tuning.hitRegionScale == 1.3)
             try expectNear(RuntimeTuning.standard.wanderDelay(randomUnit: 0), 8.4)
             try expectNear(RuntimeTuning.standard.wanderDelay(randomUnit: 1), 17.4)
+        },
+        LogicTest(name: "gait cadence follows the tuned walking speed") {
+            // Authored frame durations assume the standard speed, so the
+            // standard tuning must not retime anything.
+            try expectNear(RuntimeTuning.standard.locomotionAnimationRate, 1)
+
+            var faster = RuntimeTuning.standard
+            faster.walkingSpeed = 80
+            try expectNear(faster.normalized.locomotionAnimationRate, 2)
+
+            // The ceiling keeps a sprint readable rather than a blur, and the
+            // floor keeps a slow stroll from turning into a shuffle.
+            var fastest = RuntimeTuning.standard
+            fastest.walkingSpeed = 160
+            try expectNear(fastest.normalized.locomotionAnimationRate, 3.2)
+
+            var slowest = RuntimeTuning.standard
+            slowest.walkingSpeed = 20
+            try expectNear(slowest.normalized.locomotionAnimationRate, 0.6)
         },
         LogicTest(name: "look angles match Codex v2 clock convention") {
             let pet = WorldPoint.zero

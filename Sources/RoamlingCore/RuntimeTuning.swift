@@ -26,7 +26,7 @@ public struct RuntimeTuning: Codable, Equatable, Sendable {
         catchWindow: Double = 0.35,
         hitRegionScale: Double = 1.12
     ) {
-        self.walkingSpeed = walkingSpeed.clamped(to: 20...80)
+        self.walkingSpeed = walkingSpeed.clamped(to: 20...160)
         self.wanderPause = wanderPause.clamped(to: 2...40)
         self.crossDisplayWanderChance = crossDisplayWanderChance.clamped(to: 0...1)
         self.pointerAwarenessDistance = pointerAwarenessDistance.clamped(to: 140...360)
@@ -52,6 +52,15 @@ public struct RuntimeTuning: Codable, Equatable, Sendable {
             catchWindow: catchWindow,
             hitRegionScale: hitRegionScale
         )
+    }
+
+    /// Authored walk frames carry fixed durations tuned for `standard`. Playing
+    /// them at a fixed rate while the pet covers more ground per cycle is
+    /// exactly the sliding the authored gait exists to remove, so locomotion
+    /// scales the cycle with the tuned speed. The ceiling keeps a sprint
+    /// readable instead of a blur.
+    public var locomotionAnimationRate: Double {
+        (walkingSpeed / RuntimeTuning.standard.walkingSpeed).clamped(to: 0.6...3.2)
     }
 
     public var pointerConfiguration: PointerInteractionConfiguration {

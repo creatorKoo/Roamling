@@ -566,11 +566,23 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         updateAnimation(
             pointerDegrees: behavior.state == .lookAtPointer ? decision.lookDirectionDegrees : nil
         )
-        animationPlayer.update(deltaTime: deltaTime)
+        animationPlayer.update(deltaTime: deltaTime * locomotionAnimationRate)
         overlay.setPosition(movement.position)
         renderCurrentFrame()
 
         scheduleNextTick(after: preferredTickInterval)
+    }
+
+    /// Only the states that actually travel at the tuned walking speed scale
+    /// their cadence. Evade and catch run on their own speeds and keep the
+    /// authored timing.
+    private var locomotionAnimationRate: Double {
+        switch behavior.state {
+        case .wander, .findSleepSpot, .travelToInterest:
+            tuning.locomotionAnimationRate
+        default:
+            1
+        }
     }
 
     private var preferredTickInterval: TimeInterval {
