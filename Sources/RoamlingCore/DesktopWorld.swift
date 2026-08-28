@@ -72,9 +72,22 @@ public struct FocusSnapshot: Codable, Hashable, Sendable {
         confidence: Double = 0
     ) {
         self.windowID = windowID
-        self.focusedElementFrame = focusedElementFrame
-        self.caretFrame = caretFrame
+        self.focusedElementFrame = focusedElementFrame.flatMap { $0.isEmpty ? nil : $0 }
+        self.caretFrame = Self.usableCaret(caretFrame)
         self.confidence = confidence.clamped(to: 0...1)
+    }
+
+    /// An insertion point legitimately reports zero width, so `isEmpty` would
+    /// discard exactly the rect placement cares about most. Widen it to a
+    /// usable obstacle instead of dropping it.
+    private static func usableCaret(_ rect: WorldRect?) -> WorldRect? {
+        guard let rect, rect.size.width > 0 || rect.size.height > 0 else { return nil }
+        return WorldRect(
+            x: rect.minX,
+            y: rect.minY,
+            width: max(rect.size.width, 2),
+            height: max(rect.size.height, 2)
+        )
     }
 }
 

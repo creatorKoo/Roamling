@@ -352,6 +352,55 @@ func sourceLogicTests() -> [LogicTest] {
             try expect(destination.point.y >= window.maxY - 80)
             try expect(destination.point.distance(to: WorldPoint(x: 120, y: 650)) > 300)
         },
+        LogicTest(name: "focus placement refuses to sit on the caret") {
+            let fixture = FocusPlacementFixture()
+
+            // Without accessibility the planner picks the inner-left seat.
+            let baseline = try require(fixture.destination(focus: nil))
+            try expect(baseline.point == WorldPoint(x: 124, y: 726))
+
+            // A caret sitting exactly there has to push the pet somewhere else.
+            let caret = WorldRect(x: 121, y: 700, width: 2, height: 40)
+            let focused = try require(fixture.destination(
+                focus: FocusSnapshot(caretFrame: caret, confidence: 0.9)
+            ))
+            try expect(focused.point != baseline.point)
+            try expect(!fixture.petFrame(at: focused.point).intersects(caret))
+            // It still stays on the caret's side rather than fleeing the window.
+            try expect(focused.point == WorldPoint(x: 58, y: 726))
+        },
+        LogicTest(name: "focus placement treats a collapsed caret as an obstacle") {
+            let fixture = FocusPlacementFixture()
+            // A collapsed insertion point reports zero width. Dropping it as an
+            // empty rect would remove the only obstacle that matters.
+            let snapshot = FocusSnapshot(
+                caretFrame: WorldRect(x: 121, y: 700, width: 0, height: 40),
+                confidence: 0.9
+            )
+            let caret = try require(snapshot.caretFrame)
+            try expect(caret.size.width >= 2)
+
+            let focused = try require(fixture.destination(focus: snapshot))
+            try expect(focused.point == WorldPoint(x: 58, y: 726))
+            try expect(!fixture.petFrame(at: focused.point).intersects(caret))
+        },
+        LogicTest(name: "focus placement prefers the focused window over the coarse hint") {
+            let fixture = FocusPlacementFixture()
+            // The coarse hint points at a small stale region in the corner.
+            let stale = LocationHint(
+                approximateRegion: WorldRect(x: 0, y: 24, width: 100, height: 100),
+                confidence: 0.55
+            )
+            let focused = try require(fixture.destination(
+                hint: stale,
+                focus: FocusSnapshot(windowID: "w1", confidence: 0.9)
+            ))
+            try expect(focused.point.y == 726)
+
+            // Same stale hint without accessibility still lands in the corner.
+            let coarse = try require(fixture.destination(hint: stale, focus: nil))
+            try expect(coarse.point.y < 200)
+        },
         LogicTest(name: "behavior enters interest travel without overriding drag") {
             var behavior = BehaviorController(state: .idle, enteredAt: 0)
             behavior.handle(.beginInterestTravel, at: 1)
@@ -387,5 +436,46 @@ private final class LockedBox<Value>: @unchecked Sendable {
         lock.lock()
         storage = value
         lock.unlock()
+    }
+}
+
+/// Shared geometry for the MVP 3 caret-aware placement tests. The window fills
+/// the safe area so every candidate lands inside it, which keeps the outside
+/// bonus out of the comparison and leaves caret handling as the only variable.
+struct FocusPlacementFixture {
+    let display = DisplaySnapshot(
+        id: "main",
+        name: "main",
+        frame: WorldRect(x: 0, y: 0, width: 1_200, height: 900),
+        visibleFrame: WorldRect(x: 0, y: 24, width: 1_200, height: 830),
+        scale: 2
+    )
+    let window = WorldRect(x: 58, y: 86, width: 1_084, height: 706)
+    let objectSize = WorldSize(width: 96, height: 104)
+
+    func petFrame(at point: WorldPoint) -> WorldRect {
+        WorldRect(
+            x: point.x - objectSize.width / 2,
+            y: point.y - objectSize.height / 2,
+            width: objectSize.width,
+            height: objectSize.height
+        )
+    }
+
+    func destination(
+        hint: LocationHint? = nil,
+        focus: FocusSnapshot?
+    ) -> InterestDestination? {
+        BasicInterestPositionPlanner.destination(
+            for: hint ?? LocationHint(approximateRegion: window, confidence: 0.55),
+            in: DesktopWorldSnapshot(
+                displays: [display],
+                windows: [WindowSnapshot(id: "w1", frame: window, isFocused: true)],
+                focus: focus
+            ),
+            currentPosition: WorldPoint(x: 200, y: 400),
+            pointerPosition: WorldPoint(x: 600, y: 100),
+            objectSize: objectSize
+        )
     }
 }
