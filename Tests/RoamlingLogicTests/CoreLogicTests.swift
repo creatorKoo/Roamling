@@ -300,6 +300,68 @@ func coreLogicTests() -> [LogicTest] {
             try expectNear(clamped.walkingSpeed, 320)
             try expectNear(clamped.wanderPause, RuntimeTuning.standard.wanderPause)
         },
+        LogicTest(name: "visual emptiness separates flat regions from busy ones") {
+            let bounds = WorldRect(x: 0, y: 0, width: 800, height: 400)
+            let columns = 40
+            let rows = 20
+
+            func field(_ make: (Int, Int) -> Double) throws -> LuminanceField {
+                var samples: [Double] = []
+                for row in 0..<rows {
+                    for column in 0..<columns { samples.append(make(column, row)) }
+                }
+                return try require(LuminanceField(
+                    bounds: bounds, columns: columns, rows: rows, samples: samples
+                ))
+            }
+
+            let seat = WorldRect(x: 100, y: 100, width: 200, height: 120)
+
+            // Flat wallpaper is the ideal seat.
+            let flat = try field { _, _ in 0.62 }
+            try expectNear(try require(VisualEmptiness.score(of: seat, in: flat)), 1)
+
+            // A smooth gradient is still comfortable: no local edges, and the
+            // spread alone must not disqualify it.
+            let gradient = try field { column, _ in Double(column) / Double(columns) }
+            let gradientScore = try require(VisualEmptiness.score(of: seat, in: gradient))
+            try expect(gradientScore > 0.6, "smooth gradient scored \(gradientScore)")
+
+            // Alternating high-contrast cells stand in for text and dense UI.
+            let busy = try field { column, row in (column + row).isMultiple(of: 2) ? 0.05 : 0.95 }
+            let busyScore = try require(VisualEmptiness.score(of: seat, in: busy))
+            try expect(busyScore < 0.1, "dense region scored \(busyScore)")
+            try expect(busyScore < gradientScore)
+        },
+        LogicTest(name: "visual emptiness refuses to guess from too little overlap") {
+            let bounds = WorldRect(x: 0, y: 0, width: 400, height: 400)
+            let field = try require(LuminanceField(
+                bounds: bounds,
+                columns: 20,
+                rows: 20,
+                samples: Array(repeating: 0.5, count: 400)
+            ))
+
+            // Entirely outside the captured region.
+            try expect(VisualEmptiness.score(
+                of: WorldRect(x: 900, y: 900, width: 100, height: 100), in: field
+            ) == nil)
+
+            // Clipping a single cell is not enough to judge.
+            try expect(VisualEmptiness.score(
+                of: WorldRect(x: -50, y: -50, width: 55, height: 55), in: field
+            ) == nil)
+
+            // A partial overlap that covers real cells still scores.
+            try expect(VisualEmptiness.score(
+                of: WorldRect(x: -50, y: -50, width: 200, height: 200), in: field
+            ) != nil)
+
+            // A sample count that disagrees with the grid is not a field.
+            try expect(LuminanceField(
+                bounds: bounds, columns: 4, rows: 4, samples: [0.1, 0.2]
+            ) == nil)
+        },
         LogicTest(name: "evade speed scales with the walking speed") {
             // Getting out of the way must never look slower than strolling.
             let standard = RuntimeTuning.standard
