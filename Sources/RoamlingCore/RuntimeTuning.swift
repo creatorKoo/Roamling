@@ -18,7 +18,7 @@ public struct RuntimeTuning: Codable, Equatable, Sendable {
     public var gaitCadence: Double
 
     public init(
-        walkingSpeed: Double = 40,
+        walkingSpeed: Double = 160,
         wanderPause: Double = 12,
         crossDisplayWanderChance: Double = 0.46,
         pointerAwarenessDistance: Double = 170,
@@ -28,7 +28,7 @@ public struct RuntimeTuning: Codable, Equatable, Sendable {
         hitRegionScale: Double = 1.12,
         gaitCadence: Double = 1
     ) {
-        self.walkingSpeed = walkingSpeed.clamped(to: 20...160)
+        self.walkingSpeed = walkingSpeed.clamped(to: 20...320)
         self.wanderPause = wanderPause.clamped(to: 2...40)
         self.crossDisplayWanderChance = crossDisplayWanderChance.clamped(to: 0...1)
         self.pointerAwarenessDistance = pointerAwarenessDistance.clamped(to: 140...360)
@@ -39,6 +39,36 @@ public struct RuntimeTuning: Codable, Equatable, Sendable {
         self.catchWindow = catchWindow.clamped(to: 0.15...1.2)
         self.hitRegionScale = hitRegionScale.clamped(to: 0.75...1.3)
         self.gaitCadence = gaitCadence.clamped(to: 0.5...3.2)
+    }
+
+    /// Decoding tolerates a saved blob written before a field existed.
+    ///
+    /// The synthesized decoder requires every key, so adding one value silently
+    /// threw away everything the user had tuned and reset the panel. Missing
+    /// values now take their default instead.
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let fallback = RuntimeTuning()
+        func value(_ key: CodingKeys, _ standard: Double) throws -> Double {
+            try container.decodeIfPresent(Double.self, forKey: key) ?? standard
+        }
+        self.init(
+            walkingSpeed: try value(.walkingSpeed, fallback.walkingSpeed),
+            wanderPause: try value(.wanderPause, fallback.wanderPause),
+            crossDisplayWanderChance: try value(
+                .crossDisplayWanderChance,
+                fallback.crossDisplayWanderChance
+            ),
+            pointerAwarenessDistance: try value(
+                .pointerAwarenessDistance,
+                fallback.pointerAwarenessDistance
+            ),
+            catchArmDistance: try value(.catchArmDistance, fallback.catchArmDistance),
+            catchApproachSpeed: try value(.catchApproachSpeed, fallback.catchApproachSpeed),
+            catchWindow: try value(.catchWindow, fallback.catchWindow),
+            hitRegionScale: try value(.hitRegionScale, fallback.hitRegionScale),
+            gaitCadence: try value(.gaitCadence, fallback.gaitCadence)
+        )
     }
 
     public static let standard = RuntimeTuning()
@@ -63,7 +93,7 @@ public struct RuntimeTuning: Codable, Equatable, Sendable {
     /// Deriving this from `walkingSpeed` was tried and rejected: the authored
     /// gait reads correctly at its own cadence even when the pet moves faster,
     /// and retiming it made the walk look busy. It stays a deliberate opt-in at
-    /// 1.0 so the default motion is untouched.
+    /// 1.0 so the default motion is untouched no matter how the speed is tuned.
     public var locomotionAnimationRate: Double { gaitCadence }
 
     public var pointerConfiguration: PointerInteractionConfiguration {

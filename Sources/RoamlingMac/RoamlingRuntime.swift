@@ -405,21 +405,6 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         }
     }
 
-    /// Exposes the current MVP 0.7 wake animation for feel testing without
-    /// waiting through the full idle -> sit -> sleep lifecycle.
-    public func stretchNow() {
-        guard behavior.state != .caught && behavior.state != .dragged else { return }
-        let now = ProcessInfo.processInfo.systemUptime
-        restDestination = nil
-        isEvadeTransitioning = false
-        movement.cancelRoute(stop: true)
-        behavior.handle(.beginStretch, at: now)
-        nextWanderAt = now + 1.4
-        updateAnimation(pointerDegrees: nil)
-        renderCurrentFrame()
-        if running { scheduleNextTick(after: 1 / 30) }
-    }
-
     public func petOverlayMouseDown(screenPoint: NSPoint) {
         let now = ProcessInfo.processInfo.systemUptime
         guard areInteractionsEnabled, now <= catchArmedUntil else {

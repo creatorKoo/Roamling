@@ -262,7 +262,7 @@ func coreLogicTests() -> [LogicTest] {
                 catchWindow: 3,
                 hitRegionScale: 4
             )
-            try expect(tuning.walkingSpeed == 160)
+            try expect(tuning.walkingSpeed == 320)
             try expect(tuning.wanderPause == 2)
             try expect(tuning.crossDisplayWanderChance == 1)
             try expect(tuning.pointerAwarenessDistance == 140)
@@ -272,6 +272,33 @@ func coreLogicTests() -> [LogicTest] {
             try expect(tuning.hitRegionScale == 1.3)
             try expectNear(RuntimeTuning.standard.wanderDelay(randomUnit: 0), 8.4)
             try expectNear(RuntimeTuning.standard.wanderDelay(randomUnit: 1), 17.4)
+        },
+        LogicTest(name: "saved tuning survives a field being added later") {
+            // A blob written before gaitCadence existed. The synthesized decoder
+            // rejected it and threw away everything the user had tuned.
+            let legacy = Data(#"""
+            {
+              "walkingSpeed": 80,
+              "wanderPause": 9,
+              "crossDisplayWanderChance": 0.3,
+              "pointerAwarenessDistance": 200,
+              "catchArmDistance": 60,
+              "catchApproachSpeed": 400,
+              "catchWindow": 0.4,
+              "hitRegionScale": 1.1
+            }
+            """#.utf8)
+            let decoded = try JSONDecoder().decode(RuntimeTuning.self, from: legacy)
+            try expectNear(decoded.walkingSpeed, 80)
+            try expectNear(decoded.wanderPause, 9)
+            try expectNear(decoded.hitRegionScale, 1.1)
+            try expectNear(decoded.gaitCadence, RuntimeTuning.standard.gaitCadence)
+
+            // Bounds still apply to whatever was on disk.
+            let outOfRange = Data(#"{"walkingSpeed": 5000}"#.utf8)
+            let clamped = try JSONDecoder().decode(RuntimeTuning.self, from: outOfRange)
+            try expectNear(clamped.walkingSpeed, 320)
+            try expectNear(clamped.wanderPause, RuntimeTuning.standard.wanderPause)
         },
         LogicTest(name: "gait cadence stays opt-in and independent of walking speed") {
             // The authored motion is the default. Raising the walking speed must

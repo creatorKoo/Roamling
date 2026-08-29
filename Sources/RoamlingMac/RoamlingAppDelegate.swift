@@ -130,14 +130,6 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         tuning.target = self
         menu.addItem(tuning)
 
-        let stretch = NSMenuItem(
-            title: localized("menu.stretch"),
-            action: #selector(stretchNow),
-            keyEquivalent: ""
-        )
-        stretch.target = self
-        menu.addItem(stretch)
-
         let claude = NSMenuItem(title: "Claude Code", action: nil, keyEquivalent: "")
         claude.submenu = makeClaudeCodeMenu(runtime: runtime)
         menu.addItem(claude)
@@ -355,10 +347,6 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
             controller = created
         }
         controller.present(tuning: runtime.tuning)
-    }
-
-    @objc private func stretchNow() {
-        runtime?.stretchNow()
     }
 
     @objc private func installClaudeCodeIntegration() {
