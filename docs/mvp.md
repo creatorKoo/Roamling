@@ -258,7 +258,7 @@ tool payload가 거절되지 않게 했으며, agent hook으로 이동하는 동
 animation 두 경로를 고쳤다. 1 MiB보다 큰 payload가 필요해지면 상한만 올려서는 안 된다는
 점은 `docs/architecture.md`에 기록했다.
 
-## Current gate — MVP 3: It Watches Where You Work
+## Completed — MVP 3: It Watches Where You Work
 
 MVP 1/2의 coarse window hint는 frontmost process의 layer-0 bounds만 알기 때문에 창 아래쪽
 어딘가로만 갈 수 있었다. 이 gate는 Accessibility로 focused window, focused element, caret
@@ -311,9 +311,66 @@ AXUIElement
 - planner 확장을 pure test로 검증하고 전체 suite를 통과한다.
 - `ROAMLING_CODESIGN_IDENTITY`로 서명한 빌드에서 리빌드 후에도 권한이 유지된다.
 
+2026-08-29에 사용자가 실사용에서 동작을 확인하고 다음 단계 진행을 승인했다. 정밀한
+계측이 아닌 체감 확인이었으므로, MVP 4에서 배치가 어색하면 visual score뿐 아니라 caret
+회피 쪽 원인도 함께 확인한다. gate 안에서 `MacWindowProvider`의 AX 승격을 마치며
+`FocusSnapshot`의 `windowID`를 `windowFrame`으로 바꿨다. private API 없이 창을
+`CGWindowNumber`로 매칭할 수 없어 id가 계속 nil이었기 때문이다.
+
+## Current gate — MVP 4: It Finds Empty Space
+
+지금까지의 배치는 창 geometry만 안다. 창 안 어디가 비어 있는지는 모르므로 문서 한가운데,
+코드 위, 버튼 위에 앉을 수 있다. 이 gate는 Screen Recording을 opt-in으로 켰을 때만 화면
+스냅샷 한 장을 축소해 시각적으로 빈 영역을 찾는다.
+
+내용을 읽지 않는다. OCR도 LLM도 쓰지 않고 edge density, local variance, temporal
+stability만 본다. "글자를 읽어 피하는" 것이 아니라 "복잡한 곳을 피하는" 방식이며, 이
+구분이 지금까지의 privacy 원칙과 이어지는 지점이다.
+
+```text
+ScreenCaptureKit single snapshot
+        |
+        v
+   downsampled luminance field (OS 비의존 domain value)
+        |
+        v
+CandidateScore =
+  visualEmpty + caretDistance + controlDistance + edgePreference
+  + stability + contextPreference + petComfort
+  - pointerProximity - obstructionPenalty
+```
+
+`caretDistance`와 `controlDistance`는 MVP 3에서 이미 만들었고, `PositionCandidate`의
+`visualEmptyScore` 자리도 비어 있는 채로 있다.
+
+### In scope
+
+- `MacCaptureProvider` — ScreenCaptureKit single snapshot과 권한 게이팅
+- downsampled luminance field에서 빈 영역을 점수화하는 pure 함수
+- `VisualSafeZoneProvider` — 그 점수를 후보 배치에 연결
+- confidence가 낮으면 중앙 후보를 만들지 않고 window/display corner로 fallback
+- 권한을 켤 때만 제시하는 설명과 요청, 거부·철회 시 MVP 3 경로로 복귀
+- snapshot 비용이 pet frame timing을 끊지 않도록 하는 호출 시점 제한
+
+### Explicitly out of scope for this gate
+
+- OCR, 연속 capture, cloud vision, LLM 판단
+- capture 이미지의 disk write 또는 log 기록
+- game/media source — 별도 milestone
+- `roamling.json` animation 저작 UI — MVP 5
+- gallery/network pet installer
+
+### Acceptance criteria
+
+- Screen Recording 권한 없이 실행하면 MVP 3과 동일하게 동작한다.
+- 권한 승인 후 문서 본문이나 조밀한 UI 위가 아니라 빈 영역에 앉는다.
+- capture 이미지를 disk에 쓰지 않고 log/metadata에 남기지 않는다.
+- 권한을 철회하면 다음 event부터 MVP 3 배치로 돌아간다.
+- capture가 실패하거나 느려도 pet 동작이 끊기지 않는다.
+- 빈 영역 점수화를 pure test로 검증하고 전체 suite를 통과한다.
+
 ## Exit rule
 
-사용자가 실제 편집 session에서 펫이 caret을 가리지 않는지, 위치가 MVP 2보다 나아졌는지
-확인하기 전에는 MVP 4 visual placement로 넘어가지 않는다. AX 조회 비용이나 응답 지연으로
-펫 동작이 끊기는 문제는 MVP 3 안에서 수정한다. 권한을 주지 않은 사용자의 경험을 나쁘게
-만드는 변경은 이 gate에서 받지 않는다.
+사용자가 실제 화면에서 펫이 본문과 UI를 피해 앉는지 확인하기 전에는 다음 milestone으로
+넘어가지 않는다. capture 비용으로 움직임이 끊기거나 자리를 자주 바꿔 산만해지는 문제는
+MVP 4 안에서 수정한다. 권한을 주지 않은 사용자의 경험을 나쁘게 만드는 변경은 받지 않는다.
