@@ -123,6 +123,10 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     /// the screen keeps changing while the user is away. It just does not need
     /// to spend a capture as often to find out.
     private static let restingLuminanceRefreshInterval: TimeInterval = 6
+    /// A parked pet between walks has to notice the user scrolling text under
+    /// it, which is most of its life. Half the rate of an agent seat: nothing
+    /// here is urgent, and one capture measures about 60 ms.
+    private static let roamingLuminanceRefreshInterval: TimeInterval = 6
     /// The accessibility query is synchronous, so it runs on a slow beat rather
     /// than per frame. `PlacementDirector` reviews a seat on a beat of its own,
     /// and asking more often than it looks buys nothing.
@@ -134,9 +138,6 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     /// Destinations offered to the emptiness score before a stroll. Enough to
     /// usually find a clear one, few enough that roaming stays aimless.
     private static let wanderCandidateCount = 6
-    /// How long before a stroll begins to take the snapshot it will be judged
-    /// against.
-    private static let wanderCaptureLead: TimeInterval = 1.5
     private var pendingActivityEvent: CompanionEvent?
     private var recentActivityEvents: [String: CompanionEvent] = [:]
     private var attentionModel = AttentionModel()
@@ -857,10 +858,14 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     /// Captures off the main thread and lets the travelling reseat check pick the
     /// result up. Placement never waits on a snapshot, so a slow or failed
     /// capture costs nothing but the visual term.
-    private func requestLuminanceRefresh(at timestamp: TimeInterval, near region: WorldRect) {
+    private func requestLuminanceRefresh(
+        at timestamp: TimeInterval,
+        near region: WorldRect,
+        every requested: TimeInterval
+    ) {
         let interval = behavior.state.isResting
-            ? Self.restingLuminanceRefreshInterval
-            : Self.luminanceRefreshInterval
+            ? max(requested, Self.restingLuminanceRefreshInterval)
+            : requested
         guard captureProvider.isAuthorized,
               luminanceTask == nil,
               timestamp - luminanceCapturedAt >= interval,
@@ -897,7 +902,11 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         if let hint = event.locationHint {
             activityHint = hint
             if let region = hint.approximateRegion {
-                requestLuminanceRefresh(at: timestamp, near: region)
+                requestLuminanceRefresh(
+                    at: timestamp,
+                    near: region,
+                    every: Self.luminanceRefreshInterval
+                )
             }
         } else if activeActivitySourceID != event.sourceID {
             // A different agent arriving without a window to point at: the last
@@ -931,19 +940,16 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         let isWatching = activeActivitySourceID != nil && activityHint != nil
         // An agent at work suppresses roaming even when no window could be
         // located for it, the same as before placement moved to the director.
-        let isStrollDue = isRoamingEnabled
-            && activeActivitySourceID == nil
-            && !movement.hasRoute
-            && timestamp >= nextWanderAt
+        let isRoaming = isRoamingEnabled && activeActivitySourceID == nil
+        let isStrollDue = isRoaming && !movement.hasRoute && timestamp >= nextWanderAt
 
         if isWatching, let region = activityHint?.approximateRegion {
-            requestLuminanceRefresh(at: timestamp, near: region)
-        } else if activeActivitySourceID == nil,
-                  !movement.hasRoute,
-                  timestamp >= nextWanderAt - Self.wanderCaptureLead {
-            // One capture shortly before the pause ends, so a stroll is judged
-            // against a fresh screen without capturing on a loop while the pet
-            // is just sitting there.
+            requestLuminanceRefresh(
+                at: timestamp,
+                near: region,
+                every: Self.luminanceRefreshInterval
+            )
+        } else if isRoaming, !movement.hasRoute {
             requestLuminanceRefreshForRoaming(at: timestamp)
         }
 
@@ -962,13 +968,15 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
                 || Self.pointerOwnedStates.contains(behavior.state)
                 || (isPointerAvoidanceEnabled && proximity != .far),
             isEvading: isEvadeTransitioning,
+            isWalking: movement.hasRoute,
+            isResting: behavior.state.isResting,
             activitySourceID: activeActivitySourceID,
             activityHint: activityHint,
             userIdleDuration: userIdleDuration,
             idleBeforeRest: restConfiguration.idleBeforeRest,
             isRoamingEnabled: isRoamingEnabled,
             isStrollDue: isStrollDue,
-            strollCandidates: isStrollDue ? strollCandidates() : []
+            strollCandidates: isRoaming && !movement.hasRoute ? strollCandidates() : []
         )
     }
 
@@ -1231,7 +1239,11 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     private func requestLuminanceRefreshForRoaming(at timestamp: TimeInterval) {
         guard let display = world.display(containing: movement.position)
             ?? world.nearestDisplay(to: movement.position) else { return }
-        requestLuminanceRefresh(at: timestamp, near: display.visibleFrame)
+        requestLuminanceRefresh(
+            at: timestamp,
+            near: display.visibleFrame,
+            every: Self.roamingLuminanceRefreshInterval
+        )
     }
 
     private func beginStroll(

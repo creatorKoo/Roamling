@@ -924,6 +924,82 @@ func coreLogicTests() -> [LogicTest] {
             ) == .hold)
             try expect(!director.isSeated)
         },
+        LogicTest(name: "a parked pet leaves text without waiting out the pause") {
+            // Between agent turns the pet is just roaming, and the pause between
+            // walks is long enough for the user to scroll a paragraph under it.
+            // Nothing else watches during that window.
+            let fixture = DirectorFixture()
+            var director = PlacementDirector()
+            let parked = WorldPoint(x: 300, y: 400)
+            let clear = WorldPoint(x: 900, y: 300)
+            let covered = try require(fixture.field(busyAround: parked, delta: 0.06))
+
+            func roaming(at timestamp: TimeInterval, position: WorldPoint) -> PetSituation {
+                fixture.situation(
+                    at: timestamp,
+                    position: position,
+                    sourceID: nil,
+                    luminance: covered,
+                    strollCandidates: [clear]
+                )
+            }
+
+            // It has only just stopped here, so it is given a moment.
+            try expect(director.decide(roaming(at: 0, position: parked)) == .hold)
+            try expect(director.decide(roaming(at: 1, position: parked)) == .hold)
+
+            let escaped = director.decide(roaming(at: 6, position: parked))
+            try expect(escaped == .stroll(clear), "got \(escaped)")
+
+            // Once it is standing somewhere clear, nothing sends it off again.
+            for step in 0..<10 {
+                try expect(
+                    director.decide(roaming(
+                        at: 10 + Double(step) * 0.5, position: clear
+                    )) == .hold,
+                    "the pet left a clear spot"
+                )
+            }
+        },
+        LogicTest(name: "a parked pet on text stays put when nowhere is better") {
+            let fixture = DirectorFixture()
+            var director = PlacementDirector()
+            let parked = WorldPoint(x: 300, y: 400)
+            let alsoCovered = WorldPoint(x: 340, y: 430)
+            let everywhere = try require(fixture.uniformField(delta: 0.06))
+            for step in 0..<20 {
+                let intent = director.decide(fixture.situation(
+                    at: Double(step) * 0.5,
+                    position: parked,
+                    sourceID: nil,
+                    luminance: everywhere,
+                    strollCandidates: [alsoCovered]
+                ))
+                try expect(intent == .hold, "walked to an equally covered spot: \(intent)")
+            }
+        },
+        LogicTest(name: "a walking or sleeping pet is not re-routed by its own spot") {
+            let fixture = DirectorFixture()
+            let parked = WorldPoint(x: 300, y: 400)
+            let clear = WorldPoint(x: 900, y: 300)
+            let covered = try require(fixture.field(busyAround: parked, delta: 0.06))
+
+            for (label, walking, resting) in [("walking", true, false), ("resting", false, true)] {
+                var director = PlacementDirector()
+                for step in 0..<20 {
+                    let intent = director.decide(fixture.situation(
+                        at: Double(step) * 0.5,
+                        position: parked,
+                        sourceID: nil,
+                        luminance: covered,
+                        isWalking: walking,
+                        isResting: resting,
+                        strollCandidates: [clear]
+                    ))
+                    try expect(intent == .hold, "\(label) pet was re-routed: \(intent)")
+                }
+            }
+        },
         LogicTest(name: "a stroll destination passes the same emptiness bar as a seat") {
             // Defect 4: the rule about empty space lived only on the agent-seat
             // path, and roaming is where the pet spends most of its life.
@@ -994,6 +1070,8 @@ private struct DirectorFixture {
         luminance: LuminanceField? = nil,
         isPointerOwned: Bool = false,
         isEvading: Bool = false,
+        isWalking: Bool = false,
+        isResting: Bool = false,
         userIdleDuration: TimeInterval = 0,
         idleBeforeRest: TimeInterval = .infinity,
         isStrollDue: Bool = false,
@@ -1012,6 +1090,8 @@ private struct DirectorFixture {
             pointerPosition: WorldPoint(x: 600, y: 100),
             isPointerOwned: isPointerOwned,
             isEvading: isEvading,
+            isWalking: isWalking,
+            isResting: isResting,
             activitySourceID: sourceID,
             activityHint: sourceID == nil
                 ? nil

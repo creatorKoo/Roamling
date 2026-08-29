@@ -54,6 +54,11 @@ public struct PetSituation: Sendable {
     /// The pointer owns the pet: caught, dragged, or reacting to a near cursor.
     public var isPointerOwned: Bool
     public var isEvading: Bool
+    /// A walk is already under way, so nothing here should start another one.
+    public var isWalking: Bool
+    /// The pet is sitting, seeking a sleep spot, or asleep. Rest owns movement
+    /// while that lasts, so planning a stroll it cannot take is wasted work.
+    public var isResting: Bool
     public var activitySourceID: String?
     public var activityHint: LocationHint?
     public var userIdleDuration: TimeInterval
@@ -76,6 +81,8 @@ public struct PetSituation: Sendable {
         walkingSpeed: Double = 160,
         isPointerOwned: Bool = false,
         isEvading: Bool = false,
+        isWalking: Bool = false,
+        isResting: Bool = false,
         activitySourceID: String? = nil,
         activityHint: LocationHint? = nil,
         userIdleDuration: TimeInterval = 0,
@@ -92,6 +99,8 @@ public struct PetSituation: Sendable {
         self.walkingSpeed = walkingSpeed
         self.isPointerOwned = isPointerOwned
         self.isEvading = isEvading
+        self.isWalking = isWalking
+        self.isResting = isResting
         self.activitySourceID = activitySourceID
         self.activityHint = activityHint
         self.userIdleDuration = userIdleDuration
@@ -188,6 +197,7 @@ public struct PlacementDirector: Sendable {
     public let configuration: Configuration
     private var seat: Seat?
     private var travel: Travel?
+    private var parkedSince: TimeInterval?
     private var lastReviewAt: TimeInterval = -.infinity
     /// The verdict from the last review, repeated between beats so a walk in
     /// progress keeps its destination instead of restarting every frame.
@@ -235,6 +245,7 @@ public struct PlacementDirector: Sendable {
             travel = nil
             return strollVerdict(situation)
         }
+        parkedSince = nil
 
         // A different agent is a different window. The pet walks over to it
         // rather than claiming wherever it happens to be standing.
@@ -423,27 +434,70 @@ public struct PlacementDirector: Sendable {
         return 8 + distance / max(20, situation.walkingSpeed) * 2
     }
 
-    /// Priorities 9 and 10. Wandering is where the pet spends most of its life,
+    /// Priorities 10 and 11. Wandering is where the pet spends most of its life,
     /// so it passes the same emptiness bar as an interest seat — a rule that
     /// only applied to agent seats left most of the day unruled.
     private mutating func strollVerdict(_ situation: PetSituation) -> PlacementIntent {
+        carried = .hold
         guard situation.isRoamingEnabled,
-              situation.isStrollDue,
               let first = situation.strollCandidates.first else {
-            carried = .hold
+            parkedSince = nil
             return carried
         }
-        let point = situation.world.luminance.flatMap {
+        if situation.isWalking || situation.isResting {
+            parkedSince = nil
+            return carried
+        }
+        if parkedSince == nil { parkedSince = situation.timestamp }
+
+        if situation.isStrollDue {
+            parkedSince = nil
+            return .stroll(comfortable(among: situation) ?? first)
+        }
+
+        // The pause between walks is the whole point of roaming, and it is also
+        // long enough for the user to scroll a paragraph under a pet that is
+        // just sitting there. Nothing else is watching during it, so this is.
+        guard let field = situation.world.luminance,
+              let parkedSince,
+              situation.timestamp - parkedSince >= configuration.seatDwell,
+              let score = VisualEmptiness.score(
+                of: frame(at: situation.position, size: situation.objectSize),
+                in: field
+              ),
+              score < configuration.holdEmptiness,
+              let escape = comfortable(among: situation),
+              // Only somewhere genuinely clear, for the same reason a seat is:
+              // trading one covered spot for another just paces the pet.
+              let escapeScore = VisualEmptiness.score(
+                of: frame(at: escape, size: situation.objectSize),
+                in: field
+              ),
+              escapeScore >= configuration.holdEmptiness,
+              situation.position.distance(to: escape) > configuration.minimumTravelDistance
+        else { return carried }
+
+        self.parkedSince = nil
+        return .stroll(escape)
+    }
+
+    private func comfortable(among situation: PetSituation) -> WorldPoint? {
+        situation.world.luminance.flatMap {
             VisualEmptiness.firstComfortable(
                 among: situation.strollCandidates,
                 objectSize: situation.objectSize,
                 in: $0,
                 atLeast: configuration.holdEmptiness
             )
-        } ?? first
-        // A stroll is issued once. Repeating it between review beats would lay
-        // the same route every frame.
-        carried = .hold
-        return .stroll(point)
+        }
+    }
+
+    private func frame(at point: WorldPoint, size: WorldSize) -> WorldRect {
+        WorldRect(
+            x: point.x - size.width / 2,
+            y: point.y - size.height / 2,
+            width: size.width,
+            height: size.height
+        )
     }
 }
