@@ -142,6 +142,10 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         accessibility.submenu = makeAccessibilityMenu(runtime: runtime)
         menu.addItem(accessibility)
 
+        let visual = NSMenuItem(title: localized("menu.visualPlacement"), action: nil, keyEquivalent: "")
+        visual.submenu = makeVisualPlacementMenu(runtime: runtime)
+        menu.addItem(visual)
+
         menu.addItem(.separator())
         let openFolder = NSMenuItem(
             title: localized("menu.openPetFolder"),
@@ -253,6 +257,38 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
             let enable = NSMenuItem(
                 title: localized("accessibility.enable"),
                 action: #selector(enableAccessibility),
+                keyEquivalent: ""
+            )
+            enable.target = self
+            menu.addItem(enable)
+        }
+        return menu
+    }
+
+    private func makeVisualPlacementMenu(runtime: RoamlingRuntime) -> NSMenu {
+        let menu = NSMenu(title: localized("menu.visualPlacement"))
+        let authorized = runtime.isScreenCaptureAuthorized
+        let status = NSMenuItem(
+            title: authorized ? localized("visual.status.on") : localized("visual.status.off"),
+            action: nil,
+            keyEquivalent: ""
+        )
+        status.isEnabled = false
+        menu.addItem(status)
+        menu.addItem(.separator())
+
+        if authorized {
+            let hint = NSMenuItem(
+                title: localized("visual.revoke.hint"),
+                action: nil,
+                keyEquivalent: ""
+            )
+            hint.isEnabled = false
+            menu.addItem(hint)
+        } else {
+            let enable = NSMenuItem(
+                title: localized("visual.enable"),
+                action: #selector(enableVisualPlacement),
                 keyEquivalent: ""
             )
             enable.target = self
@@ -418,6 +454,18 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         alert.addButton(withTitle: localized("button.cancel"))
         guard alert.runModal() == .alertFirstButtonReturn else { return }
         runtime.requestAccessibilityAuthorization()
+        rebuildMenu()
+    }
+
+    @objc private func enableVisualPlacement() {
+        guard let runtime else { return }
+        let alert = NSAlert()
+        alert.messageText = localized("visual.alert.title")
+        alert.informativeText = localized("visual.alert.body")
+        alert.addButton(withTitle: localized("button.openSystemSettings"))
+        alert.addButton(withTitle: localized("button.cancel"))
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        runtime.requestScreenCaptureAuthorization()
         rebuildMenu()
     }
 

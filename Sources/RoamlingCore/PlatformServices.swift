@@ -36,6 +36,10 @@ public protocol SafeZoneProviding: AnyObject {
 @MainActor
 public protocol CaptureProviding: AnyObject {
     var isAuthorized: Bool { get }
+
+    /// A downsampled luminance view of one display, or nil when capture is
+    /// unavailable. Implementations must not persist or log the capture.
+    func captureLuminanceField(for display: DisplaySnapshot) async -> LuminanceField?
 }
 
 @MainActor

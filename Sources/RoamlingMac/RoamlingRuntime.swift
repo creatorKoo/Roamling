@@ -73,6 +73,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     private let displayProvider = MacDisplayProvider()
     private let safeZoneProvider = MacBasicSafeZoneProvider()
     private let userIdleProvider = MacUserIdleProvider()
+    private let captureProvider = MacCaptureProvider()
     private let restConfiguration = RestConfiguration.standard
     private var pointerProvider: MacPointerProvider!
     private var windowProvider: MacWindowProvider!
@@ -767,6 +768,14 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     @discardableResult
     public func requestAccessibilityAuthorization() -> Bool {
         focusProvider?.requestAuthorization() ?? false
+    }
+
+    /// Visual placement stays off until the user turns it on from the menu.
+    public var isScreenCaptureAuthorized: Bool { captureProvider.isAuthorized }
+
+    @discardableResult
+    public func requestScreenCaptureAuthorization() -> Bool {
+        captureProvider.requestAuthorization()
     }
 
     private func refreshedFocus(at timestamp: TimeInterval, force: Bool) -> FocusSnapshot? {

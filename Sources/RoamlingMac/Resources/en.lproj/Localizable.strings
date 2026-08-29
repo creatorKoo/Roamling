@@ -79,3 +79,10 @@
 "tuning.gaitCadence" = "Gait cadence";
 "tuning.gaitCadenceNote" = "How fast the walk cycle plays while travelling. 1.00× is the authored motion and the recommended setting; raise it only if faster walking speeds look like sliding to you.";
 "tuning.evadeSpeed" = "Evade speed";
+"menu.visualPlacement" = "Visual Placement";
+"visual.status.on" = "Empty-space Placement: On";
+"visual.status.off" = "Empty-space Placement: Off";
+"visual.enable" = "Enable Empty-space Placement…";
+"visual.alert.title" = "Enable empty-space placement?";
+"visual.alert.body" = "macOS will ask you to allow Roamling under Screen Recording. Roamling then takes one heavily downscaled snapshot when it needs a seat, and reads only how busy each area looks so the pet can settle on empty space instead of your text.\n\nIt does not recognise text, keep the image, write it to disk, or send it anywhere. macOS may require you to quit and reopen Roamling after granting this.";
+"visual.revoke.hint" = "Turn off in System Settings › Privacy & Security";

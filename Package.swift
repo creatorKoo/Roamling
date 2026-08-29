@@ -40,6 +40,7 @@ let package = Package(
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("CoreGraphics"),
+                .linkedFramework("ScreenCaptureKit"),
                 .linkedFramework("SwiftUI")
             ]
         ),
