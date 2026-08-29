@@ -402,6 +402,34 @@ func sourceLogicTests() -> [LogicTest] {
             let coarse = try require(fixture.destination(hint: stale, focus: nil))
             try expect(coarse.point.y < 200)
         },
+        LogicTest(name: "visual placement moves the seat toward empty space") {
+            let fixture = FocusPlacementFixture()
+            let baseline = try require(fixture.destination(focus: nil))
+
+            // The window's left half is dense; the right half is blank wall.
+            let columns = 60
+            let rows = 30
+            var samples: [Double] = []
+            for row in 0..<rows {
+                for column in 0..<columns {
+                    let busy = column < columns / 2 && (column + row).isMultiple(of: 2)
+                    samples.append(busy ? 0.05 : 0.9)
+                }
+            }
+            let field = try require(LuminanceField(
+                bounds: fixture.display.frame,
+                columns: columns,
+                rows: rows,
+                samples: samples
+            ))
+
+            let placed = try require(fixture.destination(focus: nil, luminance: field))
+            try expect(placed.point.x > baseline.point.x, "seat should move off the dense half")
+            try expect(placed.point.x > fixture.display.frame.midX)
+
+            // Without a capture the extra sweep does not exist at all.
+            try expect(baseline.point.x < fixture.display.frame.midX)
+        },
         LogicTest(name: "focus placement falls back when accessibility gives no window") {
             let fixture = FocusPlacementFixture()
             let stale = LocationHint(
@@ -481,14 +509,16 @@ struct FocusPlacementFixture {
 
     func destination(
         hint: LocationHint? = nil,
-        focus: FocusSnapshot?
+        focus: FocusSnapshot?,
+        luminance: LuminanceField? = nil
     ) -> InterestDestination? {
         BasicInterestPositionPlanner.destination(
             for: hint ?? LocationHint(approximateRegion: window, confidence: 0.55),
             in: DesktopWorldSnapshot(
                 displays: [display],
                 windows: [WindowSnapshot(id: "w1", frame: window, isFocused: true)],
-                focus: focus
+                focus: focus,
+                luminance: luminance
             ),
             currentPosition: WorldPoint(x: 200, y: 400),
             pointerPosition: WorldPoint(x: 600, y: 100),

@@ -113,6 +113,9 @@ public struct DesktopWorldSnapshot: Codable, Hashable, Sendable {
     public let windows: [WindowSnapshot]
     public let pointer: PointerSnapshot?
     public let focus: FocusSnapshot?
+    /// Downsampled luminance for the display being placed on, when the user
+    /// turned visual placement on.
+    public let luminance: LuminanceField?
     public let safeZones: [SafeZone]
 
     public init(
@@ -120,13 +123,38 @@ public struct DesktopWorldSnapshot: Codable, Hashable, Sendable {
         windows: [WindowSnapshot] = [],
         pointer: PointerSnapshot? = nil,
         focus: FocusSnapshot? = nil,
+        luminance: LuminanceField? = nil,
         safeZones: [SafeZone] = []
     ) {
         self.displays = displays
         self.windows = windows
         self.pointer = pointer
         self.focus = focus
+        self.luminance = luminance
         self.safeZones = safeZones
+    }
+
+    /// Screen samples are deliberately absent from the coding keys, so encoding
+    /// a world snapshot can never carry what was on the user's screen into a
+    /// file, a log, or a request. A decoded snapshot always has no luminance.
+    private enum CodingKeys: String, CodingKey {
+        case displays
+        case windows
+        case pointer
+        case focus
+        case safeZones
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            displays: try container.decode([DisplaySnapshot].self, forKey: .displays),
+            windows: try container.decodeIfPresent([WindowSnapshot].self, forKey: .windows) ?? [],
+            pointer: try container.decodeIfPresent(PointerSnapshot.self, forKey: .pointer),
+            focus: try container.decodeIfPresent(FocusSnapshot.self, forKey: .focus),
+            luminance: nil,
+            safeZones: try container.decodeIfPresent([SafeZone].self, forKey: .safeZones) ?? []
+        )
     }
 
     public func display(containing point: WorldPoint) -> DisplaySnapshot? {

@@ -112,6 +112,13 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     private var activityHint: LocationHint?
     private var cachedFocus: FocusSnapshot?
     private var focusQueriedAt: TimeInterval = -.infinity
+    private var lastReseatCheckAt: TimeInterval = -.infinity
+    private var cachedLuminance: LuminanceField?
+    private var luminanceCapturedAt: TimeInterval = -.infinity
+    private var luminanceTask: Task<Void, Never>?
+    /// A screen capture is far heavier than an accessibility query and the
+    /// desktop rarely changes shape between seats, so it refreshes slowly.
+    private static let luminanceRefreshInterval: TimeInterval = 3
     /// The accessibility query is synchronous, so it runs only when placement
     /// can act on the answer: when an event picks a seat, and on a slow beat
     /// while walking there. A seated pet waits for the next event.
@@ -257,6 +264,9 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         tickTimer?.invalidate()
         tickTimer = nil
         activityTasks.forEach { $0.cancel() }
+        luminanceTask?.cancel()
+        luminanceTask = nil
+        cachedLuminance = nil
         activityTasks.removeAll()
         claudeCodeSource.stop()
         codexSource.stop()
@@ -794,16 +804,45 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     }
 
     private func planningWorld(focus: FocusSnapshot?) -> DesktopWorldSnapshot {
-        guard let focus else { return world }
-        return DesktopWorldSnapshot(displays: world.displays, focus: focus)
+        // Revoking screen recording has to take effect on the next seat rather
+        // than leave the pet trusting an old capture.
+        let luminance = captureProvider.isAuthorized ? cachedLuminance : nil
+        guard focus != nil || luminance != nil else { return world }
+        return DesktopWorldSnapshot(
+            displays: world.displays,
+            focus: focus,
+            luminance: luminance
+        )
     }
 
-    /// Walking to a seat takes a moment and the caret can move while it does.
-    private func reseatForFocusIfNeeded(at timestamp: TimeInterval) {
-        guard timestamp - focusQueriedAt >= Self.focusRefreshInterval,
+    /// Captures off the main thread and lets the travelling reseat check pick the
+    /// result up. Placement never waits on a snapshot, so a slow or failed
+    /// capture costs nothing but the visual term.
+    private func requestLuminanceRefresh(at timestamp: TimeInterval, near region: WorldRect) {
+        guard captureProvider.isAuthorized,
+              luminanceTask == nil,
+              timestamp - luminanceCapturedAt >= Self.luminanceRefreshInterval,
+              let display = world.display(containing: region.center)
+                ?? world.nearestDisplay(to: region.center) else { return }
+        luminanceCapturedAt = timestamp
+        luminanceTask = Task { [weak self] in
+            guard let provider = self?.captureProvider else { return }
+            let field = await provider.captureLuminanceField(for: display)
+            self?.cachedLuminance = field
+            self?.luminanceTask = nil
+        }
+    }
+
+    /// Walking to a seat takes a moment. The caret can move while it does, and a
+    /// capture requested when the seat was chosen usually lands mid-walk.
+    private func reseatIfBetterSeatAvailable(at timestamp: TimeInterval) {
+        guard timestamp - lastReseatCheckAt >= Self.focusRefreshInterval,
               let hint = activityHint,
-              let current = activityDestination,
-              let focus = refreshedFocus(at: timestamp, force: true),
+              let current = activityDestination else { return }
+        lastReseatCheckAt = timestamp
+
+        let focus = refreshedFocus(at: timestamp, force: true)
+        guard focus != nil || cachedLuminance != nil,
               let updated = BasicInterestPositionPlanner.destination(
                 for: hint,
                 in: planningWorld(focus: focus),
@@ -836,6 +875,9 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         arrivalReaction: CompanionReaction,
         at timestamp: TimeInterval
     ) {
+        if let region = event.locationHint?.approximateRegion {
+            requestLuminanceRefresh(at: timestamp, near: region)
+        }
         guard let hint = event.locationHint,
               let destination = BasicInterestPositionPlanner.destination(
                 for: hint,
@@ -873,7 +915,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         deltaTime: TimeInterval
     ) -> Bool {
         if activityDestination != nil {
-            reseatForFocusIfNeeded(at: timestamp)
+            reseatIfBetterSeatAvailable(at: timestamp)
         }
 
         if let destination = activityDestination {

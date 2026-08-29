@@ -48,17 +48,44 @@ public enum BasicInterestPositionPlanner {
         let halfWidth = objectSize.width / 2
         let halfHeight = objectSize.height / 2
         let bottomY = region.maxY - halfHeight - 14
-        let rawCandidates: [(WorldPoint, Bool)] = [
+        var rawCandidates: [(WorldPoint, Bool)] = [
             (WorldPoint(x: region.minX - halfWidth - 14, y: bottomY), true),
             (WorldPoint(x: region.maxX + halfWidth + 14, y: bottomY), true),
             (WorldPoint(x: region.minX + halfWidth + 18, y: bottomY), false),
             (WorldPoint(x: region.maxX - halfWidth - 18, y: bottomY), false)
         ]
 
+        // Four seats at the two edges give an emptiness score nothing to choose
+        // between. When a capture exists, sweep the bottom band so the score can
+        // actually find a gap between paragraphs or panes. The band stays low in
+        // the window; this gate looks for empty space, not for the middle of the
+        // user's document.
+        if world.luminance != nil {
+            let innerLeft = region.minX + halfWidth + 18
+            let innerRight = region.maxX - halfWidth - 18
+            if innerRight > innerLeft {
+                let steps = 5
+                for step in 1..<steps {
+                    let ratio = Double(step) / Double(steps)
+                    let x = innerLeft + (innerRight - innerLeft) * ratio
+                    rawCandidates.append((WorldPoint(x: x, y: bottomY), false))
+                }
+            }
+        }
+
         var unique: [WorldPoint: Bool] = [:]
         for (point, outside) in rawCandidates {
             let clamped = safe.closestPoint(to: point)
             unique[clamped] = (unique[clamped] ?? false) || outside
+        }
+
+        func petFrame(at point: WorldPoint) -> WorldRect {
+            WorldRect(
+                x: point.x - halfWidth,
+                y: point.y - halfHeight,
+                width: objectSize.width,
+                height: objectSize.height
+            )
         }
 
         let candidates = unique.map { point, intendedOutside -> InterestDestination in
@@ -77,21 +104,25 @@ public enum BasicInterestPositionPlanner {
             var caretAffinity = 0.0
             var occlusionPenalty = 0.0
             if let focus {
-                let petFrame = WorldRect(
-                    x: point.x - halfWidth,
-                    y: point.y - halfHeight,
-                    width: objectSize.width,
-                    height: objectSize.height
-                )
+                let frame = petFrame(at: point)
                 if let caret = focus.caretFrame {
                     caretAffinity = max(0, 24 - caret.distance(to: point) / 40)
-                    if petFrame.intersects(caret, tolerance: Self.caretClearance) {
+                    if frame.intersects(caret, tolerance: Self.caretClearance) {
                         occlusionPenalty += 120
                     }
                 }
-                if let element = focus.focusedElementFrame, petFrame.intersects(element) {
+                if let element = focus.focusedElementFrame, frame.intersects(element) {
                     occlusionPenalty += 40
                 }
+            }
+
+            // Emptiness only ranks seats that already passed the caret and
+            // pointer checks, so it can move the pet along the band but never
+            // onto something it must avoid.
+            var visualEmptyScore = 0.0
+            if let field = world.luminance,
+               let emptiness = VisualEmptiness.score(of: petFrame(at: point), in: field) {
+                visualEmptyScore = emptiness * 34
             }
 
             return InterestDestination(
@@ -101,6 +132,7 @@ public enum BasicInterestPositionPlanner {
                     + outsideBonus
                     + bottomEdgeScore
                     + caretAffinity
+                    + visualEmptyScore
                     - pointerPenalty
                     - travelPenalty
                     - occlusionPenalty

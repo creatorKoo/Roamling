@@ -10,7 +10,7 @@ import Foundation
 /// scored, and are dropped. Nothing is written to disk or logged, and no text
 /// is recognised — this type cannot express what was on screen, only how busy
 /// each region looked.
-public struct LuminanceField: Sendable, Equatable {
+public struct LuminanceField: Sendable, Hashable {
     public let bounds: WorldRect
     public let columns: Int
     public let rows: Int
