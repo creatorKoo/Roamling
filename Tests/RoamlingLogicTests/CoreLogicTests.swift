@@ -33,6 +33,34 @@ func coreLogicTests() -> [LogicTest] {
                 )
             }
         },
+        LogicTest(name: "a walking pet can still fall asleep") {
+            // Rest is gated on how long the *user* has been idle, never on the
+            // pet holding still, and the tick chain checks rest before roaming.
+            // So a pet mid-stroll has to be able to stop and sit, or raising the
+            // pause between walks would quietly mean it never sleeps again.
+            try expect(
+                BehaviorController.restEntryStates.contains(.wander),
+                "a stroll would block rest for as long as the pause is set to"
+            )
+            var behavior = BehaviorController(state: .wander, enteredAt: 0)
+            behavior.handle(.beginRest, at: 80)
+            try expect(behavior.state == .sit, "walking pet refused to sit")
+            behavior.handle(.seekSleepSpot, at: 82.4)
+            behavior.handle(.sleepSpotReached, at: 84)
+            try expect(behavior.state == .sleep)
+        },
+        LogicTest(name: "the nap threshold is tunable and stays bounded") {
+            try expectNear(
+                RuntimeTuning.standard.restConfiguration.idleBeforeRest,
+                RestConfiguration.standard.idleBeforeRest
+            )
+            let patient = RuntimeTuning(idleBeforeRest: 300)
+            try expectNear(patient.restConfiguration.idleBeforeRest, 300)
+            // The panel's own range is the outer bound; nothing downstream may
+            // widen it into a pet that naps after two seconds.
+            try expectNear(RuntimeTuning(idleBeforeRest: 1).idleBeforeRest, 15)
+            try expectNear(RuntimeTuning(idleBeforeRest: 9_000).idleBeforeRest, 600)
+        },
         LogicTest(name: "observing pet roams and settles back to idle") {
             var behavior = BehaviorController(state: .idle, enteredAt: 0)
             behavior.handle(.reaction(.glance), at: 1)
@@ -293,6 +321,7 @@ func coreLogicTests() -> [LogicTest] {
             try expectNear(decoded.wanderPause, 9)
             try expectNear(decoded.hitRegionScale, 1.1)
             try expectNear(decoded.gaitCadence, RuntimeTuning.standard.gaitCadence)
+            try expectNear(decoded.idleBeforeRest, RuntimeTuning.standard.idleBeforeRest)
 
             // Bounds still apply to whatever was on disk.
             let outOfRange = Data(#"{"walkingSpeed": 5000}"#.utf8)

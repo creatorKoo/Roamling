@@ -59,6 +59,7 @@
 "tuning.footer" = "Changes apply immediately and are saved. This panel tunes roaming and pointer interaction only; MVP 0.7 rest timing stays fixed during its first validation pass.";
 "tuning.section.movement" = "Movement";
 "tuning.walkSpeed" = "Walk speed";
+"tuning.idleBeforeRest" = "Idle before napping";
 "tuning.wanderPause" = "Pause between walks";
 "tuning.crossDisplay" = "Other-display trips";
 "tuning.section.pointer" = "Pointer & Catch";

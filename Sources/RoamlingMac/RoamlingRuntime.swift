@@ -74,7 +74,6 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     private let safeZoneProvider = MacBasicSafeZoneProvider()
     private let userIdleProvider = MacUserIdleProvider()
     private let captureProvider = MacCaptureProvider()
-    private let restConfiguration = RestConfiguration.standard
     private var pointerProvider: MacPointerProvider!
     private var windowProvider: MacWindowProvider!
     private var focusProvider: MacFocusProvider!
@@ -607,6 +606,10 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
             1
         }
     }
+
+    /// Rest timing follows the tuning panel, so changing the idle threshold
+    /// takes effect on the next tick rather than at the next launch.
+    private var restConfiguration: RestConfiguration { tuning.restConfiguration }
 
     private var preferredTickInterval: TimeInterval {
         if ProcessInfo.processInfo.systemUptime <= catchArmedUntil { return 1 / 60 }

@@ -59,6 +59,7 @@
 "tuning.footer" = "변경은 바로 적용되고 저장됩니다. 이 패널은 돌아다니기와 포인터 상호작용만 조정하며, MVP 0.7의 휴식 타이밍은 첫 검증 동안 고정입니다.";
 "tuning.section.movement" = "이동";
 "tuning.walkSpeed" = "이동 속도";
+"tuning.idleBeforeRest" = "잠들기 전 대기";
 "tuning.wanderPause" = "걷기 사이 멈춤";
 "tuning.crossDisplay" = "다른 화면으로 이동";
 "tuning.section.pointer" = "포인터·잡기";

@@ -123,6 +123,13 @@ private struct RuntimeTuningView: View {
                 step: 0.01,
                 style: .percent
             )
+            TuningSliderRow(
+                title: localized("tuning.idleBeforeRest"),
+                value: model.binding(\.idleBeforeRest),
+                range: 15...600,
+                step: 5,
+                style: .seconds
+            )
 
             Divider()
             Text(localized("tuning.section.pointer"))

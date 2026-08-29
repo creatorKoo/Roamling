@@ -17,6 +17,7 @@ public struct RuntimeTuning: Codable, Equatable, Sendable {
     public var hitRegionScale: Double
     public var gaitCadence: Double
     public var evadeSpeedScale: Double
+    public var idleBeforeRest: Double
 
     public init(
         walkingSpeed: Double = 160,
@@ -28,7 +29,8 @@ public struct RuntimeTuning: Codable, Equatable, Sendable {
         catchWindow: Double = 0.35,
         hitRegionScale: Double = 1.12,
         gaitCadence: Double = 1,
-        evadeSpeedScale: Double = 1.4
+        evadeSpeedScale: Double = 1.4,
+        idleBeforeRest: Double = RestConfiguration.standard.idleBeforeRest
     ) {
         self.walkingSpeed = walkingSpeed.clamped(to: 20...320)
         self.wanderPause = wanderPause.clamped(to: 2...40)
@@ -42,6 +44,7 @@ public struct RuntimeTuning: Codable, Equatable, Sendable {
         self.hitRegionScale = hitRegionScale.clamped(to: 0.75...1.3)
         self.gaitCadence = gaitCadence.clamped(to: 0.5...3.2)
         self.evadeSpeedScale = evadeSpeedScale.clamped(to: 0.8...3)
+        self.idleBeforeRest = idleBeforeRest.clamped(to: 15...600)
     }
 
     /// Decoding tolerates a saved blob written before a field existed.
@@ -71,7 +74,8 @@ public struct RuntimeTuning: Codable, Equatable, Sendable {
             catchWindow: try value(.catchWindow, fallback.catchWindow),
             hitRegionScale: try value(.hitRegionScale, fallback.hitRegionScale),
             gaitCadence: try value(.gaitCadence, fallback.gaitCadence),
-            evadeSpeedScale: try value(.evadeSpeedScale, fallback.evadeSpeedScale)
+            evadeSpeedScale: try value(.evadeSpeedScale, fallback.evadeSpeedScale),
+            idleBeforeRest: try value(.idleBeforeRest, fallback.idleBeforeRest)
         )
     }
 
@@ -89,8 +93,16 @@ public struct RuntimeTuning: Codable, Equatable, Sendable {
             catchWindow: catchWindow,
             hitRegionScale: hitRegionScale,
             gaitCadence: gaitCadence,
-            evadeSpeedScale: evadeSpeedScale
+            evadeSpeedScale: evadeSpeedScale,
+            idleBeforeRest: idleBeforeRest
         )
+    }
+
+    /// Rest timing, so the one value a user has a reason to change is the one
+    /// exposed. Sitting and waking stay authored: they are animation pacing,
+    /// not a preference.
+    public var restConfiguration: RestConfiguration {
+        RestConfiguration(idleBeforeRest: idleBeforeRest)
     }
 
     /// How fast the authored walk cycle plays while travelling.
