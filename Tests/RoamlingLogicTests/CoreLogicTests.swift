@@ -300,6 +300,34 @@ func coreLogicTests() -> [LogicTest] {
             try expectNear(clamped.walkingSpeed, 320)
             try expectNear(clamped.wanderPause, RuntimeTuning.standard.wanderPause)
         },
+        LogicTest(name: "evade speed scales with the walking speed") {
+            // Getting out of the way must never look slower than strolling.
+            let standard = RuntimeTuning.standard
+            try expect(standard.fastEvadeSpeed > standard.walkingSpeed)
+            try expectNear(standard.fastEvadeSpeed, standard.walkingSpeed * 1.4)
+            try expectNear(standard.slowEvadeSpeed, standard.fastEvadeSpeed * 0.55)
+
+            var slower = RuntimeTuning.standard
+            slower.walkingSpeed = 60
+            let halved = slower.normalized
+            try expectNear(halved.fastEvadeSpeed, 84)
+            try expect(halved.fastEvadeSpeed > halved.walkingSpeed)
+
+            // The floor keeps evasion usable at the slowest walking speeds.
+            var crawling = RuntimeTuning.standard
+            crawling.walkingSpeed = 20
+            crawling.evadeSpeedScale = 0.8
+            let floored = crawling.normalized
+            try expectNear(floored.fastEvadeSpeed, 60)
+            try expectNear(floored.slowEvadeSpeed, 33)
+
+            // The panel value reaches the pointer model, not just the tuning.
+            var brisk = RuntimeTuning.standard
+            brisk.evadeSpeedScale = 3
+            let configuration = brisk.normalized.pointerConfiguration
+            try expectNear(configuration.fastEvadeSpeed, 480)
+            try expectNear(configuration.slowEvadeSpeed, 264)
+        },
         LogicTest(name: "gait cadence stays opt-in and independent of walking speed") {
             // The authored motion is the default. Raising the walking speed must
             // not retime the walk cycle on its own.

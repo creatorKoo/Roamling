@@ -78,3 +78,4 @@
 "tuning.section.advanced" = "Advanced";
 "tuning.gaitCadence" = "Gait cadence";
 "tuning.gaitCadenceNote" = "How fast the walk cycle plays while travelling. 1.00× is the authored motion and the recommended setting; raise it only if faster walking speeds look like sliding to you.";
+"tuning.evadeSpeed" = "Evade speed";

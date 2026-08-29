@@ -16,6 +16,7 @@ public struct RuntimeTuning: Codable, Equatable, Sendable {
     public var catchWindow: Double
     public var hitRegionScale: Double
     public var gaitCadence: Double
+    public var evadeSpeedScale: Double
 
     public init(
         walkingSpeed: Double = 160,
@@ -26,7 +27,8 @@ public struct RuntimeTuning: Codable, Equatable, Sendable {
         catchApproachSpeed: Double = 380,
         catchWindow: Double = 0.35,
         hitRegionScale: Double = 1.12,
-        gaitCadence: Double = 1
+        gaitCadence: Double = 1,
+        evadeSpeedScale: Double = 1.4
     ) {
         self.walkingSpeed = walkingSpeed.clamped(to: 20...320)
         self.wanderPause = wanderPause.clamped(to: 2...40)
@@ -39,6 +41,7 @@ public struct RuntimeTuning: Codable, Equatable, Sendable {
         self.catchWindow = catchWindow.clamped(to: 0.15...1.2)
         self.hitRegionScale = hitRegionScale.clamped(to: 0.75...1.3)
         self.gaitCadence = gaitCadence.clamped(to: 0.5...3.2)
+        self.evadeSpeedScale = evadeSpeedScale.clamped(to: 0.8...3)
     }
 
     /// Decoding tolerates a saved blob written before a field existed.
@@ -67,7 +70,8 @@ public struct RuntimeTuning: Codable, Equatable, Sendable {
             catchApproachSpeed: try value(.catchApproachSpeed, fallback.catchApproachSpeed),
             catchWindow: try value(.catchWindow, fallback.catchWindow),
             hitRegionScale: try value(.hitRegionScale, fallback.hitRegionScale),
-            gaitCadence: try value(.gaitCadence, fallback.gaitCadence)
+            gaitCadence: try value(.gaitCadence, fallback.gaitCadence),
+            evadeSpeedScale: try value(.evadeSpeedScale, fallback.evadeSpeedScale)
         )
     }
 
@@ -84,7 +88,8 @@ public struct RuntimeTuning: Codable, Equatable, Sendable {
             catchApproachSpeed: catchApproachSpeed,
             catchWindow: catchWindow,
             hitRegionScale: hitRegionScale,
-            gaitCadence: gaitCadence
+            gaitCadence: gaitCadence,
+            evadeSpeedScale: evadeSpeedScale
         )
     }
 
@@ -96,14 +101,28 @@ public struct RuntimeTuning: Codable, Equatable, Sendable {
     /// 1.0 so the default motion is untouched no matter how the speed is tuned.
     public var locomotionAnimationRate: Double { gaitCadence }
 
+    /// Evading has to outrun strolling. Fixed evade speeds meant a fast walking
+    /// speed made the pet look slower when it was trying to get out of the way,
+    /// so both evade speeds scale with `walkingSpeed`.
+    ///
+    /// The floor keeps evasion usable at the slowest walking speeds; a pet that
+    /// cannot step aside is worse than one that steps aside briskly. It only
+    /// takes over below roughly a 43 pt/s walk, so it never overrides a tuned
+    /// value that is already fast enough.
+    public var fastEvadeSpeed: Double { max(60, walkingSpeed * evadeSpeedScale) }
+
+    /// The gentle sidestep keeps the authored 74:138 relationship to the urgent
+    /// one, so the two still read as different reactions.
+    public var slowEvadeSpeed: Double { fastEvadeSpeed * 0.55 }
+
     public var pointerConfiguration: PointerInteractionConfiguration {
         PointerInteractionConfiguration(
             awarenessDistance: pointerAwarenessDistance,
             slowEvadeDistance: 100,
             fastEvadeDistance: 50,
             catchDistance: catchArmDistance,
-            slowEvadeSpeed: 74,
-            fastEvadeSpeed: 138,
+            slowEvadeSpeed: slowEvadeSpeed,
+            fastEvadeSpeed: fastEvadeSpeed,
             catchPointerSpeed: catchApproachSpeed,
             catchClosingSpeed: max(120, catchApproachSpeed * 0.48)
         )

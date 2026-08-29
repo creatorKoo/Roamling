@@ -135,6 +135,13 @@ private struct RuntimeTuningView: View {
                 style: .points
             )
             TuningSliderRow(
+                title: localized("tuning.evadeSpeed"),
+                value: model.binding(\.evadeSpeedScale),
+                range: 0.8...3,
+                step: 0.05,
+                style: .multiplier
+            )
+            TuningSliderRow(
                 title: localized("tuning.catchArm"),
                 value: model.binding(\.catchArmDistance),
                 range: 40...140,

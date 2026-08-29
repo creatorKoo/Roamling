@@ -78,3 +78,4 @@
 "tuning.section.advanced" = "고급";
 "tuning.gaitCadence" = "걸음 속도";
 "tuning.gaitCadenceNote" = "이동할 때 걷기 동작이 재생되는 속도입니다. 1.00배가 원래 만들어진 동작이고 권장값입니다. 빠른 이동 속도에서 미끄러져 보일 때만 올리세요.";
+"tuning.evadeSpeed" = "회피 속도";
