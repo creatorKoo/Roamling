@@ -108,23 +108,36 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     private var lastPointerDecision: PointerDecision?
     private var isEvadeTransitioning = false
     private var restDestination: RestDestination?
-    private var activityDestination: InterestDestination?
+    /// The window the pet is watching. It outlives any one walk: a parked pet
+    /// still has to know which window to judge its seat against.
     private var activityHint: LocationHint?
+    private var placement = PlacementDirector()
     private var cachedFocus: FocusSnapshot?
     private var focusQueriedAt: TimeInterval = -.infinity
-    private var lastReseatCheckAt: TimeInterval = -.infinity
     private var cachedLuminance: LuminanceField?
     private var luminanceCapturedAt: TimeInterval = -.infinity
     private var luminanceTask: Task<Void, Never>?
     /// A screen capture is far heavier than an accessibility query and the
     /// desktop rarely changes shape between seats, so it refreshes slowly.
     private static let luminanceRefreshInterval: TimeInterval = 3
-    /// The accessibility query is synchronous, so it runs only when placement
-    /// can act on the answer: when an event picks a seat, and on a slow beat
-    /// while walking there. A seated pet waits for the next event.
+    /// A sleeping pet still has to notice text arriving underneath it, because
+    /// the screen keeps changing while the user is away. It just does not need
+    /// to spend a capture as often to find out.
+    private static let restingLuminanceRefreshInterval: TimeInterval = 6
+    /// The accessibility query is synchronous, so it runs on a slow beat rather
+    /// than per frame. `PlacementDirector` reviews a seat on a beat of its own,
+    /// and asking more often than it looks buys nothing.
     private static let focusRefreshInterval: TimeInterval = 0.5
-    /// Re-routing for anything smaller than this would read as jitter.
-    private static let focusReseatThreshold = 24.0
+    /// States where the pointer, not placement, decides where the pet goes.
+    private static let pointerOwnedStates: Set<BehaviorState> = [
+        .caught, .dragged, .evadePointer, .lookAtPointer
+    ]
+    /// Destinations offered to the emptiness score before a stroll. Enough to
+    /// usually find a clear one, few enough that roaming stays aimless.
+    private static let wanderCandidateCount = 6
+    /// How long before a stroll begins to take the snapshot it will be judged
+    /// against.
+    private static let wanderCaptureLead: TimeInterval = 1.5
     private var pendingActivityEvent: CompanionEvent?
     private var recentActivityEvents: [String: CompanionEvent] = [:]
     private var attentionModel = AttentionModel()
@@ -515,6 +528,18 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
             && now <= catchArmedUntil
 
         if behavior.state != .caught && behavior.state != .dragged {
+            // Gather, decide, apply. The decision runs every tick even when
+            // something else owns the pet, so the seat verdict is never stale by
+            // the time placement is allowed to act on it. Gating the judging
+            // along with the moving is what froze placement next to the cursor.
+            let intent = placement.decide(makeSituation(
+                at: now,
+                pointer: pointer.position,
+                proximity: decision.proximity,
+                catchIsArmed: catchIsArmed,
+                userIdleDuration: userIdleDuration
+            ))
+
             if catchIsArmed {
                 isEvadeTransitioning = false
                 movement.cancelRoute(stop: false)
@@ -524,10 +549,16 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
                 nextWanderAt = max(nextWanderAt, now + 1.0)
             } else if isEvadeTransitioning {
                 updateEvadeTransition(at: now, deltaTime: deltaTime)
+            } else if intent.travelReason != nil, behavior.state.isResting {
+                // Stepping out from under the user's text is the one thing that
+                // outranks a nap, and the only reason placement may end one.
+                cancelRestForActivity(at: now)
+                apply(intent, at: now, deltaTime: deltaTime)
             } else if updateRestLifecycle(
                 userIdleDuration: userIdleDuration,
                 pointerProximity: decision.proximity,
                 pointerPosition: pointer.position,
+                mayNapOnSeat: intent == .sleepInPlace,
                 at: now,
                 deltaTime: deltaTime
             ) {
@@ -543,14 +574,10 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
                     _ = movement.update(deltaTime: deltaTime)
                     nextWanderAt = max(nextWanderAt, now + 0.8)
                 case .far:
-                    if !updateActivityLifecycle(at: now, deltaTime: deltaTime) {
-                        updateRoaming(at: now, deltaTime: deltaTime)
-                    }
+                    apply(intent, at: now, deltaTime: deltaTime)
                 }
             } else {
-                if !updateActivityLifecycle(at: now, deltaTime: deltaTime) {
-                    updateRoaming(at: now, deltaTime: deltaTime)
-                }
+                apply(intent, at: now, deltaTime: deltaTime)
             }
         }
 
@@ -687,11 +714,26 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
             return
         }
         if behavior.state.isResting {
+            // An agent emits an event per tool call. Waking for each of them
+            // would mean the pet can doze for one beat and never longer, so
+            // only events the user would want to be shown get it up.
+            guard Self.deservesWakingFromRest(selected) else { return }
             cancelRestForActivity(at: now)
             pendingActivityEvent = selected
             return
         }
         dispatchActivityEvent(selected, at: now)
+    }
+
+    /// Routine progress is what the pet is already sitting next to. Only a
+    /// result or a request for the user is worth interrupting a nap for.
+    private static func deservesWakingFromRest(_ event: CompanionEvent) -> Bool {
+        switch event.kind {
+        case .attentionRequired, .achievement, .negative, .setback:
+            true
+        case .activityStarted, .highIntensity, .positive, .calm, .idle, .activityEnded:
+            false
+        }
     }
 
     private func resumePendingActivityIfReady(at timestamp: TimeInterval) {
@@ -712,25 +754,18 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
 
         switch event.kind {
         case .activityStarted, .highIntensity:
-            activeActivitySourceID = event.sourceID
             let sustained = event.kind == .highIntensity || event.intensity >= 0.65
                 ? CompanionReaction.work
                 : .observe
-            activeActivityReaction = sustained
-            beginActivityTravelIfPossible(
-                for: event,
-                arrivalReaction: reaction ?? sustained,
+            beginWatching(
+                event,
+                sustained: sustained,
+                reaction: reaction ?? sustained,
                 at: timestamp
             )
 
         case .attentionRequired:
-            activeActivitySourceID = event.sourceID
-            activeActivityReaction = .observe
-            beginActivityTravelIfPossible(
-                for: event,
-                arrivalReaction: reaction ?? .paw,
-                at: timestamp
-            )
+            beginWatching(event, sustained: .observe, reaction: reaction ?? .paw, at: timestamp)
 
         case .positive:
             if let reaction { applyActivityReaction(reaction, at: timestamp) }
@@ -748,8 +783,9 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         case .setback:
             activeActivitySourceID = event.sourceID
             activeActivityReaction = .observe
-            activityDestination = nil
-            activityHint = nil
+            // The trip is off but the window is still the one being watched, so
+            // the hint stays and the seat keeps being judged where the pet is.
+            placement.settleInPlace(sourceID: event.sourceID, at: timestamp)
             movement.cancelRoute(stop: false)
             applyActivityReaction(reaction ?? .sad, at: timestamp)
 
@@ -819,9 +855,12 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     /// result up. Placement never waits on a snapshot, so a slow or failed
     /// capture costs nothing but the visual term.
     private func requestLuminanceRefresh(at timestamp: TimeInterval, near region: WorldRect) {
+        let interval = behavior.state.isResting
+            ? Self.restingLuminanceRefreshInterval
+            : Self.luminanceRefreshInterval
         guard captureProvider.isAuthorized,
               luminanceTask == nil,
-              timestamp - luminanceCapturedAt >= Self.luminanceRefreshInterval,
+              timestamp - luminanceCapturedAt >= interval,
               let display = world.display(containing: region.center)
                 ?? world.nearestDisplay(to: region.center) else { return }
         luminanceCapturedAt = timestamp
@@ -831,32 +870,6 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
             self?.cachedLuminance = field
             self?.luminanceTask = nil
         }
-    }
-
-    /// Walking to a seat takes a moment. The caret can move while it does, and a
-    /// capture requested when the seat was chosen usually lands mid-walk.
-    private func reseatIfBetterSeatAvailable(at timestamp: TimeInterval) {
-        guard timestamp - lastReseatCheckAt >= Self.focusRefreshInterval,
-              let hint = activityHint,
-              let current = activityDestination else { return }
-        lastReseatCheckAt = timestamp
-
-        let focus = refreshedFocus(at: timestamp, force: true)
-        guard focus != nil || cachedLuminance != nil,
-              let updated = BasicInterestPositionPlanner.destination(
-                for: hint,
-                in: planningWorld(focus: focus),
-                currentPosition: movement.position,
-                pointerPosition: pointerProvider.currentPointer(at: timestamp).position,
-                objectSize: overlay.objectSize
-              ),
-              updated.point.distance(to: current.point) > Self.focusReseatThreshold else { return }
-
-        activityDestination = updated
-        movement.setRoute(DisplayTopology(displays: displays).route(
-            from: movement.position,
-            to: updated.point
-        ).waypoints)
     }
 
     private func queueNextAttentionCandidate(at timestamp: TimeInterval) {
@@ -870,80 +883,158 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         pendingActivityEvent = next.id == lastDispatchedActivityEventID ? nil : next
     }
 
-    private func beginActivityTravelIfPossible(
-        for event: CompanionEvent,
-        arrivalReaction: CompanionReaction,
+    /// Records the window to watch and the reaction the user is owed. Where the
+    /// pet stands to watch it is the director's answer, on the next tick.
+    private func beginWatching(
+        _ event: CompanionEvent,
+        sustained: CompanionReaction,
+        reaction: CompanionReaction,
         at timestamp: TimeInterval
     ) {
-        if let region = event.locationHint?.approximateRegion {
-            requestLuminanceRefresh(at: timestamp, near: region)
+        if let hint = event.locationHint {
+            activityHint = hint
+            if let region = hint.approximateRegion {
+                requestLuminanceRefresh(at: timestamp, near: region)
+            }
+        } else if activeActivitySourceID != event.sourceID {
+            // A different agent arriving without a window to point at: the last
+            // one's window is not evidence about this one, and leaving it in
+            // place would walk the pet to the wrong screen.
+            activityHint = nil
         }
-        guard let hint = event.locationHint,
-              let destination = BasicInterestPositionPlanner.destination(
-                for: hint,
-                in: planningWorld(focus: refreshedFocus(at: timestamp, force: true)),
-                currentPosition: movement.position,
-                pointerPosition: pointerProvider.currentPointer(at: timestamp).position,
-                objectSize: overlay.objectSize
-              ) else {
-            applyActivityReaction(arrivalReaction, at: timestamp)
+        activeActivitySourceID = event.sourceID
+        activeActivityReaction = sustained
+        guard activityHint != nil else {
+            // Nothing to walk to, so the reaction plays where the pet is.
+            activityArrivalReaction = nil
+            applyActivityReaction(reaction, at: timestamp)
             return
+        }
+        activityArrivalReaction = reaction
+    }
+
+    /// Collects everything the placement decision is allowed to look at.
+    ///
+    /// Nothing here decides anything. Gathering is the adapter's whole job on
+    /// this path, which is why the fields it fills are inputs to one function
+    /// rather than state four code paths write to and read from each other.
+    private func makeSituation(
+        at timestamp: TimeInterval,
+        pointer: WorldPoint,
+        proximity: PointerProximity,
+        catchIsArmed: Bool,
+        userIdleDuration: TimeInterval
+    ) -> PetSituation {
+        let isWatching = activeActivitySourceID != nil && activityHint != nil
+        // An agent at work suppresses roaming even when no window could be
+        // located for it, the same as before placement moved to the director.
+        let isStrollDue = isRoamingEnabled
+            && activeActivitySourceID == nil
+            && !movement.hasRoute
+            && timestamp >= nextWanderAt
+
+        if isWatching, let region = activityHint?.approximateRegion {
+            requestLuminanceRefresh(at: timestamp, near: region)
+        } else if activeActivitySourceID == nil,
+                  !movement.hasRoute,
+                  timestamp >= nextWanderAt - Self.wanderCaptureLead {
+            // One capture shortly before the pause ends, so a stroll is judged
+            // against a fresh screen without capturing on a loop while the pet
+            // is just sitting there.
+            requestLuminanceRefreshForRoaming(at: timestamp)
         }
 
-        let route = DisplayTopology(displays: displays).route(
-            from: movement.position,
-            to: destination.point
+        // The accessibility query costs a synchronous round trip, so it only
+        // runs while there is a window whose caret the answer would move the pet
+        // away from.
+        let focus = isWatching ? refreshedFocus(at: timestamp, force: false) : nil
+        return PetSituation(
+            timestamp: timestamp,
+            world: planningWorld(focus: focus),
+            position: movement.position,
+            objectSize: overlay.objectSize,
+            pointerPosition: pointer,
+            walkingSpeed: tuning.walkingSpeed,
+            isPointerOwned: catchIsArmed
+                || Self.pointerOwnedStates.contains(behavior.state)
+                || (isPointerAvoidanceEnabled && proximity != .far),
+            isEvading: isEvadeTransitioning,
+            activitySourceID: activeActivitySourceID,
+            activityHint: activityHint,
+            userIdleDuration: userIdleDuration,
+            idleBeforeRest: restConfiguration.idleBeforeRest,
+            isRoamingEnabled: isRoamingEnabled,
+            isStrollDue: isStrollDue,
+            strollCandidates: isStrollDue ? strollCandidates() : []
         )
-        guard !route.waypoints.isEmpty,
-              movement.position.distance(to: destination.point) > 18 else {
-            applyActivityReaction(arrivalReaction, at: timestamp)
-            return
+    }
+
+    /// Carries out the director's decision. Nothing here re-decides.
+    private func apply(
+        _ intent: PlacementIntent,
+        at timestamp: TimeInterval,
+        deltaTime: TimeInterval
+    ) {
+        switch intent {
+        case let .travel(destination, _):
+            travelToSeat(destination, at: timestamp, deltaTime: deltaTime)
+        case let .stroll(point):
+            beginStroll(to: point, at: timestamp, deltaTime: deltaTime)
+        case .hold, .sleepInPlace, .none:
+            // `.sleepInPlace` lands here when rest declined to start — the
+            // pointer came close, or the state machine was mid-transition. The
+            // seat is kept either way.
+            if activeActivitySourceID != nil {
+                holdSeat(at: timestamp, deltaTime: deltaTime)
+            } else {
+                updateRoaming(at: timestamp, deltaTime: deltaTime)
+            }
+        }
+    }
+
+    private func travelToSeat(
+        _ destination: InterestDestination,
+        at timestamp: TimeInterval,
+        deltaTime: TimeInterval
+    ) {
+        if !movement.hasRoute || movement.destination != destination.point {
+            let route = DisplayTopology(displays: displays).route(
+                from: movement.position,
+                to: destination.point
+            )
+            guard !route.waypoints.isEmpty else {
+                // Nowhere to walk is not a reason to keep trying. The pet
+                // watches from where it stands and the seat is judged there.
+                placement.settleInPlace(
+                    sourceID: activeActivitySourceID,
+                    at: timestamp
+                )
+                holdSeat(at: timestamp, deltaTime: deltaTime)
+                return
+            }
+            movement.setRoute(route.waypoints)
         }
         isEvadeTransitioning = false
         restDestination = nil
-        activityDestination = destination
-        activityHint = hint
-        activityArrivalReaction = arrivalReaction
-        movement.configuration.maximumSpeed = tuning.walkingSpeed
-        movement.setRoute(route.waypoints)
         behavior.handle(.beginInterestTravel, at: timestamp)
+        movement.configuration.maximumSpeed = tuning.walkingSpeed
         nextWanderAt = .infinity
+        if movement.update(deltaTime: deltaTime).reachedDestination {
+            deliverArrivalReaction(at: timestamp)
+            persistPosition()
+        }
     }
 
-    private func updateActivityLifecycle(
-        at timestamp: TimeInterval,
-        deltaTime: TimeInterval
-    ) -> Bool {
-        if activityDestination != nil {
-            reseatIfBetterSeatAvailable(at: timestamp)
-        }
-
-        if let destination = activityDestination {
-            if !movement.hasRoute {
-                let route = DisplayTopology(displays: displays).route(
-                    from: movement.position,
-                    to: destination.point
-                )
-                movement.setRoute(route.waypoints)
-            }
-            behavior.handle(.beginInterestTravel, at: timestamp)
-            movement.configuration.maximumSpeed = tuning.walkingSpeed
-            let update = movement.update(deltaTime: deltaTime)
-            if update.reachedDestination {
-                activityDestination = nil
-                activityHint = nil
-                let reaction = activityArrivalReaction ?? activeActivityReaction ?? .observe
-                activityArrivalReaction = nil
-                applyActivityReaction(reaction, at: timestamp)
-                persistPosition()
-            }
-            return true
-        }
-
-        guard activeActivitySourceID != nil else { return false }
+    /// A parked pet keeps its seat. All that is left is wearing the reaction the
+    /// current event asked for.
+    private func holdSeat(at timestamp: TimeInterval, deltaTime: TimeInterval) {
         movement.cancelRoute(stop: false)
         movement.configuration.maximumSpeed = tuning.walkingSpeed
         _ = movement.update(deltaTime: deltaTime)
+        if activityArrivalReaction != nil {
+            deliverArrivalReaction(at: timestamp)
+            return
+        }
         switch behavior.state {
         case .observe, .work, .waitingForUser, .celebrate, .sad:
             break
@@ -952,23 +1043,35 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         default:
             applyActivityReaction(activeActivityReaction ?? .observe, at: timestamp)
         }
-        return true
+    }
+
+    /// The reaction an event asked for is owed to the user until the pet
+    /// settles, whether it walked to a new seat or kept the one it had.
+    private func deliverArrivalReaction(at timestamp: TimeInterval) {
+        let reaction = activityArrivalReaction ?? activeActivityReaction ?? .observe
+        activityArrivalReaction = nil
+        applyActivityReaction(reaction, at: timestamp)
     }
 
     private func applyActivityReaction(
         _ reaction: CompanionReaction,
         at timestamp: TimeInterval
     ) {
+        // Reactions never wake the creature by themselves. Callers that mean to
+        // interrupt rest call `cancelRestForActivity` first, so a session that
+        // simply ends leaves a sleeping pet asleep.
+        guard !behavior.state.isResting else { return }
         behavior.handle(.reaction(reaction), at: timestamp)
         movement.cancelRoute(stop: false)
         nextWanderAt = activeActivitySourceID == nil ? timestamp + 2.0 : .infinity
     }
 
+    /// The director releases the seat on its own once there is no source to
+    /// watch, so nothing here has to remember to clear a placement flag.
     private func clearActiveActivity(at timestamp: TimeInterval) {
         activeActivitySourceID = nil
         activeActivityReaction = nil
         activityArrivalReaction = nil
-        activityDestination = nil
         activityHint = nil
         movement.cancelRoute(stop: false)
         nextWanderAt = timestamp + 2.0
@@ -978,6 +1081,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         userIdleDuration: TimeInterval,
         pointerProximity: PointerProximity,
         pointerPosition: WorldPoint,
+        mayNapOnSeat: Bool,
         at timestamp: TimeInterval,
         deltaTime: TimeInterval
     ) -> Bool {
@@ -992,7 +1096,11 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
             _ = movement.update(deltaTime: deltaTime)
             if timestamp - behavior.enteredAt >= restConfiguration.sittingDuration {
                 behavior.handle(.seekSleepSpot, at: timestamp)
-                beginRestTravel(pointerPosition: pointerPosition, at: timestamp)
+                beginRestTravel(
+                    pointerPosition: pointerPosition,
+                    napInPlace: mayNapOnSeat,
+                    at: timestamp
+                )
             }
             return true
 
@@ -1015,11 +1123,15 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
             break
         }
 
+        // Watching an agent used to block rest outright, which meant the pet
+        // could never sleep during the long unattended run that is exactly when
+        // nobody is looking at it. Priority 7 of the decision table answers
+        // whether the seat it is parked on is worth dozing on.
         guard userIdleDuration >= restConfiguration.idleBeforeRest,
-              activeActivitySourceID == nil,
-              activityDestination == nil,
+              !placement.isTravelling,
+              activeActivitySourceID == nil || mayNapOnSeat,
               pointerProximity == .far,
-              behavior.state == .idle || behavior.state == .wander || behavior.state == .dropped else {
+              BehaviorController.restEntryStates.contains(behavior.state) else {
             return false
         }
         isEvadeTransitioning = false
@@ -1031,7 +1143,19 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         return true
     }
 
-    private func beginRestTravel(pointerPosition: WorldPoint, at timestamp: TimeInterval) {
+    private func beginRestTravel(
+        pointerPosition: WorldPoint,
+        napInPlace: Bool,
+        at timestamp: TimeInterval
+    ) {
+        // A pet that dozed off beside a working agent is already on a vetted
+        // seat. Walking it to a display corner to sleep would throw that away
+        // and put the trip back that this gate exists to remove.
+        if napInPlace {
+            enterSleep(at: timestamp)
+            return
+        }
+
         let zones = safeZoneProvider.currentSafeZones(in: world)
         let restWorld = DesktopWorldSnapshot(
             displays: world.displays,
@@ -1079,38 +1203,40 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         nextWanderAt = timestamp + restConfiguration.wakeWanderDelay
     }
 
+    /// Walks whatever route roaming already has and paces the next pause.
+    /// Choosing where to stroll is priority 9 of the decision table, not this.
     private func updateRoaming(at timestamp: TimeInterval, deltaTime: TimeInterval) {
+        movement.configuration.maximumSpeed = tuning.walkingSpeed
         guard isRoamingEnabled else {
             movement.cancelRoute(stop: false)
-            movement.configuration.maximumSpeed = tuning.walkingSpeed
             _ = movement.update(deltaTime: deltaTime)
             return
         }
-
-        if movement.hasRoute {
-            movement.configuration.maximumSpeed = tuning.walkingSpeed
-            let update = movement.update(deltaTime: deltaTime)
-            if update.reachedDestination {
-                behavior.handle(.arrived, at: timestamp)
-                nextWanderAt = timestamp + tuning.wanderDelay(
-                    randomUnit: Double.random(in: 0...1)
-                )
-                persistPosition()
-            }
+        guard movement.hasRoute else {
+            _ = movement.update(deltaTime: deltaTime)
             return
         }
-
-        _ = movement.update(deltaTime: deltaTime)
-        guard timestamp >= nextWanderAt else { return }
-        beginWander(at: timestamp)
+        if movement.update(deltaTime: deltaTime).reachedDestination {
+            behavior.handle(.arrived, at: timestamp)
+            nextWanderAt = timestamp + tuning.wanderDelay(
+                randomUnit: Double.random(in: 0...1)
+            )
+            persistPosition()
+        }
     }
 
-    private func beginWander(at timestamp: TimeInterval) {
+    private func requestLuminanceRefreshForRoaming(at timestamp: TimeInterval) {
+        guard let display = world.display(containing: movement.position)
+            ?? world.nearestDisplay(to: movement.position) else { return }
+        requestLuminanceRefresh(at: timestamp, near: display.visibleFrame)
+    }
+
+    private func beginStroll(
+        to point: WorldPoint,
+        at timestamp: TimeInterval,
+        deltaTime: TimeInterval
+    ) {
         isEvadeTransitioning = false
-        guard let destination = randomDestination() else {
-            nextWanderAt = timestamp + 2
-            return
-        }
         // Claim the walking state before laying a route. Setting the route
         // first left it in place when the state machine refused the
         // transition, so the pet walked the whole leg animated as whatever it
@@ -1119,14 +1245,27 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
             nextWanderAt = timestamp + 2
             return
         }
-        let topology = DisplayTopology(displays: displays)
-        let route = topology.route(from: movement.position, to: destination)
+        let route = DisplayTopology(displays: displays).route(
+            from: movement.position,
+            to: point
+        )
         movement.configuration.maximumSpeed = tuning.walkingSpeed
         movement.setRoute(route.waypoints)
         if !movement.hasRoute { nextWanderAt = timestamp + 2 }
+        _ = movement.update(deltaTime: deltaTime)
     }
 
-    private func randomDestination() -> WorldPoint? {
+    /// Wandering is where the pet spends most of its life: an agent turn ends,
+    /// the activity clears, and two seconds later it strolls off. That walk
+    /// never looked at the screen, so it parked on the user's text far more
+    /// often than any interest seat ever did. Offering the director a handful
+    /// of destinations to reject is the cheapest way to fix that without making
+    /// roaming look calculated.
+    private func strollCandidates() -> [WorldPoint] {
+        (0..<Self.wanderCandidateCount).compactMap { _ in randomWanderPoint() }
+    }
+
+    private func randomWanderPoint() -> WorldPoint? {
         guard !displays.isEmpty else { return nil }
         let current = world.display(containing: movement.position) ?? world.nearestDisplay(to: movement.position)
         let target: DisplaySnapshot

@@ -39,6 +39,7 @@ module만 추출할 수 있다. 선행 Rust/C ABI는 만들지 않는다.
 - `BehaviorController`: explicit creature FSM
 - `BasicSafeZonePlanner`: permission-free rest candidates and destination scoring
 - `BasicInterestPositionPlanner`: coarse window-edge destination scoring for MVP 1
+- `PlacementDirector`: the one decision table for where the pet stands (`docs/placement.md`)
 - `RestConfiguration`: MVP 0.7 idle/sit/wake timing
 - `CompanionEvent`, `UserContext`, `ActivitySource`
 - `AttentionModel`, `ReactionPolicy`, candidate scoring
@@ -430,6 +431,11 @@ CandidateScore =
 confidence가 낮으면 중앙 후보를 만들지 않고 window/display corner로 fallback한다.
 caret은 관심 위치지만 avoid radius 안에서는 강한 obstacle이다. minor caret movement는
 head/look pose로만 반응하고 dwell/hysteresis가 지나야 위치를 바꾼다.
+
+이 절은 후보를 **어떻게 점수화하는지**를 다룬다. 그 점수를 언제 다시 묻고, 언제 자리를
+지키고, 언제 옮기는지 — 즉 결정의 흐름은 `docs/placement.md`에 있다. MVP 4에서 나온
+배치 결함이 전부 점수가 아니라 그 흐름에 있었으므로, 배치 동작을 고치기 전에 그 문서를
+먼저 읽는다.
 
 ## Permission model
 

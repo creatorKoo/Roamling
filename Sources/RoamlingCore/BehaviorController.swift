@@ -70,6 +70,16 @@ public struct BehaviorController: Sendable {
         .idle, .dropped, .wander, .observe, .work
     ]
 
+    /// States that `.beginRest` may start sitting from.
+    ///
+    /// `.observe` and `.work` belong here because a pet parked beside a working
+    /// agent is standing on a seat it already vetted. Refusing rest there means
+    /// it can only ever doze between sessions, which is exactly when the user is
+    /// least likely to be watching.
+    public static let restEntryStates: Set<BehaviorState> = [
+        .idle, .wander, .dropped, .observe, .work
+    ]
+
     public private(set) var state: BehaviorState
     public private(set) var enteredAt: TimeInterval
 
@@ -90,7 +100,7 @@ public struct BehaviorController: Sendable {
         case .arrived:
             if state == .wander || state == .travelToInterest { transition(to: .idle, at: timestamp) }
         case .beginRest:
-            if state == .idle || state == .wander || state == .dropped {
+            if BehaviorController.restEntryStates.contains(state) {
                 transition(to: .sit, at: timestamp)
             }
         case .seekSleepSpot:

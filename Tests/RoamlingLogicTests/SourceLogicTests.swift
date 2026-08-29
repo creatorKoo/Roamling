@@ -454,6 +454,163 @@ func sourceLogicTests() -> [LogicTest] {
             behavior.handle(.dragMoved, at: 2.1)
             behavior.handle(.beginInterestTravel, at: 2.2)
             try expect(behavior.state == .dragged)
+        },
+        LogicTest(name: "a working terminal seats the pet beside the caret, not at the screen edge") {
+            // The report this covers: launching an agent sent the pet to a
+            // screen corner while the window it was watching had empty room.
+            let display = DisplaySnapshot(
+                id: "main",
+                name: "main",
+                frame: WorldRect(x: 0, y: 0, width: 1_512, height: 982),
+                visibleFrame: WorldRect(x: 0, y: 25, width: 1_512, height: 932),
+                scale: 2
+            )
+            let window = WorldRect(x: 60, y: 60, width: 1_390, height: 870)
+            let caret = WorldRect(x: 300, y: 700, width: 2, height: 20)
+
+            // Output fills the window below the caret line and leaves the rest
+            // of it clear, which is what a terminal mid-run looks like.
+            let columns = 64
+            let rows = 42
+            let cellHeight = display.frame.size.height / Double(rows)
+            let cellWidth = display.frame.size.width / Double(columns)
+            var samples: [Double] = []
+            for row in 0..<rows {
+                let y = (Double(row) + 0.5) * cellHeight
+                for column in 0..<columns {
+                    let x = (Double(column) + 0.5) * cellWidth
+                    let inText = window.contains(WorldPoint(x: x, y: y))
+                        && y > 690
+                        && x < 1_000
+                    samples.append(inText && (column + row).isMultiple(of: 3) ? 0.78 : 0.86)
+                }
+            }
+            let field = try require(LuminanceField(
+                bounds: display.frame, columns: columns, rows: rows, samples: samples
+            ))
+
+            let placed = try require(BasicInterestPositionPlanner.destination(
+                for: LocationHint(approximateRegion: window, confidence: 0.55),
+                in: DesktopWorldSnapshot(
+                    displays: [display],
+                    focus: FocusSnapshot(
+                        windowFrame: window,
+                        focusedElementFrame: window,
+                        caretFrame: caret,
+                        confidence: 0.9
+                    ),
+                    luminance: field
+                ),
+                currentPosition: WorldPoint(x: 700, y: 400),
+                pointerPosition: WorldPoint(x: 1_400, y: 120),
+                objectSize: WorldSize(width: 96, height: 104)
+            ))
+
+            // Not flung to the edge of the screen.
+            try expect(placed.point.x > 200, "seat landed at the screen edge: \(placed.point)")
+            // Close enough to read as watching this work.
+            try expect(
+                caret.distance(to: placed.point) < 500,
+                "seat sat \(caret.distance(to: placed.point)) away from the caret"
+            )
+            // And not on the output.
+            let frame = WorldRect(
+                x: placed.point.x - 48, y: placed.point.y - 52, width: 96, height: 104
+            )
+            let emptiness = try require(VisualEmptiness.score(of: frame, in: field))
+            try expect(emptiness > 0.85, "seat scored \(emptiness) on the output")
+        },
+        LogicTest(name: "seat evaluation tells a clear seat from a covered one") {
+            let fixture = FocusPlacementFixture()
+            let seat = WorldPoint(x: 124, y: 726)
+
+            // Without a capture nothing saw the pixels, so a seat is not
+            // condemned on a guess. That is the MVP 3 path and it stays put.
+            let unseen = try require(fixture.seat(at: seat))
+            try expect(unseen.isHoldable)
+
+            let clear = try require(fixture.field { _ in false })
+            let flat = try require(fixture.seat(at: seat, luminance: clear))
+            try expect(flat.isHoldable)
+
+            // Output arrived under the pet while nobody typed anything.
+            let buried = try require(fixture.field { $0 > 640 })
+            let covered = try require(fixture.seat(at: seat, luminance: buried))
+            let emptiness = try require(covered.emptiness)
+            try expect(!covered.isHoldable)
+            try expect(emptiness < BasicInterestPositionPlanner.holdEmptiness)
+
+            // The caret arriving under the pet is enough on its own.
+            let onCaret = try require(fixture.seat(
+                at: seat,
+                focus: FocusSnapshot(
+                    caretFrame: WorldRect(x: 121, y: 700, width: 2, height: 40),
+                    confidence: 0.9
+                ),
+                luminance: clear
+            ))
+            try expect(onCaret.coversCaret)
+            try expect(!onCaret.isHoldable)
+
+            // A seat that no longer belongs to the window unsticks itself, so
+            // switching windows still moves the pet.
+            let elsewhere = try require(fixture.seat(
+                at: WorldPoint(x: 1196, y: 880),
+                luminance: clear
+            ))
+            try expect(!elsewhere.watchesRegion)
+            try expect(!elsewhere.isHoldable)
+        },
+        LogicTest(name: "placement stays out of the caret's path") {
+            let fixture = FocusPlacementFixture()
+            // The caret shares the row the bottom seats use and keeps moving
+            // right, so a seat ahead of it is empty now and inside a sentence
+            // a minute from now.
+            let ahead = try require(fixture.destination(
+                focus: FocusSnapshot(
+                    caretFrame: WorldRect(x: 1_000, y: 700, width: 2, height: 40),
+                    confidence: 0.9
+                )
+            ))
+            try expect(ahead.point.x < 1_000, "sat in the caret's path at \(ahead.point.x)")
+
+            // Control: the same caret lifted just clear of the seat row is a
+            // comparable distance away, so only the shared line changed. The
+            // near seat wins again, which is what makes the case above the
+            // advance penalty and not simple proximity.
+            let clearOfIt = try require(fixture.destination(
+                focus: FocusSnapshot(
+                    caretFrame: WorldRect(x: 1_000, y: 620, width: 2, height: 40),
+                    confidence: 0.9
+                )
+            ))
+            try expect(clearOfIt.point.x > 1_000)
+        },
+        LogicTest(name: "the sweep leaves the bottom line when the bottom line is full") {
+            let fixture = FocusPlacementFixture()
+            // Agent output fills the bottom of a terminal and leaves the middle
+            // clear. A sweep that only walks the bottom line never sees that.
+            let field = try require(fixture.field { $0 > 660 })
+            let placed = try require(fixture.destination(focus: nil, luminance: field))
+            try expect(placed.point.y < 700, "stayed on the full bottom line at \(placed.point.y)")
+            try expect(fixture.petFrame(at: placed.point).maxY < 660)
+        },
+        LogicTest(name: "a pet watching an agent can still fall asleep on its seat") {
+            // Rest used to be reachable only from idle/wander/dropped, so a pet
+            // parked beside a working agent stayed awake for the whole run.
+            for state in [BehaviorState.observe, .work] {
+                var behavior = BehaviorController(state: state, enteredAt: 0)
+                behavior.handle(.beginRest, at: 1)
+                try expect(behavior.state == .sit, "\(state) refused to sit")
+                behavior.handle(.seekSleepSpot, at: 2)
+                behavior.handle(.sleepSpotReached, at: 3)
+                try expect(behavior.state == .sleep)
+            }
+
+            // Being carried is still not a nap.
+            var dragged = BehaviorController(state: .dragged, enteredAt: 0)
+            dragged.handle(.beginRest, at: 1)
+            try expect(dragged.state == .dragged)
         }
     ]
 }
@@ -514,15 +671,55 @@ struct FocusPlacementFixture {
     ) -> InterestDestination? {
         BasicInterestPositionPlanner.destination(
             for: hint ?? LocationHint(approximateRegion: window, confidence: 0.55),
-            in: DesktopWorldSnapshot(
-                displays: [display],
-                windows: [WindowSnapshot(id: "w1", frame: window, isFocused: true)],
-                focus: focus,
-                luminance: luminance
-            ),
+            in: world(focus: focus, luminance: luminance),
             currentPosition: WorldPoint(x: 200, y: 400),
             pointerPosition: WorldPoint(x: 600, y: 100),
             objectSize: objectSize
+        )
+    }
+
+    func seat(
+        at point: WorldPoint,
+        focus: FocusSnapshot? = nil,
+        luminance: LuminanceField? = nil
+    ) -> SeatEvaluation? {
+        BasicInterestPositionPlanner.evaluateSeat(
+            at: point,
+            for: LocationHint(approximateRegion: window, confidence: 0.55),
+            in: world(focus: focus, luminance: luminance),
+            currentPosition: point,
+            pointerPosition: WorldPoint(x: 600, y: 100),
+            objectSize: objectSize
+        )
+    }
+
+    /// A field over the whole display, filled by a rule keyed on world y.
+    func field(_ isBusy: (Double) -> Bool) -> LuminanceField? {
+        let columns = 60
+        let rows = 45
+        let cellHeight = display.frame.size.height / Double(rows)
+        var samples: [Double] = []
+        for row in 0..<rows {
+            let y = (Double(row) + 0.5) * cellHeight
+            for column in 0..<columns {
+                let busy = isBusy(y) && (column + row).isMultiple(of: 2)
+                samples.append(busy ? 0.05 : 0.9)
+            }
+        }
+        return LuminanceField(
+            bounds: display.frame,
+            columns: columns,
+            rows: rows,
+            samples: samples
+        )
+    }
+
+    private func world(focus: FocusSnapshot?, luminance: LuminanceField?) -> DesktopWorldSnapshot {
+        DesktopWorldSnapshot(
+            displays: [display],
+            windows: [WindowSnapshot(id: "w1", frame: window, isFocused: true)],
+            focus: focus,
+            luminance: luminance
         )
     }
 }

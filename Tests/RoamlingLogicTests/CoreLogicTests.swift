@@ -321,17 +321,71 @@ func coreLogicTests() -> [LogicTest] {
             let flat = try field { _, _ in 0.62 }
             try expectNear(try require(VisualEmptiness.score(of: seat, in: flat)), 1)
 
-            // A smooth gradient is still comfortable: no local edges, and the
-            // spread alone must not disqualify it.
-            let gradient = try field { column, _ in Double(column) / Double(columns) }
+            // A desktop gradient wallpaper drifts across the whole screen, so
+            // one cell differs from its neighbour by very little. It has to
+            // stay comfortable enough to sit on.
+            let gradient = try field { column, row in
+                0.3 + 0.2 * Double(column) / Double(columns) + 0.15 * Double(row) / Double(rows)
+            }
             let gradientScore = try require(VisualEmptiness.score(of: seat, in: gradient))
             try expect(gradientScore > 0.6, "smooth gradient scored \(gradientScore)")
 
-            // Alternating high-contrast cells stand in for text and dense UI.
+            // Body text survives downsampling as a low-contrast wash, not as
+            // alternating black and white. This case is the one that matters:
+            // scoring it as empty is what parks the pet on the user's work.
+            let text = try field { column, row in
+                (column + row).isMultiple(of: 3) ? 0.78 : 0.86
+            }
+            let textScore = try require(VisualEmptiness.score(of: seat, in: text))
+            try expect(
+                textScore < BasicInterestPositionPlanner.holdEmptiness,
+                "downsampled text scored \(textScore) and would read as an empty seat"
+            )
+
+            // Alternating high-contrast cells stand in for dense UI.
             let busy = try field { column, row in (column + row).isMultiple(of: 2) ? 0.05 : 0.95 }
             let busyScore = try require(VisualEmptiness.score(of: seat, in: busy))
             try expect(busyScore < 0.1, "dense region scored \(busyScore)")
-            try expect(busyScore < gradientScore)
+            try expect(busyScore < textScore)
+            try expect(textScore < gradientScore)
+        },
+        LogicTest(name: "a stroll rejects destinations that sit on content") {
+            // The pet spends most of its life roaming, not watching an agent,
+            // and that walk used to ignore the screen entirely.
+            let bounds = WorldRect(x: 0, y: 0, width: 800, height: 400)
+            let columns = 40
+            let rows = 20
+            var samples: [Double] = []
+            for row in 0..<rows {
+                for column in 0..<columns {
+                    let text = column < columns / 2
+                    samples.append(text && (column + row).isMultiple(of: 3) ? 0.78 : 0.86)
+                }
+            }
+            let field = try require(LuminanceField(
+                bounds: bounds, columns: columns, rows: rows, samples: samples
+            ))
+            let pet = WorldSize(width: 96, height: 104)
+            let onText = WorldPoint(x: 150, y: 200)
+            let clear = WorldPoint(x: 620, y: 200)
+            let alsoClear = WorldPoint(x: 700, y: 120)
+
+            func pick(_ points: [WorldPoint]) -> WorldPoint? {
+                VisualEmptiness.firstComfortable(
+                    among: points, objectSize: pet, in: field, atLeast: 0.55
+                )
+            }
+
+            // Offered the text first, it walks past it.
+            try expect(pick([onText, clear]) == clear)
+            // Offered a clear spot first, it takes that one instead of shopping
+            // around, which is what keeps roaming from looking calculated.
+            try expect(pick([alsoClear, clear]) == alsoClear)
+            // When every option is bad the least bad one still wins, because
+            // refusing to move is not an answer.
+            try expect(pick([onText]) == onText)
+            // Nothing judgeable means no opinion, so the caller keeps its pick.
+            try expect(pick([WorldPoint(x: 4_000, y: 4_000)]) == nil)
         },
         LogicTest(name: "visual emptiness refuses to guess from too little overlap") {
             let bounds = WorldRect(x: 0, y: 0, width: 400, height: 400)
@@ -598,9 +652,405 @@ func coreLogicTests() -> [LogicTest] {
             let unstable = PositionCandidate(point: WorldPoint(x: 10, y: 0), visualEmptyScore: 5, stabilityScore: 1)
             let stable = PositionCandidate(point: WorldPoint(x: 20, y: 0), visualEmptyScore: 3, stabilityScore: 3)
             try expect(CandidatePositionScorer.best(from: [unstable, stable])?.point == stable.point)
-        }
+        },
+        LogicTest(name: "placement yields to the pointer without going blind") {
+            // Defect 5: gating the judging along with the moving is what froze
+            // the seat verdict whenever the cursor came near.
+            let fixture = DirectorFixture()
+            var director = PlacementDirector()
+            let owned = fixture.situation(at: 0, position: fixture.corner, isPointerOwned: true)
+            try expect(director.decide(owned) == PlacementIntent.none)
+
+            // The verdict behind that `.none` was still worked out, so the tick
+            // the pointer lets go acts on it instead of starting over.
+            let released = fixture.situation(at: 0.05, position: fixture.corner)
+            try expect(director.decide(released).travelReason == .newActivity)
+        },
+        LogicTest(name: "a new agent seats the pet and its next event keeps it there") {
+            let fixture = DirectorFixture()
+            var director = PlacementDirector()
+            let travel = director.decide(fixture.situation(at: 0, position: fixture.corner))
+            try expect(travel.travelReason == .newActivity)
+            let seat = try require(travel.destination).point
+
+            // Still walking. The destination must not change under the pet.
+            let midWalk = director.decide(fixture.situation(at: 0.6, position: fixture.corner))
+            try expect(midWalk.destination?.point == seat)
+
+            try expect(director.decide(fixture.situation(at: 1, position: seat)) == .hold)
+            try expect(director.isSeated)
+
+            // An agent fires an event per tool call. Re-planning on each is
+            // what made the pet pace the window instead of watching it.
+            for step in 0..<12 {
+                let now = 1.5 + Double(step) * 0.5
+                try expect(
+                    director.decide(fixture.situation(at: now, position: seat)) == .hold,
+                    "tick \(now) moved a seat that never got worse"
+                )
+            }
+        },
+        LogicTest(name: "a covered seat is left once, for somewhere actually clear") {
+            // The reported twitch: leaving a marginal seat for another marginal
+            // seat meant the replacement flickered across the same line the old
+            // one did, so the pet paced instead of settling. Measured on a real
+            // desktop a clear seat scores about 0.97 and text lands anywhere in
+            // 0.35...0.55, so the rule is about where it lands, not how far it
+            // fell.
+            let fixture = DirectorFixture()
+            let configuration = PlacementDirector.Configuration.standard
+            var director = PlacementDirector()
+            let flat = try require(fixture.flatField())
+            let seat = try require(director.decide(
+                fixture.situation(at: 0, position: fixture.corner, luminance: flat)
+            ).destination).point
+            try expect(director.decide(
+                fixture.situation(at: 1, position: seat, luminance: flat)
+            ) == .hold)
+
+            // Sparse text under the pet: not dense, and still the user's work.
+            let covered = try require(fixture.field(busyAround: seat, delta: 0.014))
+            let score = try require(
+                VisualEmptiness.score(of: fixture.petFrame(at: seat), in: covered)
+            )
+            try expect(
+                score < configuration.holdEmptiness && score > 0.35,
+                "this case needs a seat in the band real text lands in, got \(score)"
+            )
+            let moved = director.decide(fixture.situation(
+                at: 4, position: seat, luminance: covered
+            ))
+            try expect(moved.travelReason == .coveringWork, "got \(moved)")
+
+            // It moved somewhere genuinely empty, so nothing brings it back.
+            let better = try require(moved.destination).point
+            let betterScore = try require(
+                VisualEmptiness.score(of: fixture.petFrame(at: better), in: covered)
+            )
+            try expect(
+                betterScore >= configuration.holdEmptiness,
+                "the replacement was as marginal as the seat it left: \(betterScore)"
+            )
+            for step in 0..<20 {
+                let now = 5 + Double(step) * 0.5
+                try expect(
+                    director.decide(fixture.situation(
+                        at: now, position: better, luminance: covered
+                    )) == .hold,
+                    "the pet kept pacing at \(now)"
+                )
+            }
+        },
+        LogicTest(name: "a marginal seat is kept when every alternative is as bad") {
+            // Walking off the user's text is only progress if there is somewhere
+            // better to stand. Trading one covered seat for another is the pacing
+            // this is here to prevent.
+            let fixture = DirectorFixture()
+            var director = PlacementDirector()
+            let flat = try require(fixture.flatField())
+            let seat = try require(director.decide(
+                fixture.situation(at: 0, position: fixture.corner, luminance: flat)
+            ).destination).point
+            try expect(director.decide(
+                fixture.situation(at: 1, position: seat, luminance: flat)
+            ) == .hold)
+
+            let everywhere = try require(fixture.uniformField(delta: 0.014))
+            for step in 0..<20 {
+                let now = 4 + Double(step) * 0.5
+                try expect(
+                    director.decide(fixture.situation(
+                        at: now, position: seat, luminance: everywhere
+                    )) == .hold,
+                    "the pet walked to an equally covered seat at \(now)"
+                )
+            }
+        },
+        LogicTest(name: "a fresh seat survives the first bad frame under it") {
+            let fixture = DirectorFixture()
+            var director = PlacementDirector()
+            let flat = try require(fixture.flatField())
+            let seat = try require(director.decide(
+                fixture.situation(at: 0, position: fixture.corner, luminance: flat)
+            ).destination).point
+            try expect(director.decide(
+                fixture.situation(at: 1, position: seat, luminance: flat)
+            ) == .hold)
+
+            let covered = try require(fixture.field(busyAround: seat, delta: 0.06))
+            // Inside the dwell window the seat is defended...
+            try expect(director.decide(
+                fixture.situation(at: 2, position: seat, luminance: covered)
+            ) == .hold)
+            // ...and once it is over the pet steps off the user's work.
+            try expect(director.decide(
+                fixture.situation(at: 4, position: seat, luminance: covered)
+            ).travelReason == .coveringWork)
+        },
+        LogicTest(name: "a seat chosen without a capture is re-decided once one arrives") {
+            // Defect 3: the first event of a session always plans blind, and
+            // hysteresis then defended that guess for the whole session because
+            // wallpaper in a corner always scores as empty.
+            let fixture = DirectorFixture()
+            var director = PlacementDirector()
+            let blind = try require(director.decide(
+                fixture.situation(at: 0, position: fixture.corner)
+            ).destination).point
+            try expect(director.decide(fixture.situation(at: 1, position: blind)) == .hold)
+
+            let field = try require(fixture.field(busyAround: blind, delta: 0.06))
+            let replan = director.decide(
+                fixture.situation(at: 1.6, position: blind, luminance: field)
+            )
+            try expect(replan.travelReason == .plannedBlind, "got \(replan)")
+
+            // And only once. The replacement was chosen with the capture in
+            // hand, so nothing about it is owed a second look.
+            let better = try require(replan.destination).point
+            let betterScore = try require(
+                VisualEmptiness.score(of: fixture.petFrame(at: better), in: field)
+            )
+            try expect(
+                betterScore >= PlacementDirector.Configuration.standard.holdEmptiness,
+                "the replacement seat scored \(betterScore)"
+            )
+            try expect(director.decide(
+                fixture.situation(at: 2.2, position: better, luminance: field)
+            ) == .hold)
+            try expect(director.decide(
+                fixture.situation(at: 3, position: better, luminance: field)
+            ) == .hold)
+        },
+        LogicTest(name: "the pet steps off the caret without waiting out the dwell") {
+            let fixture = DirectorFixture()
+            var director = PlacementDirector()
+            let seat = try require(director.decide(
+                fixture.situation(at: 0, position: fixture.corner)
+            ).destination).point
+            try expect(director.decide(fixture.situation(at: 1, position: seat)) == .hold)
+
+            // The user clicks into the line the pet is sitting on.
+            let focus = FocusSnapshot(
+                windowFrame: fixture.window,
+                caretFrame: WorldRect(x: seat.x - 1, y: seat.y - 8, width: 2, height: 18),
+                confidence: 0.9
+            )
+            let moved = director.decide(
+                fixture.situation(at: 1.6, position: seat, focus: focus)
+            )
+            try expect(moved.travelReason == .coveringCaret, "got \(moved)")
+        },
+        LogicTest(name: "the seat follows the window the agent moved to") {
+            let fixture = DirectorFixture()
+            var director = PlacementDirector()
+            let seat = try require(director.decide(
+                fixture.situation(at: 0, position: fixture.corner)
+            ).destination).point
+            try expect(director.decide(fixture.situation(at: 1, position: seat)) == .hold)
+
+            // Same agent, different window: the seat it holds is no longer
+            // watching anything.
+            let moved = LocationHint(
+                approximateRegion: WorldRect(x: 700, y: 120, width: 420, height: 300),
+                confidence: 0.55
+            )
+            let follow = director.decide(
+                fixture.situation(at: 1.6, position: seat, hint: moved)
+            )
+            try expect(follow.travelReason == .followedFocus, "got \(follow)")
+        },
+        LogicTest(name: "an idle pet sleeps on the seat it is keeping") {
+            let fixture = DirectorFixture()
+            var director = PlacementDirector()
+            let seat = try require(director.decide(
+                fixture.situation(at: 0, position: fixture.corner)
+            ).destination).point
+            try expect(director.decide(fixture.situation(at: 1, position: seat)) == .hold)
+            try expect(director.decide(fixture.situation(
+                at: 90, position: seat, userIdleDuration: 80, idleBeforeRest: 75
+            )) == .sleepInPlace)
+
+            // A seat that went bad outranks the nap.
+            let field = try require(fixture.field(busyAround: seat, delta: 0.06))
+            let woken = director.decide(fixture.situation(
+                at: 91,
+                position: seat,
+                luminance: field,
+                userIdleDuration: 81,
+                idleBeforeRest: 75
+            ))
+            try expect(woken.travelReason != nil, "got \(woken)")
+        },
+        LogicTest(name: "the seat is released when there is no agent left to watch") {
+            let fixture = DirectorFixture()
+            var director = PlacementDirector()
+            let seat = try require(director.decide(
+                fixture.situation(at: 0, position: fixture.corner)
+            ).destination).point
+            try expect(director.decide(fixture.situation(at: 1, position: seat)) == .hold)
+            try expect(director.isSeated)
+
+            try expect(director.decide(
+                fixture.situation(at: 2, position: seat, sourceID: nil)
+            ) == .hold)
+            try expect(!director.isSeated)
+        },
+        LogicTest(name: "a stroll destination passes the same emptiness bar as a seat") {
+            // Defect 4: the rule about empty space lived only on the agent-seat
+            // path, and roaming is where the pet spends most of its life.
+            let fixture = DirectorFixture()
+            var director = PlacementDirector()
+            let busy = WorldPoint(x: 300, y: 400)
+            let clear = WorldPoint(x: 900, y: 300)
+            let field = try require(fixture.field(busyAround: busy, delta: 0.06))
+
+            let strolling = director.decide(fixture.situation(
+                at: 0,
+                position: fixture.corner,
+                sourceID: nil,
+                luminance: field,
+                isStrollDue: true,
+                strollCandidates: [busy, clear]
+            ))
+            try expect(strolling == .stroll(clear), "got \(strolling)")
+
+            // Nothing is due, so nothing is chosen.
+            try expect(director.decide(
+                fixture.situation(at: 1, position: fixture.corner, sourceID: nil)
+            ) == .hold)
+        },
     ]
 }
+
+private extension PlacementIntent {
+    var destination: InterestDestination? {
+        guard case let .travel(destination, _) = self else { return nil }
+        return destination
+    }
+}
+
+/// One display, one window, and whatever the decision table needs to read.
+///
+/// Every argument here used to be a mutable field on the runtime that four
+/// code paths wrote to, which is why none of these cases could be reproduced
+/// without launching the app.
+private struct DirectorFixture {
+    let display = DisplaySnapshot(
+        id: "main",
+        name: "main",
+        frame: WorldRect(x: 0, y: 0, width: 1_200, height: 900),
+        visibleFrame: WorldRect(x: 0, y: 24, width: 1_200, height: 830),
+        scale: 2
+    )
+    let window = WorldRect(x: 58, y: 86, width: 1_084, height: 706)
+    let objectSize = WorldSize(width: 96, height: 104)
+    /// Far enough from any seat that the first plan is always a real walk.
+    let corner = WorldPoint(x: 80, y: 800)
+
+    func petFrame(at point: WorldPoint) -> WorldRect {
+        WorldRect(
+            x: point.x - objectSize.width / 2,
+            y: point.y - objectSize.height / 2,
+            width: objectSize.width,
+            height: objectSize.height
+        )
+    }
+
+    func situation(
+        at timestamp: TimeInterval,
+        position: WorldPoint,
+        sourceID: String? = "claude",
+        hint: LocationHint? = nil,
+        focus: FocusSnapshot? = nil,
+        luminance: LuminanceField? = nil,
+        isPointerOwned: Bool = false,
+        isEvading: Bool = false,
+        userIdleDuration: TimeInterval = 0,
+        idleBeforeRest: TimeInterval = .infinity,
+        isStrollDue: Bool = false,
+        strollCandidates: [WorldPoint] = []
+    ) -> PetSituation {
+        PetSituation(
+            timestamp: timestamp,
+            world: DesktopWorldSnapshot(
+                displays: [display],
+                windows: [WindowSnapshot(id: "w1", frame: window, isFocused: true)],
+                focus: focus,
+                luminance: luminance
+            ),
+            position: position,
+            objectSize: objectSize,
+            pointerPosition: WorldPoint(x: 600, y: 100),
+            isPointerOwned: isPointerOwned,
+            isEvading: isEvading,
+            activitySourceID: sourceID,
+            activityHint: sourceID == nil
+                ? nil
+                : (hint ?? LocationHint(approximateRegion: window, confidence: 0.55)),
+            userIdleDuration: userIdleDuration,
+            idleBeforeRest: idleBeforeRest,
+            isStrollDue: isStrollDue,
+            strollCandidates: strollCandidates
+        )
+    }
+
+    /// Wallpaper: nothing anywhere for the score to object to.
+    func flatField() -> LuminanceField? { field(busyAround: nil, delta: 0) }
+
+    /// The same middling texture over the whole display, so no seat anywhere is
+    /// better than the one the pet already has.
+    func uniformField(delta: Double) -> LuminanceField? {
+        field(busyAround: display.frame.center, delta: delta, radius: display.frame)
+    }
+
+    /// Flat except around `point`, where neighbouring cells differ by `delta`.
+    /// Emptiness is driven almost entirely by that difference, so it is the one
+    /// knob these cases turn.
+    func field(
+        busyAround point: WorldPoint?,
+        delta: Double,
+        radius: WorldRect? = nil
+    ) -> LuminanceField? {
+        let columns = 80
+        let rows = 60
+        let cell = WorldSize(
+            width: display.frame.size.width / Double(columns),
+            height: display.frame.size.height / Double(rows)
+        )
+        let busy = radius ?? point.map { seat -> WorldRect in
+            let frame = petFrame(at: seat)
+            return WorldRect(
+                x: frame.minX - 30,
+                y: frame.minY - 30,
+                width: frame.size.width + 60,
+                height: frame.size.height + 60
+            )
+        }
+        var samples: [Double] = []
+        for row in 0..<rows {
+            for column in 0..<columns {
+                let sample = WorldPoint(
+                    x: (Double(column) + 0.5) * cell.width,
+                    y: (Double(row) + 0.5) * cell.height
+                )
+                guard let busy, busy.contains(sample) else {
+                    samples.append(0.62)
+                    continue
+                }
+                samples.append(
+                    (column + row).isMultiple(of: 2) ? 0.5 - delta / 2 : 0.5 + delta / 2
+                )
+            }
+        }
+        return LuminanceField(
+            bounds: display.frame,
+            columns: columns,
+            rows: rows,
+            samples: samples
+        )
+    }
+}
+
 
 private func testDisplay(_ id: String, _ frame: WorldRect) -> DisplaySnapshot {
     DisplaySnapshot(id: id, name: id, frame: frame, visibleFrame: frame, scale: 1)

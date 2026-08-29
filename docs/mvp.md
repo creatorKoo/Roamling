@@ -351,6 +351,11 @@ CandidateScore =
 - confidence가 낮으면 중앙 후보를 만들지 않고 window/display corner로 fallback
 - 권한을 켤 때만 제시하는 설명과 요청, 거부·철회 시 MVP 3 경로로 복귀
 - snapshot 비용이 pet frame timing을 끊지 않도록 하는 호출 시점 제한
+- 창 하단 한 줄이 아니라 여러 행을 훑는 후보 sweep과 caret 진행 방향 회피
+- 앉은 자리를 1초 주기로 재확인해 실제로 가려졌을 때만 옮기는 seat hold
+- agent event마다 재계획하지 않는 hysteresis — 새 자리가 확실히 나을 때만 이동
+- 좋은 자리에서 user idle이 이어지면 그 자리에서 그대로 잠드는 rest 경로
+- wander 목적지도 emptiness로 거른다 — agent를 보지 않는 시간이 펫 일과의 대부분이다
 
 ### Explicitly out of scope for this gate
 
@@ -367,6 +372,11 @@ CandidateScore =
 - capture 이미지를 disk에 쓰지 않고 log/metadata에 남기지 않는다.
 - 권한을 철회하면 다음 event부터 MVP 3 배치로 돌아간다.
 - capture가 실패하거나 느려도 pet 동작이 끊기지 않는다.
+- 같은 창을 보는 동안 agent event가 반복돼도 자리를 지키고, 가려졌을 때만 옮긴다.
+- 입력이 없어도 화면이 바뀌어 펫이 덮이면 1초 안팎에 알아채고 비킨다.
+- 좋은 자리에 앉아 user idle이 이어지면 corner로 걸어가지 않고 그 자리에서 잔다.
+- agent를 보고 있지 않은 평상시 배회에서도 본문 위에 앉지 않는다.
+- 자는 동안 routine agent event로는 깨지 않고 결과·요청 event에만 깬다.
 - 빈 영역 점수화를 pure test로 검증하고 전체 suite를 통과한다.
 
 ## Exit rule

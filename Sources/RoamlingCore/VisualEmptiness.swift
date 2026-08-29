@@ -47,9 +47,15 @@ public struct LuminanceField: Sendable, Hashable {
 /// wallpaper gradient — which is fine to sit on — from scoring as busy.
 public enum VisualEmptiness {
     /// A mean neighbour difference at or above this reads as fully busy.
-    private static let gradientReference = 0.10
+    ///
+    /// Downsampling averages a couple of glyphs into one sample, so a page of
+    /// text arrives far flatter than it looks: measured against rendered
+    /// terminal output it lands near 0.025, not near 0.5. The first calibration
+    /// used 0.10 and scored solid body text at 0.79 — indistinguishable from
+    /// wallpaper — which let the pet park on the user's work.
+    private static let gradientReference = 0.02
     /// A standard deviation at or above this reads as fully busy.
-    private static let spreadReference = 0.20
+    private static let spreadReference = 0.05
     private static let gradientWeight = 0.7
 
     /// Returns `0...1`, where 1 is flat and safe to sit on.
@@ -102,5 +108,33 @@ public enum VisualEmptiness {
         let spreadTerm = min(1, spread / spreadReference)
         let busyness = gradientTerm * gradientWeight + spreadTerm * (1 - gradientWeight)
         return (1 - busyness).clamped(to: 0...1)
+    }
+
+    /// Picks a spot from `points` that is not sitting on content.
+    ///
+    /// Roaming is supposed to look aimless, so this keeps the order it was
+    /// given rather than always taking the single emptiest point: the first
+    /// candidate clear enough to sit on wins, and only when none of them clear
+    /// the bar does the least bad one. Returns nil when the field cannot judge
+    /// any of them, which leaves the caller's own pick alone.
+    public static func firstComfortable(
+        among points: [WorldPoint],
+        objectSize: WorldSize,
+        in field: LuminanceField,
+        atLeast threshold: Double
+    ) -> WorldPoint? {
+        var best: (point: WorldPoint, score: Double)?
+        for point in points {
+            let frame = WorldRect(
+                x: point.x - objectSize.width / 2,
+                y: point.y - objectSize.height / 2,
+                width: objectSize.width,
+                height: objectSize.height
+            )
+            guard let score = score(of: frame, in: field) else { continue }
+            if score >= threshold { return point }
+            if score > (best?.score ?? -1) { best = (point, score) }
+        }
+        return best?.point
     }
 }
