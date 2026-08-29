@@ -57,6 +57,13 @@ public enum BasicInterestPositionPlanner {
     /// hold threshold rather than next to it.
     private static let clearEmptiness = 0.85
     /// How far a seat may sit outside its window and still count as watching it.
+    ///
+    /// It has to reach at least as far as the seats this planner places beside
+    /// the window, or a seat it just chose reads as no longer watching and the
+    /// caller moves the pet again on the very next review, forever. Those
+    /// candidates sit `halfWidth + 14` outside the edge, so the margin is
+    /// derived from the pet rather than fixed. A full-screen window hid this:
+    /// its outside seats get clamped back onto the display.
     private static let holdRegionMargin = 48.0
     /// The caret advances to the right as the user types, so a seat on its line
     /// and ahead of it will be written into within seconds. It outweighs the
@@ -289,11 +296,12 @@ public enum BasicInterestPositionPlanner {
         // something it must avoid.
         let visualEmptyScore = (emptiness ?? 0) * 34
 
+        let watchMargin = max(Self.holdRegionMargin, plan.halfWidth + 24)
         let watched = WorldRect(
-            x: plan.region.minX - Self.holdRegionMargin,
-            y: plan.region.minY - Self.holdRegionMargin,
-            width: plan.region.size.width + Self.holdRegionMargin * 2,
-            height: plan.region.size.height + Self.holdRegionMargin * 2
+            x: plan.region.minX - watchMargin,
+            y: plan.region.minY - watchMargin,
+            width: plan.region.size.width + watchMargin * 2,
+            height: plan.region.size.height + watchMargin * 2
         )
 
         return SeatEvaluation(

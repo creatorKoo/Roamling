@@ -410,7 +410,20 @@ public struct PlacementDirector: Sendable {
             // and that trade has to be worth watching.
             guard let evaluation else { return true }
             return destination.score > evaluation.score + configuration.replacementMargin
-        case .newActivity, .coveringCaret, .plannedBlind, .followedFocus:
+        case .newActivity:
+            // Walking over is the point of this priority, but only when there
+            // is somewhere better to be. Without a caret the strongest pull
+            // left is the window's bottom edge, and on a full-screen window
+            // that is the corner of the display -- not a reason to leave a
+            // seat that is already clear.
+            //
+            // Being on another display is a reason, and the score does not say
+            // so: measured across two displays the corner seat beat a clear one
+            // on the wrong screen by 6.9, well under the margin. Watching the
+            // region is the question, so it is asked directly.
+            guard let evaluation, evaluation.watchesRegion else { return true }
+            return destination.score > evaluation.score + configuration.replacementMargin
+        case .coveringCaret, .plannedBlind, .followedFocus:
             return true
         }
     }

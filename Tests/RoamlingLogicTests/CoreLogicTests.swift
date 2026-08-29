@@ -695,6 +695,90 @@ func coreLogicTests() -> [LogicTest] {
             let released = fixture.situation(at: 0.05, position: fixture.corner)
             try expect(director.decide(released).travelReason == .newActivity)
         },
+        LogicTest(name: "a new agent moves the pet across displays, not across the room") {
+            // Walking over is the point of this priority, but only when there
+            // is somewhere better to be. Without a caret the strongest pull is
+            // the window's bottom edge, and on a full-screen window that is the
+            // corner of the display -- not worth leaving a clear seat for.
+            // Standing on another display is worth it, and the score does not
+            // say so: measured here the corner seat beats a clear one on the
+            // wrong screen by less than the margin.
+            let left = DisplaySnapshot(
+                id: "1", name: "1",
+                frame: WorldRect(x: 0, y: 0, width: 1_728, height: 1_117),
+                visibleFrame: WorldRect(x: 0, y: 25, width: 1_728, height: 1_092),
+                scale: 2
+            )
+            let right = DisplaySnapshot(
+                id: "2", name: "2",
+                frame: WorldRect(x: 1_728, y: 0, width: 1_920, height: 1_080),
+                visibleFrame: WorldRect(x: 1_728, y: 25, width: 1_920, height: 1_055),
+                scale: 1
+            )
+            let window = WorldRect(x: 1_728, y: 25, width: 1_920, height: 1_055)
+            func situation(_ position: WorldPoint) -> PetSituation {
+                PetSituation(
+                    timestamp: 0,
+                    world: DesktopWorldSnapshot(displays: [left, right]),
+                    position: position,
+                    objectSize: WorldSize(width: 96, height: 104),
+                    activitySourceID: "claude",
+                    activityHint: LocationHint(approximateRegion: window, confidence: 0.55)
+                )
+            }
+
+            var away = PlacementDirector()
+            let crossing = away.decide(situation(WorldPoint(x: 800, y: 500)))
+            try expect(crossing.travelReason == .newActivity, "got \(crossing)")
+            let landing = try require(crossing.destination).point
+            try expect(
+                landing.x >= right.frame.minX,
+                "the pet has to end up on the display the work is on, got \(landing)"
+            )
+
+            // Already watching that window: a corner on the same screen is not
+            // a reason to get up.
+            var present = PlacementDirector()
+            try expect(present.decide(situation(WorldPoint(x: 2_600, y: 700))) == .hold)
+            // Just outside the frame still counts as being there.
+            var beside = PlacementDirector()
+            try expect(beside.decide(situation(WorldPoint(x: 1_760, y: 60))) == .hold)
+        },
+        LogicTest(name: "a seat the planner picks is one it agrees is watching") {
+            // Otherwise placement chooses a seat beside the window and then
+            // decides on the next review that the seat is not watching the
+            // window, forever. A full-screen window hides it, because the seats
+            // beside it get clamped back onto the display.
+            let display = DisplaySnapshot(
+                id: "main", name: "main",
+                frame: WorldRect(x: 0, y: 0, width: 1_600, height: 1_000),
+                visibleFrame: WorldRect(x: 0, y: 25, width: 1_600, height: 975),
+                scale: 2
+            )
+            let objectSize = WorldSize(width: 96, height: 104)
+            for width in [320.0, 640.0, 900.0, 1_400.0] {
+                for height in [240.0, 500.0, 800.0] {
+                    let window = WorldRect(x: 120, y: 90, width: width, height: height)
+                    let world = DesktopWorldSnapshot(displays: [display])
+                    let hint = LocationHint(approximateRegion: window, confidence: 0.55)
+                    let pet = WorldPoint(x: 1_500, y: 900)
+                    guard let destination = BasicInterestPositionPlanner.destination(
+                        for: hint, in: world, currentPosition: pet,
+                        pointerPosition: nil, objectSize: objectSize
+                    ) else { continue }
+                    let seat = try require(BasicInterestPositionPlanner.evaluateSeat(
+                        at: destination.point, for: hint, in: world,
+                        currentPosition: destination.point,
+                        pointerPosition: nil, objectSize: objectSize
+                    ))
+                    try expect(
+                        seat.watchesRegion,
+                        "window \(width)x\(height) got a seat at \(destination.point) "
+                            + "that it does not consider to be watching it"
+                    )
+                }
+            }
+        },
         LogicTest(name: "a new agent seats the pet and its next event keeps it there") {
             let fixture = DirectorFixture()
             var director = PlacementDirector()
@@ -1047,9 +1131,12 @@ private struct DirectorFixture {
         visibleFrame: WorldRect(x: 0, y: 24, width: 1_200, height: 830),
         scale: 2
     )
-    let window = WorldRect(x: 58, y: 86, width: 1_084, height: 706)
+    /// Deliberately not filling the display: the pet has to be able to stand
+    /// somewhere that is not already watching this window.
+    let window = WorldRect(x: 300, y: 86, width: 842, height: 600)
     let objectSize = WorldSize(width: 96, height: 104)
-    /// Far enough from any seat that the first plan is always a real walk.
+    /// Outside the watched region, so a first plan is a real walk rather than
+    /// the pet deciding it is already where it needs to be.
     let corner = WorldPoint(x: 80, y: 800)
 
     func petFrame(at point: WorldPoint) -> WorldRect {
