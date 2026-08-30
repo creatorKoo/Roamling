@@ -91,6 +91,27 @@ public struct CompanionEvent: Codable, Hashable, Sendable, Identifiable {
     }
 }
 
+/// When an agent that stopped talking should be treated as finished.
+///
+/// Nothing else ends a watch. `activityEnded` arrives from a Stop hook, and a
+/// hook cannot run for a session that was interrupted, killed, or disconnected
+/// -- which is the ordinary way an agent ends when it is being driven from a
+/// GUI. A watch that never ends freezes the pet's whole idle life: it stops
+/// roaming, and it can only sleep on a seat that stays verifiably clear.
+public enum ActivityLifetime {
+    /// Long enough to sit through a slow tool call without the pet wandering
+    /// off mid-build, short enough that a missed Stop costs one stroll rather
+    /// than the rest of the session.
+    public static let silenceBeforeExpiry: TimeInterval = 300
+
+    public static func hasFallenSilent(
+        lastEventAt: TimeInterval,
+        now: TimeInterval
+    ) -> Bool {
+        now - lastEventAt >= silenceBeforeExpiry
+    }
+}
+
 public protocol ActivitySource: Sendable {
     var id: String { get }
     var sourceType: ActivitySourceType { get }

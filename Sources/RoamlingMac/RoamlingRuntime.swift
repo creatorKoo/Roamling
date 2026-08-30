@@ -144,6 +144,9 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     private var reactionPolicy = ReactionPolicy()
     private var lastDispatchedActivityEventID: String?
     private var activeActivitySourceID: String?
+    /// When the active source last said anything, so a watch that will never
+    /// be ended by a hook can end on its own.
+    private var activityHeardAt: TimeInterval = 0
     private var activeActivityReaction: CompanionReaction?
     private var activityArrivalReaction: CompanionReaction?
     private var running = false
@@ -500,6 +503,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         let deltaTime = min(max(now - (lastTickAt ?? now), 0), 0.1)
         lastTickAt = now
         behavior.handle(.tick, at: now)
+        expireSilentActivity(at: now)
         resumePendingActivityIfReady(at: now)
 
         let pointer = pointerProvider.currentPointer(at: now)
@@ -740,6 +744,20 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         }
     }
 
+    /// A Stop hook cannot run for a session that was interrupted or killed, and
+    /// driving agents from a GUI is exactly how that happens. Without this the
+    /// pet stays on duty forever: never roaming, and able to sleep only while
+    /// its seat keeps scoring clear.
+    private func expireSilentActivity(at timestamp: TimeInterval) {
+        guard activeActivitySourceID != nil,
+              ActivityLifetime.hasFallenSilent(
+                lastEventAt: activityHeardAt,
+                now: timestamp
+              ) else { return }
+        clearActiveActivity(at: timestamp)
+        applyActivityReaction(.calm, at: timestamp)
+    }
+
     private func resumePendingActivityIfReady(at timestamp: TimeInterval) {
         guard behavior.state == .idle, let event = pendingActivityEvent else { return }
         pendingActivityEvent = nil
@@ -748,6 +766,9 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
 
     private func dispatchActivityEvent(_ event: CompanionEvent, at timestamp: TimeInterval) {
         lastDispatchedActivityEventID = event.id
+        if activeActivitySourceID == nil || activeActivitySourceID == event.sourceID {
+            activityHeardAt = timestamp
+        }
         let reaction = reactionPolicy.reaction(
             for: event,
             context: event.context ?? .idle,
@@ -786,6 +807,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
 
         case .setback:
             activeActivitySourceID = event.sourceID
+            activityHeardAt = timestamp
             activeActivityReaction = .observe
             // The trip is off but the window is still the one being watched, so
             // the hint stays and the seat keeps being judged where the pet is.
@@ -915,6 +937,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
             activityHint = nil
         }
         activeActivitySourceID = event.sourceID
+        activityHeardAt = timestamp
         activeActivityReaction = sustained
         guard activityHint != nil else {
             // Nothing to walk to, so the reaction plays where the pet is.

@@ -33,6 +33,23 @@ func coreLogicTests() -> [LogicTest] {
                 )
             }
         },
+        LogicTest(name: "a watch ends on its own when the agent goes quiet") {
+            // Nothing else ends one. `activityEnded` comes from a Stop hook,
+            // and a hook cannot run for a session that was interrupted or
+            // killed -- the ordinary way an agent ends when it is driven from a
+            // GUI. A watch that never ends stops the pet roaming and lets it
+            // sleep only while its seat keeps scoring clear.
+            let heard = 1_000.0
+            try expect(!ActivityLifetime.hasFallenSilent(lastEventAt: heard, now: heard))
+            // A slow tool call is silence too, and must not end the watch.
+            try expect(!ActivityLifetime.hasFallenSilent(lastEventAt: heard, now: heard + 120))
+            try expect(
+                ActivityLifetime.silenceBeforeExpiry > 120,
+                "expiring inside a slow tool call would walk the pet off mid-build"
+            )
+            // A session that will never speak again has to stop owning the pet.
+            try expect(ActivityLifetime.hasFallenSilent(lastEventAt: heard, now: heard + 600))
+        },
         LogicTest(name: "a walking pet can still fall asleep") {
             // Rest is gated on how long the *user* has been idle, never on the
             // pet holding still, and the tick chain checks rest before roaming.
