@@ -323,8 +323,8 @@ func petLogicTests() -> [LogicTest] {
             for (capability, name, source) in [
                 (PetCapability.sit, "waiting", PetCapability.paw),
                 (.sleep, "waiting", .paw),
-                (.caught, "jumping", .celebrate),
-                (.dragged, "jumping", .celebrate),
+                (.caught, "waiting", .paw),
+                (.dragged, "waiting", .paw),
                 (.stretch, "idle", .idle)
             ] {
                 let resolved = pet.resolver.resolution(capability)

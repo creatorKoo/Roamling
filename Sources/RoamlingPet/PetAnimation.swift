@@ -187,8 +187,12 @@ public struct AnimationResolver: Sendable {
         // an agent pet gets to settling.
         .sit: .paw,
         .stretch: .idle,
-        .caught: .celebrate,
+        // A held pet looking up at the cursor reads as held. A jump does not:
+        // it loops, so while the cursor carries the pet it looks like the pet
+        // is bouncing under its own power, which is the opposite of caught.
+        .caught: .paw,
         .dragged: .caught,
+        // Landing is the one that really is a hop, so it keeps the jump.
         .landing: .celebrate,
         .paw: .idle,
         .work: .moveRight,
