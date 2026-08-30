@@ -8,7 +8,7 @@
 "menu.avoidPointer" = "포인터 피하기";
 "menu.catchDrag" = "잡기·끌기";
 "menu.tuning" = "동작 조정…";
-"menu.accessibility" = "손쉬운 사용";
+"menu.accessibility" = "커서 인식";
 "menu.openPetFolder" = "펫 폴더 열기…";
 "menu.reloadPets" = "펫 다시 읽기";
 "menu.about" = "Roamling 정보";
@@ -48,12 +48,12 @@
 "result.detail.codex.removed" = "제거한 훅을 더 쓰지 않으려면 Codex 세션을 재시작하세요.";
 "error.pet.load" = "이 펫을 불러오지 못했습니다";
 "error.claude.settings" = "Claude Code 설정을 바꾸지 못했습니다";
-"accessibility.status.on" = "커서 인식: 켬";
-"accessibility.status.off" = "커서 인식: 끔";
-"accessibility.enable" = "커서 인식 켜기…";
+"accessibility.status.on" = "손쉬운 사용: 허용됨";
+"accessibility.status.off" = "손쉬운 사용: 허용 안 됨";
+"accessibility.enable" = "손쉬운 사용 허용…";
 "accessibility.alert.title" = "커서 인식을 켤까요?";
 "accessibility.alert.body" = "macOS가 손쉬운 사용에서 Roamling을 허용할지 묻습니다. 허용하면 Roamling이 입력 중인 컨트롤과 텍스트 커서의 위치를 읽어, 펫이 작업하는 자리를 가리지 않고 그 근처에 앉습니다.\n\n입력하는 내용, 선택한 텍스트, 창 제목, 문서 내용은 읽지 않습니다.";
-"accessibility.revoke.hint" = "시스템 설정 › 개인정보 보호 및 보안에서 끕니다";
+"accessibility.revoke.hint" = "시스템 설정 › 개인정보 보호 및 보안 › 손쉬운 사용에서 끕니다";
 "tuning.window.title" = "Roamling 동작 조정";
 "tuning.header" = "MVP 0 / 0.5 감각 실험실";
 "tuning.footer" = "변경은 바로 적용되고 저장됩니다. 이 패널은 돌아다니기와 포인터 상호작용만 조정하며, MVP 0.7의 휴식 타이밍은 첫 검증 동안 고정입니다.";

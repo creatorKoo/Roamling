@@ -8,7 +8,7 @@
 "menu.avoidPointer" = "Avoid Pointer";
 "menu.catchDrag" = "Catch & Drag";
 "menu.tuning" = "Behavior Tuning…";
-"menu.accessibility" = "Accessibility";
+"menu.accessibility" = "Cursor Awareness";
 "menu.openPetFolder" = "Open Pet Folder…";
 "menu.reloadPets" = "Reload Pets";
 "menu.about" = "About Roamling";
@@ -48,12 +48,12 @@
 "result.detail.codex.removed" = "Restart Codex sessions to stop using the removed hooks.";
 "error.pet.load" = "Couldn’t load this pet";
 "error.claude.settings" = "Couldn’t update Claude Code settings";
-"accessibility.status.on" = "Caret Awareness: On";
-"accessibility.status.off" = "Caret Awareness: Off";
-"accessibility.enable" = "Enable Caret Awareness…";
+"accessibility.status.on" = "Accessibility: Granted";
+"accessibility.status.off" = "Accessibility: Not granted";
+"accessibility.enable" = "Grant Accessibility…";
 "accessibility.alert.title" = "Enable caret awareness?";
 "accessibility.alert.body" = "macOS will ask you to allow Roamling under Accessibility. Roamling then reads the focused control's position and the text cursor's position so the pet can sit near your work without covering it.\n\nIt never reads what you type, the text you select, window titles, or document contents.";
-"accessibility.revoke.hint" = "Turn off in System Settings › Privacy & Security";
+"accessibility.revoke.hint" = "Turn off in System Settings › Privacy & Security › Accessibility";
 "tuning.window.title" = "Roamling Behavior Tuning";
 "tuning.header" = "MVP 0 / 0.5 feel lab";
 "tuning.footer" = "Changes apply immediately and are saved. This panel tunes roaming and pointer interaction only; MVP 0.7 rest timing stays fixed during its first validation pass.";
