@@ -69,6 +69,10 @@ RoamlingApp/      entry point
 내장 7행 레이아웃은 Roamling 내부 asset이지 새 Petdex 규격이 아니다. 현재 Mochi
 pet package는 8×9(1536×1872)이고 내장 Mochi atlas와 별개로 관리된다.
 
+Petdex 9종과 Roamling capability 14종의 간격, 무엇이 항상 대체되는지, Roamling 전용
+펫을 만들 때의 행 구성은 `docs/pets.md`에 있다. 펫이 "동작을 안 한다"고 보일 때 로직을
+파기 전에 그 문서의 커버리지 절을 먼저 읽는다.
+
 pet 탐색 순서: `$ROAMLING_PET_PATH` → `~/Library/Application Support/Roamling/Pets`
 → `~/.codex/pets` → `~/.petdex/pets`.
 
