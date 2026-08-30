@@ -33,6 +33,28 @@ func coreLogicTests() -> [LogicTest] {
                 )
             }
         },
+        LogicTest(name: "an agent with no window found does not own the pet") {
+            // An event can arrive with no location, and the window query can
+            // come back empty. The source is still active, but there is nothing
+            // to sit beside. Treating that as being on duty froze the pet
+            // outright -- no stroll, and no seat the table would call worth
+            // sleeping on -- until the source ended, which for an interrupted
+            // session is never.
+            let fixture = DirectorFixture()
+            var director = PlacementDirector()
+            let clear = WorldPoint(x: 900, y: 300)
+            let situation = fixture.situation(
+                at: 0,
+                position: fixture.corner,
+                sourceID: "claude",
+                hintless: true,
+                isStrollDue: true,
+                strollCandidates: [clear]
+            )
+            try expect(situation.activityHint == nil, "this case needs a source with no window")
+            try expect(situation.activitySourceID != nil)
+            try expect(director.decide(situation) == .stroll(clear), "the pet was pinned in place")
+        },
         LogicTest(name: "a watch ends on its own when the agent goes quiet") {
             // Nothing else ends one. `activityEnded` comes from a Stop hook,
             // and a hook cannot run for a session that was interrupted or
@@ -1170,6 +1192,9 @@ private struct DirectorFixture {
         position: WorldPoint,
         sourceID: String? = "claude",
         hint: LocationHint? = nil,
+        /// A source that arrived without a window, which is a state the runtime
+        /// can really be in and used to freeze the pet.
+        hintless: Bool = false,
         focus: FocusSnapshot? = nil,
         luminance: LuminanceField? = nil,
         isPointerOwned: Bool = false,
@@ -1197,7 +1222,7 @@ private struct DirectorFixture {
             isWalking: isWalking,
             isResting: isResting,
             activitySourceID: sourceID,
-            activityHint: sourceID == nil
+            activityHint: hintless || sourceID == nil
                 ? nil
                 : (hint ?? LocationHint(approximateRegion: window, confidence: 0.55)),
             userIdleDuration: userIdleDuration,

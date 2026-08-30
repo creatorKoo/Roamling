@@ -616,6 +616,17 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     /// takes effect on the next tick rather than at the next launch.
     private var restConfiguration: RestConfiguration { tuning.restConfiguration }
 
+    /// Whether the pet is on duty, which takes a window and not merely a source.
+    ///
+    /// Both roaming and rest stand down while this is true, so keying it on the
+    /// source alone froze the pet outright whenever an event arrived without a
+    /// window to watch: nothing to sit beside, nowhere to stroll, and no seat
+    /// for the decision table to call worth sleeping on. An agent it cannot
+    /// locate is not a reason for the pet to stand still.
+    private var isWatchingWindow: Bool {
+        activeActivitySourceID != nil && activityHint != nil
+    }
+
     private var preferredTickInterval: TimeInterval {
         if ProcessInfo.processInfo.systemUptime <= catchArmedUntil { return 1 / 60 }
         return switch behavior.state {
@@ -960,10 +971,8 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         catchIsArmed: Bool,
         userIdleDuration: TimeInterval
     ) -> PetSituation {
-        let isWatching = activeActivitySourceID != nil && activityHint != nil
-        // An agent at work suppresses roaming even when no window could be
-        // located for it, the same as before placement moved to the director.
-        let isRoaming = isRoamingEnabled && activeActivitySourceID == nil
+        let isWatching = isWatchingWindow
+        let isRoaming = isRoamingEnabled && !isWatching
         let isStrollDue = isRoaming && !movement.hasRoute && timestamp >= nextWanderAt
 
         if isWatching, let region = activityHint?.approximateRegion {
@@ -972,7 +981,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
                 near: region,
                 every: Self.luminanceRefreshInterval
             )
-        } else if isRoaming, !movement.hasRoute {
+        } else if !isWatching, !movement.hasRoute {
             requestLuminanceRefreshForRoaming(at: timestamp)
         }
 
@@ -1018,7 +1027,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
             // `.sleepInPlace` lands here when rest declined to start — the
             // pointer came close, or the state machine was mid-transition. The
             // seat is kept either way.
-            if activeActivitySourceID != nil {
+            if isWatchingWindow {
                 holdSeat(at: timestamp, deltaTime: deltaTime)
             } else {
                 updateRoaming(at: timestamp, deltaTime: deltaTime)
@@ -1163,7 +1172,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         // whether the seat it is parked on is worth dozing on.
         guard userIdleDuration >= restConfiguration.idleBeforeRest,
               !placement.isTravelling,
-              activeActivitySourceID == nil || mayNapOnSeat,
+              !isWatchingWindow || mayNapOnSeat,
               pointerProximity == .far,
               BehaviorController.restEntryStates.contains(behavior.state) else {
             return false
