@@ -256,9 +256,13 @@ public struct PlacementDirector: Sendable {
         // its seat has to react now, not up to half a second later.
         if let travel, situation.position.distance(to: travel.destination.point)
             <= configuration.arrivalTolerance {
+            // Whether the seat was chosen blind is a fact about the moment it
+            // was chosen, and the walk to it is exactly when the capture tends
+            // to land. Folding the arrival's capture in here marked every blind
+            // seat as informed and switched `plannedBlind` off in practice.
             return settle(
                 sourceID: sourceID,
-                sawCapture: travel.sawCapture || situation.world.luminance != nil,
+                sawCapture: travel.sawCapture,
                 at: situation.timestamp
             )
         }

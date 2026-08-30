@@ -545,6 +545,16 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
                 userIdleDuration: userIdleDuration
             ))
 
+            // Whether a seat was chosen with a capture in hand is the first
+            // question when the pet parks somewhere odd, and it is not
+            // answerable from outside the app.
+            record(
+                "capture",
+                captureProvider.isAuthorized
+                    ? (cachedLuminance == nil ? "authorised, none yet" : "available")
+                    : "not authorised",
+                at: now
+            )
             record("pet", behavior.state.rawValue, at: now)
             record("place", Self.describe(intent), at: now)
             record(

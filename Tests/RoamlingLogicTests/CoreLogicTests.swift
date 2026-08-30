@@ -1000,6 +1000,28 @@ func coreLogicTests() -> [LogicTest] {
                 fixture.situation(at: 3, position: better, luminance: field)
             ) == .hold)
         },
+        LogicTest(name: "a capture landing mid-walk still leaves the seat blind") {
+            // The capture is requested when the seat is planned and lands while
+            // the pet walks, so this is the ordinary case rather than the corner
+            // one. Counting the arrival's capture as though it had informed the
+            // choice turned `plannedBlind` off everywhere it mattered.
+            let fixture = DirectorFixture()
+            var director = PlacementDirector()
+            let blind = try require(director.decide(
+                fixture.situation(at: 0, position: fixture.corner)
+            ).destination).point
+
+            // It arrives with a capture in hand that it did not have when it set off.
+            let field = try require(fixture.field(busyAround: blind, delta: 0.06))
+            try expect(director.decide(
+                fixture.situation(at: 1, position: blind, luminance: field)
+            ) == .hold)
+
+            let replan = director.decide(
+                fixture.situation(at: 1.6, position: blind, luminance: field)
+            )
+            try expect(replan.travelReason == .plannedBlind, "got \(replan)")
+        },
         LogicTest(name: "the pet steps off the caret without waiting out the dwell") {
             let fixture = DirectorFixture()
             var director = PlacementDirector()
