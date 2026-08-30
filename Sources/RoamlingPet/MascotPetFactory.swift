@@ -72,8 +72,8 @@ public enum MascotPetFactory {
     /// Mochi ships the standard 8x9 Codex/Petdex row set rather than the
     /// seven-row layout the other built-in uses. Every row is authored art, and
     /// `AnimationResolver` already maps this taxonomy: work resolves to running,
-    /// observe to review, paw to waving, celebrate and landing to jumping, fail
-    /// to failed, caught and dragged to waiting. Only sit, sleep, and stretch
+    /// observe to review, paw to waiting, celebrate to jumping, fail to failed,
+    /// caught and dragged to jumping. Only sit, sleep, and stretch
     /// have no row here and fall back to idle.
     private static func makeStandardMochi(atlas: CGImage) -> PetAsset {
         let manifest = PetManifest(

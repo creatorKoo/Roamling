@@ -55,6 +55,33 @@ func coreLogicTests() -> [LogicTest] {
             try expect(situation.activitySourceID != nil)
             try expect(director.decide(situation) == .stroll(clear), "the pet was pinned in place")
         },
+        LogicTest(name: "diagnostics keep transitions, not samples") {
+            // Callers record every tick. A sampled log of a pet standing still
+            // is a wall of identical lines that answers nothing, and the one
+            // time it mattered the answer was in the gap between lines.
+            var log = DiagnosticsLog(capacity: 4)
+            try expect(log.record("rest", "waiting for user idle", at: 10))
+            try expect(!log.record("rest", "waiting for user idle", at: 11))
+            try expect(!log.record("rest", "waiting for user idle", at: 12))
+            try expect(log.record("rest", "clear to rest", at: 13))
+            try expect(log.entries.count == 2)
+
+            // Categories do not mask each other.
+            try expect(log.record("pet", "idle", at: 13))
+            try expect(log.entries.count == 3)
+
+            // A repeat after a change is a change again.
+            try expect(log.record("rest", "waiting for user idle", at: 14))
+
+            // The buffer is bounded, and the oldest entry is the one that goes.
+            try expect(log.record("pet", "wander", at: 15))
+            try expect(log.entries.count == 4)
+            try expect(log.entries.first?.timestamp == 13)
+
+            // Elapsed time is relative, because uptime alone says nothing.
+            try expect(DiagnosticsLog().text() == "(no entries)")
+            try expect(log.text().contains("0.0"))
+        },
         LogicTest(name: "a watch ends on its own when the agent goes quiet") {
             // Nothing else ends one. `activityEnded` comes from a Stop hook,
             // and a hook cannot run for a session that was interrupted or

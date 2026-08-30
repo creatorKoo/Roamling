@@ -62,6 +62,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
 
     public var currentPetPackagePath: String? { asset.packageURL?.standardizedFileURL.path }
     public var petDisplayName: String { asset.manifest.displayName }
+    public var petCoverage: AnimationResolver.Coverage { asset.resolver.coverage }
     public var scale: Double { overlay.scale }
     public var claudeCodeIntegrationStatus: ClaudeCodeIntegrationStatus {
         claudeCodeInstaller.status()
@@ -544,6 +545,16 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
                 userIdleDuration: userIdleDuration
             ))
 
+            record("pet", behavior.state.rawValue, at: now)
+            record("place", Self.describe(intent), at: now)
+            record(
+                "agent",
+                activeActivitySourceID.map {
+                    "\($0) window=\(activityHint == nil ? "none" : "found")"
+                } ?? "none",
+                at: now
+            )
+
             if catchIsArmed {
                 isEvadeTransitioning = false
                 movement.cancelRoute(stop: false)
@@ -627,6 +638,56 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         activeActivitySourceID != nil && activityHint != nil
     }
 
+    /// Why the pet is doing what it is doing, kept in memory and copyable from
+    /// the menu. Standing and sitting look identical from outside the app, so
+    /// without this the only way to tell them apart was to add a log and ship a
+    /// build.
+    private var diagnostics = DiagnosticsLog()
+    /// Mirrors the same entries to a file when a path is set, for a session too
+    /// long to hold in the buffer.
+    ///
+    ///     defaults write dev.roamling.app roamling.diagnosticsLog /tmp/pet.log
+    private static let diagnosticsPath: String? =
+        ProcessInfo.processInfo.environment["ROAMLING_REST_LOG"]
+            ?? UserDefaults.standard.string(forKey: "roamling.diagnosticsLog")
+
+    public var diagnosticsText: String {
+        diagnostics.text(now: ProcessInfo.processInfo.systemUptime)
+    }
+
+    private func record(_ category: String, _ message: String, at timestamp: TimeInterval) {
+        guard diagnostics.record(category, message, at: timestamp) else { return }
+        guard let path = Self.diagnosticsPath,
+              let entry = diagnostics.entries.last,
+              let data = String(
+                format: "%.1f %@ %@\n", entry.timestamp, entry.category, entry.message
+              ).data(using: .utf8) else { return }
+        if let handle = FileHandle(forWritingAtPath: path) {
+            handle.seekToEndOfFile()
+            try? handle.write(contentsOf: data)
+            try? handle.close()
+        } else {
+            try? data.write(to: URL(fileURLWithPath: path))
+        }
+    }
+
+    private func recordRestGate(
+        userIdleDuration: TimeInterval,
+        pointerProximity: PointerProximity,
+        mayNapOnSeat: Bool,
+        at timestamp: TimeInterval
+    ) {
+        let blocked =
+            userIdleDuration < restConfiguration.idleBeforeRest ? "waiting for user idle"
+            : placement.isTravelling ? "travelling"
+            : (isWatchingWindow && !mayNapOnSeat) ? "on duty, seat not nappable"
+            : pointerProximity != .far ? "pointer \(pointerProximity)"
+            : !BehaviorController.restEntryStates.contains(behavior.state)
+                ? "state \(behavior.state.rawValue)"
+            : "clear to rest"
+        record("rest", blocked, at: timestamp)
+    }
+
     private var preferredTickInterval: TimeInterval {
         if ProcessInfo.processInfo.systemUptime <= catchArmedUntil { return 1 / 60 }
         return switch behavior.state {
@@ -640,6 +701,20 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
             1 / 2
         default:
             1 / 12
+        }
+    }
+
+    private static func describe(_ intent: PlacementIntent) -> String {
+        switch intent {
+        case .none: "none, something else owns the pet"
+        case .hold: "hold"
+        case .sleepInPlace: "sleep in place"
+        case let .stroll(point): String(format: "stroll to %.0f,%.0f", point.x, point.y)
+        case let .travel(destination, reason):
+            String(
+                format: "travel %@ to %.0f,%.0f",
+                reason.rawValue, destination.point.x, destination.point.y
+            )
         }
     }
 
@@ -1170,6 +1245,12 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         // could never sleep during the long unattended run that is exactly when
         // nobody is looking at it. Priority 7 of the decision table answers
         // whether the seat it is parked on is worth dozing on.
+        recordRestGate(
+            userIdleDuration: userIdleDuration,
+            pointerProximity: pointerProximity,
+            mayNapOnSeat: mayNapOnSeat,
+            at: timestamp
+        )
         guard userIdleDuration >= restConfiguration.idleBeforeRest,
               !placement.isTravelling,
               !isWatchingWindow || mayNapOnSeat,

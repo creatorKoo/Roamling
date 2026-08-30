@@ -3,6 +3,9 @@
 "menu.title" = "Roamling — %@";
 "menu.pet" = "펫";
 "menu.pet.builtin" = "%@ (기본 제공)";
+"menu.pet.coverage" = "애니메이션 %1$d/%2$d";
+"menu.pet.substituted" = "대체 중: %@";
+"menu.pet.placeholder" = "대체 불가: %@";
 "menu.size" = "크기";
 "menu.roaming" = "돌아다니기";
 "menu.avoidPointer" = "포인터 피하기";
@@ -10,6 +13,7 @@
 "menu.tuning" = "동작 조정…";
 "menu.accessibility" = "커서 인식";
 "menu.openPetFolder" = "펫 폴더 열기…";
+"menu.copyDiagnostics" = "진단 기록 복사";
 "menu.reloadPets" = "펫 다시 읽기";
 "menu.about" = "Roamling 정보";
 "menu.viewSource" = "소스 보기";

@@ -127,7 +127,9 @@ func petLogicTests() -> [LogicTest] {
             try expect(pet.frameImage(at: 0) != nil)
             try expect(pet.frameImage(at: 87) != nil)
             try expect(pet.resolver.resolve(.sleep)?.name == "sleeping")
-            try expect(pet.resolver.resolve(.sit)?.name == "idle")
+            // A seated pose is a better sit than a standing one, and the chain
+            // finds it without anyone naming the pair for this capability.
+            try expect(pet.resolver.resolve(.sit)?.name == "waiting")
         },
         LogicTest(name: "built-in mascots load with semantic tracks") {
             try expect(MascotPetFactory.make().manifest.displayName == "FatMochi")
@@ -294,20 +296,43 @@ func petLogicTests() -> [LogicTest] {
                 try expect(track.frames.map(\.index) == expected, "wrong frames for \(name)")
             }
 
-            // The nine-row taxonomy has no sit, sleep, or stretch row. Every
-            // other capability has to land on real art rather than idle.
-            try expect(pet.resolver.resolve(.moveRight)?.name == "running-right")
-            try expect(pet.resolver.resolve(.moveLeft)?.name == "running-left")
-            try expect(pet.resolver.resolve(.work)?.name == "running")
-            try expect(pet.resolver.resolve(.observe)?.name == "review")
-            try expect(pet.resolver.resolve(.paw)?.name == "waving")
-            try expect(pet.resolver.resolve(.celebrate)?.name == "jumping")
-            try expect(pet.resolver.resolve(.fail)?.name == "failed")
-            try expect(pet.resolver.resolve(.caught)?.name == "waiting")
-            try expect(pet.resolver.resolve(.dragged)?.name == "waiting")
-            try expect(pet.resolver.resolve(.landing)?.name == "landing")
-            for missing in [PetCapability.sit, .sleep, .stretch] {
-                try expect(pet.resolver.resolve(missing)?.name == "idle")
+            // Everything the nine-row contract does cover has to land on the
+            // package's own art, never on a stand-in.
+            for (capability, name) in [
+                (PetCapability.idle, "idle"),
+                (.moveRight, "running-right"),
+                (.moveLeft, "running-left"),
+                (.work, "running"),
+                (.observe, "review"),
+                (.paw, "waiting"),
+                (.celebrate, "jumping"),
+                (.fail, "failed"),
+                (.landing, "landing")
+            ] {
+                let resolved = pet.resolver.resolution(capability)
+                try expect(resolved.track?.name == name, "\(capability) took \(resolved)")
+                try expect(
+                    resolved.provenance == .authored,
+                    "\(capability) should be the package's own art"
+                )
+            }
+
+            // A Codex pet never sleeps, sits down to rest, stretches, or gets
+            // picked up, so those are borrowed on purpose and reported as such.
+            // Nothing here may fall through to the last-resort placeholder.
+            for (capability, name, source) in [
+                (PetCapability.sit, "waiting", PetCapability.paw),
+                (.sleep, "waiting", .paw),
+                (.caught, "jumping", .celebrate),
+                (.dragged, "jumping", .celebrate),
+                (.stretch, "idle", .idle)
+            ] {
+                let resolved = pet.resolver.resolution(capability)
+                try expect(resolved.track?.name == name, "\(capability) took \(resolved)")
+                try expect(
+                    resolved.provenance == .substituted(source),
+                    "\(capability) should be borrowed from \(source), got \(resolved.provenance)"
+                )
             }
 
             // A drop must not trigger the full celebration.

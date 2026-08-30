@@ -90,6 +90,47 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
             item.state = runtime.currentPetPackagePath == descriptor.packageURL.standardizedFileURL.path ? .on : .off
             petMenu.addItem(item)
         }
+        // A package that declares one animation renders it for every state, and
+        // from outside that looks like a pet whose behaviour is broken rather
+        // than one whose sprite sheet is thin. Say which it is.
+        petMenu.addItem(.separator())
+        let coverage = runtime.petCoverage
+        let summary = NSMenuItem(
+            title: localizedFormat(
+                "menu.pet.coverage",
+                coverage.covered,
+                coverage.total
+            ),
+            action: nil,
+            keyEquivalent: ""
+        )
+        summary.isEnabled = false
+        petMenu.addItem(summary)
+        if !coverage.substituted.isEmpty {
+            let borrowed = NSMenuItem(
+                title: localizedFormat(
+                    "menu.pet.substituted",
+                    coverage.substituted.map(\.rawValue).sorted().joined(separator: ", ")
+                ),
+                action: nil,
+                keyEquivalent: ""
+            )
+            borrowed.isEnabled = false
+            petMenu.addItem(borrowed)
+        }
+        if !coverage.placeholder.isEmpty {
+            let missing = NSMenuItem(
+                title: localizedFormat(
+                    "menu.pet.placeholder",
+                    coverage.placeholder.map(\.rawValue).sorted().joined(separator: ", ")
+                ),
+                action: nil,
+                keyEquivalent: ""
+            )
+            missing.isEnabled = false
+            petMenu.addItem(missing)
+        }
+
         petItem.submenu = petMenu
         menu.addItem(petItem)
 
@@ -154,6 +195,14 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         )
         openFolder.target = self
         menu.addItem(openFolder)
+
+        let diagnostics = NSMenuItem(
+            title: localized("menu.copyDiagnostics"),
+            action: #selector(copyDiagnostics),
+            keyEquivalent: ""
+        )
+        diagnostics.target = self
+        menu.addItem(diagnostics)
 
         let reload = NSMenuItem(title: localized("menu.reloadPets"), action: #selector(reloadPets), keyEquivalent: "r")
         reload.target = self
@@ -520,6 +569,15 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         } catch {
             NSSound.beep()
         }
+    }
+
+    /// The pet cannot say why it is standing still, and from outside the app
+    /// standing and sitting look the same. This is how that gets asked.
+    @objc private func copyDiagnostics() {
+        guard let runtime else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(runtime.diagnosticsText, forType: .string)
     }
 
     @objc private func reloadPets() {

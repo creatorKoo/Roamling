@@ -3,6 +3,9 @@
 "menu.title" = "Roamling — %@";
 "menu.pet" = "Pet";
 "menu.pet.builtin" = "%@ (Built-in)";
+"menu.pet.coverage" = "Animations: %1$d of %2$d";
+"menu.pet.substituted" = "Borrowed: %@";
+"menu.pet.placeholder" = "No stand-in: %@";
 "menu.size" = "Size";
 "menu.roaming" = "Roaming";
 "menu.avoidPointer" = "Avoid Pointer";
@@ -10,6 +13,7 @@
 "menu.tuning" = "Behavior Tuning…";
 "menu.accessibility" = "Cursor Awareness";
 "menu.openPetFolder" = "Open Pet Folder…";
+"menu.copyDiagnostics" = "Copy Diagnostics";
 "menu.reloadPets" = "Reload Pets";
 "menu.about" = "About Roamling";
 "menu.viewSource" = "View Source";
