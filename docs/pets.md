@@ -223,16 +223,83 @@ row 13  landing         ┘ jumping과 충분히 다르면 그릴 값어치가 �
 같은 문서 109행에 **SLEEP strip 프롬프트가 이미 적혀 있다** — 4프레임, 웅크린 자세,
 눈 감은 채 들숨/날숨, 지면 접촉 고정.
 
-### PixelLab을 쓴다면
+### 리메이크 규격
 
-`CLAUDE.md`가 다음 펫부터 검토하기로 적어둔 경로다. 여기 적힌 결함들의 원인이 **strip
-분할 → 재중앙정렬** 단계였고, PixelLab은 프레임 단위로 받으므로 그 단계가 사라진다.
+기존 시트를 재서 나온 값이다. 목표를 감으로 정하지 않기 위해 숫자로 남긴다.
 
-- 구독 없이 USD credit 종량제. `GET /balance`가 credit과 subscription을 따로 준다
-- **무료 티어는 생성 해상도 상한 200×200이라 192×208 셀에 세로가 모자란다.** padding
-  전략을 미리 정하거나 Tier 1($12/월, 320×320)부터 쓴다
-- 프레임을 개별로 받더라도 **ground line과 body center는 여전히 우리 책임이다.**
-  합성 전에 프레임별 baseline을 맞추고, alpha connected component를 검사한다
+```sh
+./scripts/pyimg.sh scripts/pet_qa.py <sheet-or-frames> --baseline 176 --allow-airborne 4
+```
+
+| 항목 | 목표 | 2026-08-30 기존 시트 |
+|---|---|---|
+| baseline | 전 행 공통 176, 편차 0 | 158~176 |
+| ground contact | 걷기 포함 모든 행에서 발이 baseline에 | 걷기 행이 18px 떠오름 |
+| detached component | 프레임당 1개, 1px도 불허 | 57프레임 중 22프레임 위반 |
+| 중심 x | 95.5 ± 1px | 94~98 (거의 통과) |
+| visible height | idle 145 기준, 행별 목표 명시 | 104~147 |
+
+걷기 행의 18px 흔들림이 `docs/research.md`에 기록된 **"펫이 떠 보인다"**의 정체다.
+`jumping`만 baseline 이동이 허용되지만, **시작·끝 프레임은 176으로 복귀**해야 idle로
+이어질 때 튀지 않는다.
+
+1px 조각 22프레임은 chroma 배경을 키잉한 잔여물이다. 생성 단계에서 투명 배경을 받으면
+이 단계가 통째로 사라진다.
+
+### PixelLab
+
+**공식 경로는 MCP다.** `https://api.pixellab.ai/mcp/docs`가 도구 문서고, 설정은 Bearer
+헤더 하나라 OAuth 흐름이 없다.
+
+```json
+{ "mcpServers": { "pixellab": {
+    "url": "https://api.pixellab.ai/mcp",
+    "transport": "http",
+    "headers": { "Authorization": "Bearer <token>" }
+}}}
+```
+
+`api.pixellab.ai/v1`은 **deprecated**다. 거기서 읽은 제약(skeleton 3프레임 윈도우,
+`animate-with-text` 64×64 고정, 200×200 상한)은 MCP에 적용되지 않는다. v2 REST도 있고
+(`https://api.pixellab.ai/v2/llms.txt`) MCP에 없는 기능이 필요할 때만 쓴다.
+
+우리에게 중요한 것 셋:
+
+- **`body_type='quadruped', template='cat'`** — 고양이 템플릿이 있다. `view='side'`가
+  눈높이 시점이고, `n_directions=8`이라 걷기 좌우를 mirror가 아니라 생성으로 받는다.
+- **캔버스 비율이 우리와 거의 같다.** 문서가 "character 크기의 약 1.4배 캔버스"라고
+  적는데, 기존 Mochi가 192×208 셀에 145px라 208/145 = 1.43이다. `size≈144`면 우리 셀
+  근처로 떨어지므로 억지로 맞출 필요가 없다.
+- **정체성이 규율이 아니라 구조로 유지된다.** character 객체 하나에서 모든 애니메이션이
+  파생되고, `create_character_state`는 8방향 전부에 편집을 일관되게 적용한다. 프롬프트로
+  정체성을 붙잡으려다 실패한 것이 이 저장소의 아트 결함 목록이다.
+
+sleep처럼 템플릿에 없는 동작은 **보간 모드**로 만든다. `animate_character(mode='v3')`에
+`custom_start_frame_url`과 `end_frame_url`을 주면 두 포즈 사이를 채운다. 웅크린 자세를
+`create_character_state('curled up sleeping')`으로 한 번 얻어 끝 프레임으로 쓰는 그림이다.
+
+작업은 **비동기다.** 도구는 job id를 즉시 돌려주고 2~5분 뒤 완료되므로 `get_character`로
+폴링한다. 다운로드는 `/mcp/characters/{id}/download`이고 UUID가 곧 열쇠라 인증이 없다.
+
+#### 아직 확인 안 된 것
+
+- **`cat` 템플릿의 애니메이션 목록.** 문서에 없고 `get_character()`로만 보인다.
+  여기에 sleeping/sitting이 있으면 우리 부족분의 절반이 그냥 채워진다.
+- **비용.** template 애니메이션은 1 generation/direction이고, v3 커스텀은 크기에 따라
+  올라간다(144px면 대략 2~4/direction). 13행을 한 방향씩 잡으면 대략 35~45
+  generations다. 무료 티어 한도는 v1 시절 기록(40회)뿐이라 재확인이 필요하다.
+
+그래서 **첫 수는 목록 확인이다.** 크기는 목록을 보는 데 상관없으므로 기본값으로 싸게
+만들어 `get_character`를 읽고, 그 뒤에 실제 크기로 다시 만든다.
+
+```python
+create_character(body_type='quadruped', template='cat', view='side')
+get_character(character_id)   # cat 템플릿 애니메이션 목록
+```
+
+프레임을 개별로 받아도 **ground line과 body center는 여전히 우리 책임이다.** 서로 다른
+애니메이션 사이의 baseline 일치는 보장되지 않으므로, 행마다 위 QA 게이트를 통과시킨 뒤
+아틀라스에 합성한다.
 
 ### 확인
 

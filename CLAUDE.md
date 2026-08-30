@@ -92,20 +92,27 @@ pet 탐색 순서: `$ROAMLING_PET_PATH` → `~/Library/Application Support/Roaml
 
 ## 이미지 생성 경로
 
-Claude Code에는 이미지 생성 툴이 없다. 새 sprite가 필요하면 직접 만들려 하지 말고
-사용자에게 경로를 확인한다. 생성 이후가 Claude의 몫이다 — frame 추출, alpha/identity
-검증, atlas 합성, QA, packaging, Swift 런타임 작업. PNG는 직접 읽어 육안 QA할 수 있다.
+생성 경로는 붙어 있는 도구에 따라 다르다. PixelLab MCP가 붙어 있으면 Claude가 직접
+생성한다. 없으면 직접 만들려 하지 말고 사용자에게 경로를 확인한다. 어느 쪽이든 생성
+이후는 Claude의 몫이다 — frame 추출, alpha/identity 검증, atlas 합성, QA, packaging,
+Swift 런타임 작업. PNG는 직접 읽어 육안 QA할 수 있다.
 
-- **Mochi v1은 Codex의 `hatch-pet` 스킬로 완결한다.** 스킬 본체는
+- **PixelLab MCP가 현재 계획된 경로다.** 도구 문서는 `https://api.pixellab.ai/mcp/docs`,
+  설정은 `https://api.pixellab.ai/mcp`에 Bearer 헤더뿐이라 OAuth 흐름이 없다. `quadruped`
+  + `template='cat'`, `view='side'`가 이 프로젝트의 펫과 맞고, character 객체 하나에서
+  모든 애니메이션이 파생돼 정체성이 규율이 아니라 구조로 유지된다. 파이프라인·비용·미확인
+  사항은 `docs/pets.md`의 PixelLab 절에 있다.
+- **`api.pixellab.ai/v1`은 deprecated다.** 거기서 읽히는 제약(skeleton 3프레임 윈도우,
+  `animate-with-text` 64×64 고정, 200×200 상한, "Tier 1부터 320×320")은 MCP에 적용되지
+  않는다. 이전 기록이 그 값을 담고 있었으므로 v1 문서를 근거로 계획을 세우지 않는다.
+- **Mochi v1은 Codex의 `hatch-pet` 스킬로 만들었다.** 스킬 본체는
   `~/.agents/skills/hatch-pet`에 있고 Codex 내장 `$imagegen`을 쓴다. Claude 쪽에는
-  설치하지 않기로 했다. 수동 경로가 필요하면 `docs/art/mochi-animation-prompts-ko.md`의
+  설치하지 않는다. 수동 경로가 필요하면 `docs/art/mochi-animation-prompts-ko.md`의
   코드블록을 ChatGPT 이미지에 그대로 복붙한다.
-- **다음 펫부터는 PixelLab 이전을 검토한다.** 프레임 단위 sprite/animation을 직접
-  받으므로 지금의 strip 분할 → 재중앙정렬 단계가 사라진다. 이 단계가 기록된 detached
-  alpha component 결함의 원인이다. API는 구독 없이 USD credit 종량제로 쓸 수 있고
-  (`GET /balance`가 credits와 subscription을 따로 돌려준다), 무료 티어는 40 fast
-  generation에 생성 해상도 상한이 200×200이라 192×208 cell에는 padding이 필요하다.
-  Tier 1($12/월)부터 320×320.
+- **생성한 frame은 합성 전에 QA 게이트를 통과시킨다.**
+  `./scripts/pyimg.sh scripts/pet_qa.py <sheet-or-frames> --baseline 176`이 baseline·중심·
+  detached component를 재고 위반 시 non-zero로 끝난다. 한 프레임의 결함은 육안으로 찾을
+  수 있는 크기가 아니다 — 기존 시트에서 22프레임이 1px 조각을 달고 있었다.
 
 ## Python
 
