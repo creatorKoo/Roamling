@@ -543,6 +543,52 @@ func petLogicTests() -> [LogicTest] {
             }
             try expect(pet.resolver.resolve(.celebrate)?.name == "waving")
         },
+        LogicTest(name: "extension frames continue onto a second row") {
+            // One extension row holds eight cells, and `sleeping` and `caught`
+            // already take seven of Mochi's. The next row drawn has to spill
+            // onto a second row, and nothing proved that the spill lands on the
+            // right cell -- a wrong stride still returns an image, just the
+            // wrong one, which on screen is a pet playing somebody else's pose.
+            let fixture = try FixturePackage(frameWidth: 1, frameHeight: 1, rows: 9)
+            defer { fixture.remove() }
+            try fixture.write(manifest: PetManifest(
+                id: "fixture",
+                displayName: "Fixture",
+                description: "",
+                spritesheetPath: "spritesheet.png",
+                frame: .init(width: 1, height: 1, columns: 8, rows: 9)
+            ))
+            try fixture.writeExtensionSheet(
+                named: "roamling.png", columns: 8, rows: 2, numbered: true
+            )
+            try fixture.write(extension: RoamlingManifest(
+                spritesheetPath: "roamling.png",
+                frame: .init(columns: 8, rows: 2),
+                behaviors: ["sit": "sitting"],
+                animations: [
+                    // Straddles the row boundary on purpose: 79 is the last cell
+                    // of the first extension row and 80 the first of the second.
+                    "sitting": .init(frames: [78, 79, 80, 81], fps: 1.667, loop: false)
+                ]
+            ))
+            let pet = try PetLoader().load(packageAt: fixture.url)
+            try expect(pet.warnings.isEmpty, "\(pet.warnings)")
+            try expect(pet.frameCount == 72)
+            try expect(pet.addressableFrameCount == 88)
+            try expect(pet.frameImage(at: 88) == nil, "read past a two-row extension")
+
+            for offset in 0..<16 {
+                let frame = pet.frameImage(at: 72 + offset)
+                try expect(frame != nil, "extension cell \(offset) is unreadable")
+                let reached = frame.flatMap(cellIndex(of:))
+                try expect(
+                    reached == offset,
+                    "index \(72 + offset) reached cell \(reached ?? -1), wanted \(offset)"
+                )
+            }
+            try expect(pet.resolver.resolution(.sit).track?.name == "sitting")
+            try expect(pet.resolver.resolution(.sit).provenance == .authored)
+        },
         LogicTest(name: "an extension sheet must match the package cell size") {
             let fixture = try FixturePackage(frameWidth: 1, frameHeight: 1, rows: 9)
             defer { fixture.remove() }
@@ -841,6 +887,23 @@ private func distance(from x: Int, to range: ClosedRange<Int>) -> Int {
     return min(abs(x - range.lowerBound), abs(x - range.upperBound))
 }
 
+/// The red channel of a 1x1 frame, which is how a numbered fixture says which
+/// cell it is.
+private func cellIndex(of image: CGImage) -> Int? {
+    var pixel: [UInt8] = [0, 0, 0, 0]
+    guard let context = CGContext(
+        data: &pixel,
+        width: 1,
+        height: 1,
+        bitsPerComponent: 8,
+        bytesPerRow: 4,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    ) else { return nil }
+    context.draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+    return Int(pixel[0])
+}
+
 private final class FixturePackage {
     let url: URL
     private let image: CGImage
@@ -888,13 +951,42 @@ private final class FixturePackage {
         try JSONEncoder().encode(manifest).write(to: url.appendingPathComponent("roamling.json"))
     }
 
-    func writeExtensionSheet(named name: String, columns: Int, rows: Int) throws {
+    /// `numbered` paints each cell its own index, so a test can prove which cell
+    /// an index actually reached rather than only that something was returned.
+    func writeExtensionSheet(
+        named name: String,
+        columns: Int,
+        rows: Int,
+        numbered: Bool = false
+    ) throws {
+        // The bytes are written straight into the buffer rather than filled with
+        // a CGColor. A fill is colour-managed on the way into device RGB, which
+        // moved the value a level or two and made the cell report the wrong
+        // index -- the fixture lying, not the code under test.
+        let bytesPerRow = columns * 4
+        let buffer = UnsafeMutableRawPointer.allocate(
+            byteCount: bytesPerRow * rows, alignment: 8
+        )
+        defer { buffer.deallocate() }
+        buffer.initializeMemory(as: UInt8.self, repeating: 0, count: bytesPerRow * rows)
+        if numbered {
+            let bytes = buffer.assumingMemoryBound(to: UInt8.self)
+            for row in 0..<rows {
+                for column in 0..<columns {
+                    // Buffer row 0 is the image's top row, which is also the row
+                    // `cropping` counts from, so nothing is flipped here.
+                    let pixel = row * bytesPerRow + column * 4
+                    bytes[pixel] = UInt8(row * columns + column)
+                    bytes[pixel + 3] = 255
+                }
+            }
+        }
         guard let context = CGContext(
-            data: nil,
+            data: buffer,
             width: columns,
             height: rows,
             bitsPerComponent: 8,
-            bytesPerRow: 0,
+            bytesPerRow: bytesPerRow,
             space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ), let image = context.makeImage() else { throw FixtureError.context }
