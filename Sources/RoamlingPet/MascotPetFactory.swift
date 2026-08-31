@@ -35,6 +35,7 @@ public enum MascotPetFactory {
     private static let poseDerivedRows = 4
     private static let authoredRows = 7
     private static let standardRows = 9
+    private static let extensionSheetRows = 2
 
     private enum Pose: Int {
         case idle
@@ -70,11 +71,20 @@ public enum MascotPetFactory {
     }
 
     /// Mochi ships the standard 8x9 Codex/Petdex row set rather than the
-    /// seven-row layout the other built-in uses. Every row is authored art, and
-    /// `AnimationResolver` already maps this taxonomy: work resolves to running,
-    /// observe to review, paw to waiting, fail to failed, caught and dragged to
-    /// waiting. Only sit, sleep, and stretch have no row here and fall back to
-    /// idle.
+    /// seven-row layout the other built-in uses, plus the two-row extension
+    /// sheet that carries what Petdex has no word for.
+    ///
+    /// The two sheets are the shipped `mochi-v3` package, and the timings below
+    /// are its manifests transcribed. They are written out rather than parsed
+    /// because a built-in has no package directory to read. Keep them in step
+    /// with the shipped `mochi-v3` package when it changes -- the nine-row test
+    /// pins each track's length against what those manifests declare, and
+    /// checks every extension frame lands on a cell that has art rather than on
+    /// one of the sheet's five spare cells.
+    ///
+    /// `idle` overrides the standard 1.10s. Its six frames are one long hold
+    /// and a blink, so the standard timing blinks the cat continuously; the
+    /// package holds frame zero for 1.2s and spends 0.5s on the blink.
     private static func makeStandardMochi(atlas: CGImage) -> PetAsset {
         let manifest = PetManifest(
             id: BuiltInPetKind.mochi.manifestID,
@@ -89,13 +99,15 @@ public enum MascotPetFactory {
             )
         )
         var tracks = StandardPetAnimations.tracks(columns: columns)
-        let waveRow = 3 * columns
         let jumpRow = 4 * columns
 
         // A finished turn waves, and this sheet authors that row, so nothing
         // needs writing out here: `.celebrate` resolves straight to `waving` at
         // the Petdex length. `jumping` is left alone -- it opens a turn.
-        _ = waveRow
+
+        tracks["idle"] = track("idle", frames: [
+            (0, 1.20), (1, 0.10), (2, 0.10), (3, 0.10), (4, 0.10), (5, 0.10)
+        ])
 
         // Without this, `.landing` falls through to jumping and the pet throws a
         // full celebration every time it is dropped.
@@ -103,6 +115,31 @@ public enum MascotPetFactory {
             (jumpRow + 4, 0.10), (jumpRow + 3, 0.12),
             (jumpRow + 2, 0.10), (jumpRow, 0.18)
         ], loops: false)
+
+        var extensionAtlas: CGImage?
+        var extensionColumns = 0
+        var extensionRows = 0
+        if let sheet = loadSheet(named: "mochi-extension-atlas"),
+           sheet.width == cellWidth * columns,
+           sheet.height == cellHeight * extensionSheetRows {
+            extensionAtlas = sheet
+            extensionColumns = columns
+            extensionRows = extensionSheetRows
+
+            // Frame indices continue past the package grid, so the first cell of
+            // the extension sheet is 72. `gaze` is the exception: it points back
+            // into the package's own review row and is played faster the closer
+            // the pointer gets, so the tail flick doubles as watching.
+            let base = columns * standardRows
+            tracks["gaze"] = track("gaze", frames:
+                (0..<6).map { (8 * columns + $0, 0.172) })
+            tracks["sleeping"] = track("sleeping", frames:
+                (0..<3).map { (base + $0, 0.667) })
+            tracks["caught"] = track("caught", frames:
+                (3..<7).map { (base + $0, 0.150) })
+            tracks["sitting"] = track("sitting", frames:
+                (0..<4).map { (base + columns + $0, 0.600) }, loops: false)
+        }
 
         return PetAsset(
             manifest: manifest,
@@ -112,7 +149,14 @@ public enum MascotPetFactory {
             frameHeight: cellHeight,
             columns: columns,
             rows: standardRows,
-            tracks: tracks
+            tracks: tracks,
+            behaviorMappings: extensionAtlas == nil ? [:] : [
+                "gaze": "gaze", "sleep": "sleeping",
+                "caught": "caught", "sit": "sitting"
+            ],
+            extensionAtlas: extensionAtlas,
+            extensionColumns: extensionColumns,
+            extensionRows: extensionRows
         )
     }
 

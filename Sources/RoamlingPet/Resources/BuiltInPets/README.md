@@ -28,18 +28,33 @@ without modification.
 
 `mochi-standard-atlas.webp` is Mochi's runtime asset and uses the standard
 8×9 Codex/Petdex row set instead: idle, running right, running left, waving,
-jumping, failed, waiting, running, review. It was produced with the `hatch-pet`
-workflow on 2026-08-29, one animation row at a time, with every row reviewed and
-approved before the next. It replaces an earlier seven-row Mochi atlas that was
-rejected on 2026-08-27 for detached alpha fragments left by slicing a generated
-strip that was not on an exact equal-cell grid.
+jumping, failed, waiting, running, review. It replaces an earlier seven-row Mochi
+atlas that was rejected on 2026-08-27 for detached alpha fragments left by
+slicing a generated strip that was not on an exact equal-cell grid.
 
-Mochi therefore has no sit, sleep, or stretch row; `AnimationResolver` falls those
-back to idle. Every other capability lands on real art: work on running, observe
-on review, paw on waving, fail on failed, caught and dragged on waiting. The
-factory overrides two tracks from the standard set — a 2.2 second one-shot
-celebration built from the jumping row, and a short landing built from the same
-row so a drop does not replay the celebration.
+Both webp files here are the shipped `mochi-v3` package, copied in on
+2026-08-31 — the same bytes Codex and Petdex read from `~/.codex/pets/mochi-v3`.
+Each row was reviewed and approved on its own before the next was drawn, and the
+approval record with the reasoning for each is `output/v3/approvals.json`.
+
+`mochi-extension-atlas.webp` is that package's `roamling.json` sheet: 8×2, whose
+cells continue the frame index past the package grid, so cell 72 is index 72.
+It draws what the nine-row contract has no word for — sleeping curled on the
+ground (72–74), being carried (75–78), and nodding off (80–83). `gaze` is in the
+same manifest but draws nothing: it plays the package's own review row faster the
+closer the pointer gets.
+
+So Mochi borrows only three things now. `dragged` takes the caught pose,
+`stretch` takes idle, and `landing` takes the jumping row on purpose. `sit` and
+`sleep` used to fall back to `waiting`, which means "blocked on the user", and a
+drowsy pet looked like it was asking for approval; they now have their own rows
+here and fall back to idle elsewhere.
+
+The factory writes out two tracks the standard set gets wrong for this art. Idle
+overrides the standard 1.10s: its six frames are one long hold and a blink, so
+the standard timing blinks the cat continuously, and the package holds frame
+zero for 1.2s instead. Landing is built from the jumping row so a drop does not
+replay the celebration.
 
 Core prompt, Mochi:
 

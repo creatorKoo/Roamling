@@ -92,8 +92,14 @@ failed 8 · waiting 6 · running 6 · review 6. 더 그리면 뒤는 아무도 �
 | 배치 | 8열 × **7행**, cell 192×208 (1536×1456) | v1 8×**9**, v2 8×**11** |
 | 행 순서 | idle, running right, running left, sleeping, caught, stretching, landing | `docs/art` 및 pet manifest 참조 |
 
-내장 7행 레이아웃은 Roamling 내부 asset이지 새 Petdex 규격이 아니다. 현재 Mochi
-pet package는 8×9(1536×1872)이고 내장 Mochi atlas와 별개로 관리된다.
+내장 7행 레이아웃(FatMochi)은 Roamling 내부 asset이지 새 Petdex 규격이 아니다.
+
+**내장 Mochi는 이제 shipped `mochi-v3` 패키지와 같은 파일이다.**
+`mochi-standard-atlas.webp`(8×9)와 `mochi-extension-atlas.webp`(8×2)가
+`~/.codex/pets/mochi-v3`의 `spritesheet.webp` · `roamling.webp`와 같은 바이트다.
+패키지가 바뀌면 두 파일을 같이 복사하고, 매니페스트 타이밍은 `MascotPetFactory`에
+옮겨 적혀 있으므로 같이 고친다 — 테스트가 트랙 길이와 프레임이 그려진 칸에
+떨어지는지를 고정한다.
 
 Petdex 9종과 Roamling capability 14종의 간격, 무엇이 항상 대체되는지, Roamling 전용
 펫을 만들 때의 행 구성은 `docs/pets.md`에 있다. 펫이 "동작을 안 한다"고 보일 때 로직을

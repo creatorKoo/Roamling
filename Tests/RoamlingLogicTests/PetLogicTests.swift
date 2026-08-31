@@ -321,20 +321,60 @@ func petLogicTests() -> [LogicTest] {
                 )
             }
 
-            // A Codex pet never sleeps, sits down to rest, stretches, or gets
-            // picked up, so those are borrowed on purpose and reported as such.
-            // Resting borrows `idle`, not `waiting`: `waiting` means blocked on
-            // the user, and a drowsy pet is not asking for anything.
+            // The extension sheet draws what the nine-row contract has no word
+            // for, so the built-in authors these rather than borrowing.
+            try expect(pet.addressableFrameCount == 88, "extension sheet missing")
+            for (capability, name) in [
+                (PetCapability.sleep, "sleeping"),
+                (.sit, "sitting"),
+                (.caught, "caught"),
+                (.gaze, "gaze")
+            ] {
+                let resolved = pet.resolver.resolution(capability)
+                try expect(resolved.track?.name == name, "\(capability) took \(resolved)")
+                try expect(
+                    resolved.provenance == .authored,
+                    "\(capability) should be the extension sheet's own art"
+                )
+            }
+            // `sitting` is the row that forced a second extension row, so its
+            // frames prove the built-in addresses that row and not the first.
+            let sitting = try require(pet.tracks["sitting"])
+            try expect(sitting.frames.map(\.index) == Array(80...83))
+            try expect(!sitting.loops, "the nod plays once, then the pet walks off")
+            // Every extension frame has to land on a drawn cell. The sheet has
+            // five spare cells and a wrong index reads one of them: no crash, no
+            // warning, just a pet that plays nothing where it should sit down.
+            for name in ["gaze", "sleeping", "caught", "sitting"] {
+                for frame in try require(pet.tracks[name]).frames {
+                    let image = try require(
+                        pet.frameImage(at: frame.index),
+                        "\(name) frame \(frame.index) is unreadable"
+                    )
+                    try expect(hasArt(image), "\(name) frame \(frame.index) is a blank cell")
+                }
+            }
+            // Lengths the shipped `mochi-v3` manifests declare. Transcribed into
+            // the factory because a built-in has no package directory to read,
+            // so they are pinned here to catch the two drifting apart.
+            for (name, seconds) in [
+                ("idle", 1.70), ("sleeping", 2.00), ("caught", 0.60),
+                ("sitting", 2.40), ("gaze", 1.03)
+            ] {
+                let total = try require(pet.tracks[name]).frames.reduce(0) { $0 + $1.duration }
+                try expect(
+                    abs(total - seconds) < 0.02,
+                    "\(name) runs \(total)s, the package says \(seconds)s"
+                )
+            }
+
+            // What is left is borrowed on purpose and reported as such. Resting
+            // borrows `idle`, not `waiting`: `waiting` means blocked on the
+            // user, and a drowsy pet is not asking for anything.
             // Nothing here may fall through to the last-resort placeholder.
             for (capability, name, source) in [
-                (PetCapability.sit, "idle", PetCapability.idle),
-                (.sleep, "idle", .idle),
-                (.caught, "waiting", .paw),
-                (.dragged, "waiting", .paw),
-                (.stretch, "idle", .idle),
-                // Watching the cursor has no Petdex row. It goes quiet rather
-                // than borrowing `review`, which means "about to read a file".
-                (.gaze, "idle", .idle)
+                (PetCapability.dragged, "caught", PetCapability.caught),
+                (.stretch, "idle", .idle)
             ] {
                 let resolved = pet.resolver.resolution(capability)
                 try expect(resolved.track?.name == name, "\(capability) took \(resolved)")
@@ -889,6 +929,27 @@ private func opaqueComponentCount(_ image: CGImage) -> Int? {
 private func distance(from x: Int, to range: ClosedRange<Int>) -> Int {
     if range.contains(x) { return 0 }
     return min(abs(x - range.lowerBound), abs(x - range.upperBound))
+}
+
+/// Whether a frame has any artwork on it at all.
+///
+/// A wrong frame index does not crash: it returns a blank cell, and the pet
+/// plays nothing where it should play something.
+private func hasArt(_ image: CGImage) -> Bool {
+    let width = 24
+    let height = 26
+    var pixels = [UInt8](repeating: 0, count: width * height * 4)
+    guard let context = CGContext(
+        data: &pixels,
+        width: width,
+        height: height,
+        bitsPerComponent: 8,
+        bytesPerRow: width * 4,
+        space: CGColorSpaceCreateDeviceRGB(),
+        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+    ) else { return false }
+    context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+    return stride(from: 3, to: pixels.count, by: 4).contains { pixels[$0] > 8 }
 }
 
 /// The red channel of a 1x1 frame, which is how a numbered fixture says which
