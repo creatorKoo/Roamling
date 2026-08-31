@@ -1,0 +1,96 @@
+{
+  "_note": "Mochi v3 row approvals. The only record of what the user has accepted. Do not re-propose a rejected candidate without asking.",
+  "_palette": {
+    "status": "approved",
+    "approved_at": "2026-08-31",
+    "change": "palette pass over every row -- each colour family moved onto the median across rows",
+    "notes": "User approved after watching every track side by side. Rows drawn in separate batches had drifted: the body cream ran from (254,233,207) on jumping to (254,252,237) on review, the dark brown from (95,44,21) to (118,63,35). Each row's anchor for the dark, orange and cream bands was measured and translated onto the median of those anchors, so no row served as the reference; every pixel kept its distance from its own family anchor, which leaves shading and anti-aliased edges intact. Black was pinned, being already identical everywhere. Verified: alpha bit-identical, no black pixel changed, largest shift 19 levels, cream now within a level of (254,242,220) on every row, and pet_qa reports the same 11 known failures as before. The tan band was excluded -- its lightness boundary caught light orange on one row and genuine tan on another, asking for a 31-level correction between rows that did not disagree."
+  },
+  "idle": {
+    "status": "approved",
+    "approved_at": "2026-08-31",
+    "change": "ground-line alignment only, artwork unchanged",
+    "notes": "User approved the existing six-frame seated blink unchanged. The whole row moved 2px up so its baseline is 175 like every other row; it was the only row sitting below the shared ground line. Loop stays 1.70s with the first cell held 1.2s, which is what makes it calm enough for a state with no timer. Timing confirmed 2026-08-31 after comparing against the Petdex standard 1.10s side by side: the row keeps its 1.70s loop, which holds the first cell for 1.2s. `idle` is a steady state on both sides, so neither consumer imposes a length -- Petdex Desktop ignores the manifest and plays its own 1.10s regardless, and Codex and Roamling read ours. The longer hold suits a row that also stands in for `gaze` and runs whenever the cursor is near."
+  },
+  "running-right": {
+    "status": "approved",
+    "approved_at": "2026-08-31",
+    "change": "alignment and timing only",
+    "notes": "Ground line normalised to 175 by whole-frame vertical translation; artwork unchanged. Sub-visible alpha (1-24 of 255) cleared sheet-wide, removing 85 keying ghosts that the QA gate had been counting as detached pieces. Timing set to the Petdex standard. Row moved down 2px. 8 frames at 1.06s. The three frames the gate still flags (-3, -15, -10) are the gallop's airborne poses, which are drawn motion rather than placement error: their visible height drops 10px in the same frames. 41 ghost pixels removed."
+  },
+  "running-left": {
+    "status": "approved",
+    "approved_at": "2026-08-31",
+    "change": "alignment and timing only",
+    "notes": "Ground line normalised to 175 by whole-frame vertical translation; artwork unchanged. Sub-visible alpha (1-24 of 255) cleared sheet-wide, removing 85 keying ghosts that the QA gate had been counting as detached pieces. Timing set to the Petdex standard. Exact framewise mirror of running-right, so the same numbers apply. 41 ghost pixels removed."
+  },
+  "waving": {
+    "status": "approved",
+    "approved_at": "2026-08-31",
+    "candidate": "generated/waving-v2.png + approved idle for the neutral frames",
+    "change": "redrawn -- two-paw cheer replaces the one-paw wave",
+    "notes": "User approved the second candidate. Four frames at the Petdex standard 0.70s: neutral, both front paws lifting, both raised with crescent eyes, neutral. Frames 1 and 4 are the approved idle cell rather than the generated neutrals -- the generated ones carried an 11px detached whisker, and the spec called for the idle silhouette anyway, so idle to waving to idle is now pixel-continuous. Paws on the floor read 4/2/2/4; the first candidate had six legs. Known drift, accepted: the body markings on frames 2 and 3 are left-right swapped against the reference and the chest goes plain at the peak, both on frames that pass in 140ms."
+  },
+  "jumping": {
+    "status": "approved",
+    "approved_at": "2026-08-31",
+    "change": "alignment and timing only",
+    "notes": "Ground line normalised to 175 by whole-frame vertical translation; artwork unchanged. Sub-visible alpha (1-24 of 255) cleared sheet-wide, removing 85 keying ghosts that the QA gate had been counting as detached pieces. Timing set to the Petdex standard. The crouch and settle frames sat 26px below the ground line -- the cat sank into the floor on every turn opening and every drop. Both were raised; the row then needed one more pixel because its former baseline turned out to be a ghost. 5 frames at 0.84s, plays once. Serves `spark` and `landing`."
+  },
+  "failed": {
+    "status": "approved",
+    "approved_at": "2026-08-31",
+    "change": "timing and ending",
+    "notes": "Ground line normalised to 175 by whole-frame vertical translation; artwork unchanged. Sub-visible alpha (1-24 of 255) cleared sheet-wide, removing 85 keying ghosts that the QA gate had been counting as detached pieces. Timing set to the Petdex standard. Row moved down 1px. The last drawn frame is a half-recovered slump (height 126 against a neutral 138), so it froze mid-motion before snapping to idle. The neutral pose already exists as frame 0, so the track ends [.., 47, 40, 40]: 1.22s total with the last 244ms held on neutral, matching the standard's double-length final cell. Still 8 drawn cells. No new artwork. 3 ghost pixels removed."
+  },
+  "waiting": {
+    "status": "approved",
+    "approved_at": "2026-08-31",
+    "change": "timing only",
+    "notes": "Ground line normalised to 175 by whole-frame vertical translation; artwork unchanged. Sub-visible alpha (1-24 of 255) cleared sheet-wide, removing 85 keying ghosts that the QA gate had been counting as detached pieces. Timing set to the Petdex standard. 6 frames at 1.01s. Held indefinitely now that `paw` has no timer, so a calmer loop with a longer rest beat may still be wanted -- that is a taste question to settle from real use, not a defect."
+  },
+  "running": {
+    "status": "approved",
+    "approved_at": "2026-08-31",
+    "change": "timing only",
+    "notes": "Ground line normalised to 175 by whole-frame vertical translation; artwork unchanged. Sub-visible alpha (1-24 of 255) cleared sheet-wide, removing 85 keying ghosts that the QA gate had been counting as detached pieces. Timing set to the Petdex standard. 6 frames at 0.82s. The other row with no timer: it runs for as long as a tool does. Whether its amplitude wears thin over a long tool call is the remaining open question about this row."
+  },
+  "review": {
+    "status": "approved",
+    "approved_at": "2026-08-31",
+    "candidate": "generated/review-b1.png concept, review-b3.png art, whiskers repainted, body-aligned",
+    "change": "redrawn -- a tail flick replaces the head shake",
+    "notes": "User approved. Six frames at the Petdex standard 1.03s: the body holds still and only the tail tip sweeps out and back. Chosen over a head-lowering candidate because that one reads as bowing, and this row fires on every file read -- at most once per 1.5s -- so a repeated bow would be constant nodding. The rejected candidate is kept at output/v3/bcuts/greeting-head-bow for a future greeting.",
+    "exceptions": [
+      "Whiskers were repainted programmatically (scripts/flatten_whiskers.py): found by morphological opening inside the muzzle band, flattened to solid black, and narrowed to 2px. Four generation attempts could not produce them -- pale and invisible once, then outlined brown twigs three times. The generator's working grid is far coarser than a 192x208 cell, so its thinnest stroke is already wide enough to want an outline. No pixel was moved and nothing was pasted from another image; only the colour of pixels already identified as whisker changed.",
+      "Frames were shifted horizontally to hold the body centroid still (0.8px across the row). The generated art has the torso drawn at different offsets relative to the paws, so no single anchor holds both: the paws now travel 5.5px instead. Whole-frame translation only."
+    ]
+  },
+  "gaze": {
+    "status": "approved",
+    "approved_at": "2026-08-31",
+    "change": "no drawing -- the review row's tail flick, played faster as the pointer closes",
+    "notes": "Four attempts at a dedicated row never converged: the ears came back longer as well as more upright, so the cat grew 12-16px and read as a bigger animal rather than an alert one, and the whisker count would not settle at the reference's two a side. They are kept at output/v3/bcuts/gaze-ears-perked with what each got wrong. Instead the pointer's distance drives the animation clock -- unhurried at the edge of awareness, twice as quick within catching range -- which spends a channel nothing was using and costs no art. Declared in roamling.json for this package only; `gaze` still degrades to stillness for any other pet, because `review` is whatever that pet's author drew there."
+  },
+  "sleeping": {
+    "status": "approved",
+    "approved_at": "2026-08-31",
+    "candidate": "generated/sleeping-v1.png, frames 0 1 3",
+    "change": "new row -- the pet had been sleeping in its seated waiting pose",
+    "notes": "User approved the three-frame cut. Curled on the ground at 158x105 against the seated 123x148, so a sleeping pet finally looks unlike a waiting one -- which is why the row exists. Area lands within 2% of idle's, meaning it reads as the same animal at the same size. The generated fourth frame was dropped: it was 11% larger in area and 4px higher, so the whole cat inflated rather than a back rising, and this loop can run for many minutes. The remaining three breathe within 1%. Extension rows have no fixed frame count, so three is not a deviation."
+  },
+  "caught": {
+    "status": "approved",
+    "approved_at": "2026-08-31",
+    "candidate": "generated/caught-v2.png, frames 0-3 (candidate A)",
+    "change": "new row -- a caught pet had been showing the seated waiting pose",
+    "notes": "User approved candidate A. Held up by the scruff with the hind legs bent and the tail curled, so being picked up finally looks unlike sitting down, which is why the row exists. The first attempt was drawn dangling straight at 1:2.6 and came out 296px tall in a 208px cell; the reprompt constrained the proportion and v2 landed at 1:1.72, 101x174, which fits. Area 11,324 sits within 1% of waiting's 11,448, so it reads as the same animal at the same size, and the four frames vary by 1% between them. Baseline 175 on all four."
+  },
+  "sitting": {
+    "status": "approved",
+    "approved_at": "2026-08-31",
+    "candidate": "generated/sitting-v1.png (candidate A), whiskers flattened and mended",
+    "change": "new row -- a drowsy pet had been showing the approval-waiting pose",
+    "notes": "User approved candidate A. Four frames of a single nod: eyes half shut, nearly shut, chin down with eyes closed, then caught half open again. Body still, head and eyelids only -- height runs 148/140/126/142 while width holds at 121-122, against the reference's 123, so it reads as the same animal. Candidate B animated as well but came in 109 wide, a slimmer cat. Both candidates had broken whiskers, the failure that took four attempts on gaze: A's were dark but scattered off the cheek, B's pale beige and nearly invisible. A was flattened to 2px black by shape and one detached stroke walked back to the cheek (1px). f2 and f3 carry exactly two whiskers a side; f0 and f1 keep 1-4px dark nubs on the left cheek, attached to the outline rather than floating, and left alone because removing them means guessing a fill colour -- the bug the user caught earlier. pet_qa reports 0 of 4 failing. Placed at extension indices 80-83, which forced the extension sheet to a second row. Feet centre 97.4 against idle's 95.2, inside the spread the approved sheet already has (waiting sits at 100.3)."
+  }
+}

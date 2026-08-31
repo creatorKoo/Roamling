@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "spritesheetPath": "roamling.webp",
+  "frame": {
+    "columns": 8,
+    "rows": 2
+  },
+  "behaviors": {
+    "gaze": "gaze",
+    "sleep": "sleeping",
+    "caught": "caught",
+    "sit": "sitting"
+  },
+  "animations": {
+    "gaze": {
+      "frames": [
+        64,
+        65,
+        66,
+        67,
+        68,
+        69
+      ],
+      "fps": 5.825,
+      "loop": true
+    },
+    "sleeping": {
+      "frames": [
+        72,
+        73,
+        74
+      ],
+      "fps": 1.5,
+      "loop": true
+    },
+    "caught": {
+      "frames": [
+        75,
+        76,
+        77,
+        78
+      ],
+      "fps": 6.667,
+      "loop": true
+    },
+    "sitting": {
+      "frames": [
+        80,
+        81,
+        82,
+        83
+      ],
+      "fps": 1.667,
+      "loop": false
+    }
+  }
+}
