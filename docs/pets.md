@@ -9,26 +9,31 @@
 그 패키지가 애니메이션을 하나만 선언해서 **모든 상태가 같은 5프레임 루프로 떨어지고
 있었다.** 밖에서는 보이지 않았고, 코드 어디에도 그 사실을 말해주는 곳이 없었다.
 
-## 1. Roamling이 요구하는 것 — capability 14종
+## 1. Roamling이 요구하는 것 — capability 16종
 
 `BehaviorState`(무엇을 하는 중인가)와 `PetCapability`(무엇을 보여줄 것인가)는 다른
-축이다. 상태는 14개보다 많고, 여럿이 한 capability로 모인다.
+축이다. 상태는 16개보다 많고, 여럿이 한 capability로 모인다.
 
-| capability | 어떤 상태에서 오는가 |
-|---|---|
-| `idle` | `.idle` |
-| `moveLeft` / `moveRight` | `.wander` · `.evadePointer` · `.findSleepSpot` · `.travelToInterest` — 진행 방향으로 갈림 |
-| `sit` | `.sit` (쉬기 직전 앉는 구간) |
-| `sleep` | `.sleep` |
-| `stretch` | `.stretch` · `.wake` |
-| `observe` | `.observe` · `.lookAtPointer` |
-| `work` | `.work` |
-| `paw` | `.waitingForUser` |
-| `celebrate` | `.celebrate` |
-| `fail` | `.sad` |
-| `caught` | `.caught`, 그리고 `.dragged`의 전환 구간 |
-| `dragged` | `.dragged` |
-| `landing` | `.dropped` |
+| capability | 어떤 상태에서 오는가 | Petdex 행 |
+|---|---|---|
+| `idle` | `.idle` | `idle` |
+| `moveLeft` / `moveRight` | `.wander` · `.evadePointer` · `.findSleepSpot` · `.travelToInterest` — 진행 방향으로 갈림 | `running-left/right` |
+| `sit` | `.sit` (쉬기 직전 앉는 구간) | — |
+| `sleep` | `.sleep` | — |
+| `stretch` | `.stretch` · `.wake` | — |
+| `observe` | `.observe` — 파일을 읽거나 검색하는 중 | `review` |
+| `gaze` | `.lookAtPointer` — 커서가 가까이 왔다 | — |
+| `work` | `.work` | `running` |
+| `paw` | `.waitingForUser` | `waiting` |
+| `spark` | `.spark` — 턴이 시작됐다 | `jumping` |
+| `celebrate` | `.celebrate` — 턴이 끝났다 | `waving` |
+| `fail` | `.sad` | `failed` |
+| `caught` | `.caught`, 그리고 `.dragged`의 전환 구간 | — |
+| `dragged` | `.dragged` | — |
+| `landing` | `.dropped` | — |
+
+오른쪽 열이 빈 일곱이 Petdex에 개념이 없는 Roamling 확장이다. 나머지 아홉은 Petdex 행
+하나를 그대로 뜻하고, **그 뜻은 우리가 정하지 않는다** — `docs/state-contract.md` 참조.
 
 `PetCapabilityMapping`은 일부러 exhaustive switch다. `BehaviorState`에 case를 추가하면
 빌드가 깨진다. 조용히 `.idle`로 떨어지는 걸 한 번 겪었기 때문이다 — `travelToInterest`가
@@ -66,18 +71,26 @@ Petdex 9종이 채우는 것              Roamling 전용 (규격에 개념이 �
   idle          → idle                sit
   running-right → moveRight           sleep
   running-left  → moveLeft            stretch
-  running       → work                caught / dragged
-  review        → observe             landing
-  waiting       → paw
-  waving        → celebrate
-  jumping       → celebrate
+  running       → work                gaze   (커서 응시)
+  review        → observe             caught / dragged
+  waiting       → paw                 landing
+  jumping       → spark  (턴 시작)
+  waving        → celebrate (턴 완료)
   failed        → fail
 ```
 
-**그리고 격자에 빈자리가 없다.** v1의 9행은 9종이 한 행씩 차지하고, v2의 11행은 거기에
-look pose 2행이 붙는다. 행을 하나 더 붙이면 8×9/8×11 비율 검증을 통과하지 못한다.
-즉 규격을 지키는 어떤 Petdex 펫도 **영원히 그 5종을 갖지 못한다.** 패키지가 부실한 게
-아니라 규격이 다른 것을 겨냥한다.
+`jumping`과 `waving`을 눈여겨볼 것. **`jumping`은 축하가 아니라 시작 신호고, 완료 신호는
+`waving`이다.** 둘을 뒤집어 두면 규격대로 그려진 모든 펫에서 완료 축하가 시작 그림으로
+나온다. 실제로 그랬고, `docs/state-contract.md`가 그걸 고친 기록이다.
+
+**그리고 행 단위로는 격자에 빈자리가 없다.** v1의 9행은 9종이 한 행씩 차지하고, v2의
+11행은 거기에 look pose 2행이 붙는다. 행을 하나 더 붙이면 8×9/8×11 비율 검증을 통과하지
+못한다.
+
+**셀 단위로는 남는다.** 대부분의 행이 8칸을 다 쓰지 않는다 — 현재 Mochi 패키지 기준으로
+15칸이 비어 있다. 다만 확장은 그 칸이 아니라 **`roamling.json`이 가리키는 자기 시트**에
+두는 편이 낫다 — `pet.json`과 `spritesheet.webp`가 9행 계약 그대로 남고, 확장이 15칸에
+묶이지도 않는다.
 
 ## 4. 그래서 빌려온다 — 사슬과 출처
 
@@ -93,14 +106,16 @@ flowchart LR
     work --> moveRight --> idle
     observe --> idle
     celebrate --> idle
+    spark --> celebrate
     fail --> idle
     moveLeft --> idle
+    gaze --> idle
     caught --> paw
     dragged --> caught
-    landing --> celebrate
+    landing --> spark
 
     classDef borrowed fill:#fde,stroke:#b47
-    class sleep,sit,stretch,caught,dragged,landing borrowed
+    class sleep,sit,stretch,gaze,caught,dragged,landing borrowed
 ```
 
 분홍이 Petdex 규격에 없어서 항상 빌려오는 것들이다. `sit`에 앉은 자세 하나를 알려주면
@@ -125,22 +140,25 @@ flowchart LR
 - **루프인지 아닌지가 자세보다 중요할 때가 있다.** `caught`에 `jumping`을 붙였더니
   커서가 들고 다니는 내내 반복 재생돼서, 잡힌 게 아니라 제 발로 통통 뛰는 걸로 읽혔다.
   앉아서 위를 올려다보는 `waiting`이 "잡은 손을 쳐다보는" 그림이 되어 훨씬 낫다.
-- **`landing`은 반대다.** 착지는 진짜로 hop이라 `jumping`이 맞다.
+- **`landing`은 반대다.** 착지는 진짜로 hop이라 `jumping`이 맞다. 그래서 `landing`은
+  `celebrate`가 아니라 `spark`(= `jumping`)에서 빌린다. 이름이 아니라 **어떤 뜻을 빌리는지**
+  를 코드에 적어야 하는 이유가 이것이다 — `celebrate`를 `waving`으로 고치는 순간, 사슬로만
+  이어져 있던 착지가 작별 인사로 바뀔 뻔했다.
 - 승인 기록의 설명만 읽고 고르지 말 것. 실제로 재생해봐야 한다.
 
 ## 5. 실측 커버리지
 
 ```text
-FatMochi (내장, 8×7)        authored 14 / 대체 0
+FatMochi (내장, 8×7)        authored 16 / 대체 0
   트랙: caught · dragged · sitting · sleeping · stretching · landing ·
-        idle · running-left/right · failed · jumping · review · running ·
-        waiting · watching · waving · working
+        idle · running-left/right · failed · celebrate · jumping · review ·
+        running · waiting · watching · waving · working
 
-Mochi (내장, 9행)           authored  9 / 대체 5
-  대체: caught · dragged · sit · sleep · stretch
+Mochi (내장, 9행)           authored 10 / 대체 6
+  대체: caught · dragged · gaze · sit · sleep · stretch
 
-Mochi (외부 패키지, 8×9)     authored  8 / 대체 6
-  대체: 위 5종 + landing
+Mochi (외부 패키지, 8×9)     authored  9 / 대체 7
+  대체: 위 6종 + landing
 ```
 
 FatMochi만 완전한 이유는 **Petdex 규격을 따르지 않기 때문이다.** 8×7에 Roamling 자체
@@ -151,16 +169,20 @@ FatMochi만 완전한 이유는 **Petdex 규격을 따르지 않기 때문이다
 
 ## 6. Roamling 전용 펫을 만든다면
 
-Petdex 호환을 유지하면서 잠을 넣는 방법은 없다. 행이 남지 않는다. 그래서 선택은 둘이다.
+선택은 셋이다. 가운데가 나중에 생겼고, 대개 그게 맞다.
 
-| | Petdex 규격 그대로 | Roamling 확장 |
-|---|---|---|
-| 격자 | 8×9 또는 8×11 | 자유 (`frame`으로 선언) |
-| 갤러리 제출 | 가능 | 불가 |
-| sleep·sit·stretch·caught | 영구 대체 | 진짜 그림 |
-| 만드는 비용 | 9행 | 13~14행 |
+| | Petdex 규격 그대로 | 빈 셀 + `roamling.json` v2 | 행을 늘린 Roamling 확장 |
+|---|---|---|---|
+| 격자 | 8×9 또는 8×11 | **8×9 그대로** | 자유 (`frame`으로 선언) |
+| 갤러리 제출 | 가능 | **가능** (`pet.json`이 규격 그대로) | 불가 |
+| sleep·sit·gaze·caught | 영구 대체 | 진짜 그림 (칸이 닿는 만큼) | 진짜 그림 |
+| 만드는 비용 | 9행 | 9행 + 빈 셀 11~15칸 | 14~15행 |
 
-확장을 고른다면 이렇게 구성하는 걸 권한다. 앞 9행을 규격 순서 그대로 두는 것이 핵심이다 —
+가운데 방식은 표준 9행이 쓰지 않는 셀에 그림을 넣고, 그 인덱스를 `roamling.json`의
+`animations`로 선언한다. 격자가 안 변하므로 Petdex 검증을 통과하고, Codex는 선언하지 않은
+이름을 그냥 보지 못한다. 현재 Mochi 패키지에는 그런 셀이 15칸 있다.
+
+행까지 늘린다면 이렇게 구성하는 걸 권한다. 앞 9행을 규격 순서 그대로 두는 것이 핵심이다 —
 그러면 같은 시트를 잘라 Petdex용 8×9를 그대로 뽑아낼 수 있다.
 
 ```text
@@ -175,20 +197,33 @@ row  7  running         │
 row  8  review          ┘
 row  9  sleeping        ┐ Roamling 전용
 row 10  sitting         │ sitting이 있으면 sleep 대체도 같이 좋아진다
-row 11  stretching      │
-row 12  caught          │ dragged는 caught에서 degrade되므로 선택
-row 13  landing         ┘ jumping과 충분히 다르면 그릴 값어치가 있다
+row 11  gaze            │ 커서를 오래 응시하는 그림. Petdex에 개념이 없다
+row 12  stretching      │
+row 13  caught          │ dragged는 caught에서 degrade되므로 선택
+row 14  landing         ┘ jumping과 충분히 다르면 그릴 값어치가 있다
 ```
 
-우선순위는 **sleeping → sitting → caught → stretching → landing** 순이다. 앞의 둘이
-체감이 가장 크고(펫이 하루 대부분을 쉬면서 보낸다), landing은 `jumping`으로 대체해도
-크게 어색하지 않다.
+우선순위는 **sleeping → sitting → gaze → caught → stretching → landing** 순이다. 앞의
+둘이 체감이 가장 크고(펫이 하루 대부분을 쉬면서 보낸다), `gaze`는 커서가 다가올 때마다
+쓰이므로 빈도가 높다. landing은 `jumping`으로 대체해도 크게 어색하지 않다.
 
 ### 매니페스트
 
 `pet.json`은 Codex `model.rs`가 decode하는 모양 그대로다. 프레임 인덱스는 `row * columns
-+ column`이고, **인덱스를 반복해 정지 구간을 만들 수 있다.** 승인된 `review` 루프가 이미
-그 방식을 쓴다.
++ column`이고, **인덱스를 반복해 정지 구간을 만들 수 있다.**
+
+**단 그 트릭이 통하는 곳은 Roamling과 Codex뿐이다.** Petdex 데스크탑 렌더러
+(`sprite.zig`)는 매니페스트 타이밍을 읽지 않고 행마다 고정된 프레임 수와 길이로 **앞
+N칸만** 재생한다.
+
+```text
+idle 6 · running-right 8 · running-left 8 · waving 4 · jumping 5
+failed 8 · waiting 6 · running 6 · review 6
+```
+
+N보다 많이 그리면 뒤는 아무도 못 보고, 적게 그리면 빈 칸이 한 프레임 깜빡인다. **행별
+프레임 수는 협상 대상이 아니다.** 뒤집어 말하면 **각 행의 뒤쪽 빈 칸은 어느 소비자도
+읽지 않으므로**, 거기에 Roamling 확장 행을 넣는 것은 양쪽에서 안전하다.
 
 ```json
 {
@@ -209,6 +244,32 @@ row 13  landing         ┘ jumping과 충분히 다르면 그릴 값어치가 �
   않는 동작**에 쓴다. 잡힌 채로 들려 다니는 `dragged`는 반대로 루프여야 한다.
 - `fallback`으로 다른 트랙 이름을 지목할 수 있다. 프레임이 빈 트랙은 fallback을 따라간다.
 - 선언하지 않은 행은 **존재하지 않는 것과 같다.** 오늘의 사건이 정확히 이것이었다.
+
+규격 밖 이름은 `pet.json`이 아니라 `roamling.json`에 두고, **그림도 자기 시트에 둔다.**
+
+```json
+{
+  "schemaVersion": 1,
+  "spritesheetPath": "roamling.webp",
+  "frame": { "columns": 8, "rows": 2 },
+  "behaviors": { "sleep": "sleeping", "gaze": "gaze" },
+  "animations": {
+    "sleeping": { "frames": [72, 73, 74, 75], "fps": 2, "loop": true },
+    "gaze":     { "frames": [76, 77],         "fps": 1, "loop": true },
+    "landing":  { "frames": [34, 35, 36],     "fps": 8, "loop": false }
+  }
+}
+```
+
+프레임 인덱스는 패키지 격자 끝에서 **이어진다** — 8×9면 72번이 확장 시트의 첫 칸이다.
+그래서 트랙이 두 시트를 섞어도 되고, 위 `landing`은 패키지의 점프 프레임을 그대로 빌려
+새로 그리는 게 없다.
+
+셀 크기는 패키지의 것을 쓴다. 확장 격자에는 열·행 수만 적는다.
+
+이 방식이면 `pet.json`과 `spritesheet.webp`가 **9행 계약 그대로** 남는다. 빈 칸을 쓰는
+방법도 동작하지만 확장이 15칸으로 묶이고, 갤러리 검증기가 선언되지 않은 칸을 들여다보는지
+확인된 바가 없다.
 
 ### 그림 규칙
 

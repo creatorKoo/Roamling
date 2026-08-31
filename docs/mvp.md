@@ -207,6 +207,9 @@ Codex command hooks -------+--> authenticated loopback receivers
 - routine low-intensity tool completion을 visible reaction/attention switch에서 제외
 - meaningful completion은 확률에 묻히지 않고 최소 작은 축하로 acknowledge
 - FatMochi와 Mochi 모두 completion state 전체 약 2.2초 동안 실제 frame motion을 유지하고
+  <!-- 2026-08-31 개정: completion은 Petdex `waving` 표준인 0.70초로 바뀌었다. 규격대로
+  그려진 남의 펫을 가져오면 4프레임 인사가 0.7초짜리인데 2.2초를 쥐면 세 번 반복된다.
+  근거는 docs/state-contract.md, 당시 기준은 이 줄에 그대로 남긴다. -->
   승인된 idle silhouette로 복귀
 - 사용자 피드백에 따라 Mochi도 FatMochi와 같은 7-row authored capability set으로 교체:
   idle blink, four-paw walk left/right, sleep breathing, caught/drag, feline stretch, landing/celebrate
@@ -248,6 +251,7 @@ listener, Claude/Codex 완료 payload의 HTTP 204 수신을 확인했다. hook �
 - 다른 source의 permission request는 dwell을 깨고 관심을 가져갈 수 있다.
 - routine tool completion마다 축하하거나 monitor를 왕복하지 않는다.
 - Stop/completion은 intensity에 맞는 약 2.2초 반응을 하고 다음 active source가 있으면 이어서 본다.
+  <!-- 2026-08-31 개정: 0.70초(Petdex `waving` 표준)로 변경. 위 주석 참조. -->
 - 62개의 pure/transport test와 signed release app build를 통과한다.
 - 실제 Claude와 Codex session에서 각각 start → tool use → completion을 한 번 체감 확인한다.
 

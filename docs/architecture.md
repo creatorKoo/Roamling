@@ -198,21 +198,32 @@ Behavior는 `perform(.sleep)`처럼 semantic capability만 요청한다.
 ```text
 requested capability
     -> roamling.json explicit mapping
-    -> manifest custom animation / aliases
-    -> standard Petdex row
-    -> related capability fallback
+    -> capability authoredNames (sleeping, sitting, gaze, ...)
+    -> capability petdexState의 행 이름 + Codex alias
+    -> borrows가 가리키는 capability로 한 단계 내려가 반복
     -> idle
 ```
+
+후보 목록은 손으로 쓰지 않고 capability의 선언에서 생성한다. `PetCapability`의 16종 중
+9종은 `petdexState`로 Petdex 행 하나를 지목하고, 나머지 7종은 Petdex에 개념이 없어
+`borrows`로 내려간다. 자세한 근거는 `docs/state-contract.md`.
 
 예:
 
 ```text
-sleep      -> sleeping -> sleep -> idle
-work       -> working -> running -> idle
-observe    -> watching -> review -> waiting -> idle
-celebrate  -> celebrate -> jumping -> waving -> idle
-caught     -> caught -> waiting -> idle
+sleep      -> sleeping -> (sit) -> (paw) waiting -> idle
+work       -> working / typing -> running -> idle
+observe    -> observe -> review -> idle
+celebrate  -> celebrate -> waving -> idle
+spark      -> spark -> jumping -> idle
+landing    -> landing -> (spark) jumping -> idle
+gaze       -> gaze / watching -> idle
+caught     -> caught -> (paw) waiting -> idle
 ```
+
+`celebrate`가 `waving`을 집는 것이 핵심이다. Petdex에서 `jumping`은 턴이 **시작**될 때
+재생되는 행이고 완료 신호는 `waving`이다. 이름이 비슷해 보인다는 이유로 `jumping`을 먼저
+두었던 동안, Roamling은 규격대로 그려진 모든 펫에서 완료 축하에 시작 그림을 썼다.
 
 v2 pointer look은 0°=up, 90°=right인 16방향 frame으로 quantize한다. deadzone에서는
 idle을 사용한다. v1 pet은 look row가 없어도 idle/review fallback으로 정상 동작한다.
@@ -230,21 +241,32 @@ standard package loader도 atlas frame을 그대로 재생하며 임의 관절 a
 ```json
 {
   "schemaVersion": 1,
-  "behaviors": {
-    "sleep": "sleeping",
-    "work": "typing",
-    "observe": "watching",
-    "paw": "pawing",
-    "caught": "caught",
-    "dragged": "dragged",
-    "landing": "landing"
+  "spritesheetPath": "roamling.webp",
+  "frame": { "columns": 8, "rows": 2 },
+  "behaviors": { "sleep": "sleeping", "gaze": "gaze" },
+  "animations": {
+    "sleeping": { "frames": [72, 73, 74, 75], "fps": 2, "loop": true },
+    "gaze":     { "frames": [76, 77],         "fps": 1, "loop": true },
+    "landing":  { "frames": [34, 35, 36],     "fps": 8, "loop": false }
   }
 }
 ```
 
-unknown behavior/key는 무시한다. mapping이 가리킨 track이 없으면 표준 fallback으로
-돌아간다. 이 파일이 없을 때가 가장 중요한 compatibility path다. schema version을
-도입한 이유는 Petdex manifest를 fork하지 않고 확장을 독립적으로 진화시키기 위해서다.
+확장 frame은 **자기 sheet에 산다.** `pet.json`과 `spritesheet.webp`는 9행 계약 그대로
+남으므로, gallery 검증기가 선언되지 않은 cell을 어떻게 보는지 물을 일이 없다.
+
+index는 package 격자 끝에서 **이어진다.** 8×9 package라면 72번이 확장 sheet의 첫 cell이다.
+따라서 track의 frame list는 자기가 어느 sheet를 읽는지 알 필요가 없고, 둘을 섞어도 된다 —
+위 `landing`이 package의 jump frame을 그대로 빌려 쓴다.
+
+cell 크기는 확장 격자에 다시 적지 않는다. package의 것을 쓴다. 두 배율로 그려진 pet은 한
+pet이 아니고, 선언한 격자와 픽셀 수가 어긋나는 sheet는 거부한다.
+
+`behaviors`는 capability를 track 이름에 직접 붙인다. 확장 animation은 package 자신의 것
+**다음에** 설치되므로 track을 더할 수도, 하나를 고쳐 쓸 수도 있다. unknown behavior/key는
+무시하고, mapping이 가리킨 track이 없으면 표준 fallback으로 돌아간다. 모르는
+schemaVersion은 warning 한 줄만 남기고 무시하며 pet은 9행 그대로 그려진다. 이 파일이
+없을 때가 가장 중요한 compatibility path다.
 
 ## DesktopWorld and coordinates
 

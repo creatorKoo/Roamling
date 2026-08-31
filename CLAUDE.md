@@ -58,6 +58,32 @@ RoamlingApp/      entry point
 `docs/mvp.md`(현재 **MVP 2: Claude + Codex**)에 있다. exit rule이 있으므로 사용자가
 실사용 확인을 하기 전에 다음 MVP로 넘어가지 않는다.
 
+## 상태 어휘는 Petdex가 정본이다
+
+`PetdexState` 9종의 **뜻·표준 길이·transient/steady 분류는 우리가 정하지 않는다.** upstream
+(`petdex/src/lib/pet-states.ts`, `petdex-desktop-native/src/hook_runner.zig`, `main.zig`)에서
+포팅한 값이고, 파일 상단 주석에 출처가 적혀 있다. 바꿔야 하면 그 세 파일을 다시 읽는다.
+
+`PetCapability` 16종 중 9종은 Petdex 행 하나를 그대로 뜻하고 나머지 7종은 확장이다.
+**capability에 track 이름을 직접 붙이지 않는다** — `petdexState`와 `borrows`를 선언하면
+resolver가 후보를 생성한다. 특히 `jumping`은 축하가 아니라 **턴 시작** 신호이고 완료 신호는
+`waving`이다. 이 둘을 이름만 보고 뒤집어 둔 것이 오래된 결함이었다.
+
+**행별 프레임 수는 고정이다.** Petdex 데스크탑 렌더러(`sprite.zig`)는 매니페스트 타이밍을
+읽지 않고 행마다 고정된 앞 N칸만 재생한다 — idle 6 · 걷기 8 · waving 4 · jumping 5 ·
+failed 8 · waiting 6 · running 6 · review 6. 더 그리면 뒤는 아무도 못 보고, 덜 그리면 빈
+칸이 깜빡인다.
+
+**Roamling 확장은 `roamling.json`과 자기 시트에 산다.** `pet.json`과 `spritesheet.webp`는
+9행 계약 그대로 두고 건드리지 않는다. 확장 프레임 인덱스는 패키지 격자 끝에서 이어지므로
+(8×9면 72번이 확장 시트의 첫 칸) 한 트랙이 두 시트를 섞어도 된다 — `landing`이 패키지의
+점프 프레임을 그대로 빌린다.
+
+층 구조와 결정 근거는 `docs/state-contract.md`, 어떤 상황에 어떤 그림이 뜨는지는
+`docs/behavior-flow.md`, 현재 시트에 무엇이 그려져 있는지는
+`docs/art/mochi-v2-animation-spec.md`, 무엇을 어떻게 다시 만드는지는
+`docs/art/mochi-v3-plan.md`에 있다. **행을 새로 그리기 전에 네 문서를 읽는다.**
+
 ## Atlas 규격은 두 종류다 — 절대 섞지 말 것
 
 | | 내장 마스코트 | Petdex/Codex pet package |
