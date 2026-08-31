@@ -91,6 +91,29 @@ baseline에는 영향이 없다**(raw와 본체 값이 모든 프레임에서 �
 재제작이고, 잔여물로 보면 제거 스크립트로 끝난다. **이 판단은 기록해 두고 사용자가
 정한다.**
 
+### 정식 QA 호출
+
+정렬을 끝낸 지금 시트의 지면선은 모든 행에서 **175**로 같다. 이 명령이 v3 패키지의
+정식 게이트이고, 통과하면 0을 돌려준다.
+
+```sh
+./scripts/pyimg.sh scripts/pet_qa.py output/v3/mochi-v3/spritesheet.webp --baseline 175 \
+  --allow-airborne r1c0 --allow-airborne r1c1 --allow-airborne r1c4 \
+  --allow-airborne r2c0 --allow-airborne r2c1 --allow-airborne r2c4 \
+  --allow-airborne r4c1 --allow-airborne r4c2 \
+  --center-measure 8=head
+```
+
+면제는 여덟 프레임뿐이고 전부 실제로 공중에 있다 — 걷기 두 행의 도약 구간(-3, -15,
+-10px)과 `jumping`의 상승·정점(-2, -37px). **행 단위로 면제하지 않는다.** `--allow-airborne 1`
+한 줄이면 같은 행의 착지 프레임 5장까지 검사에서 빠지고, 그 5장이 4px 가라앉아도 게이트가
+통과한다(실측으로 확인했다).
+
+`review`만 `head`로 재는 이유는 그 행에서 고양이가 **움직이지 않기** 때문이다. 꼬리만
+흔들리는데 실루엣의 bounding 중심은 꼬리를 따라가서 12.5px 밀린다. 상단 35% 띠로 재면
+같은 행의 편차가 0.5px로 떨어진다. 반대로 걷기 행에 `head`를 쓰면 머리가 몸보다 앞으로
+나가므로 39.5px가 나온다 — **모든 행에 맞는 단일 측정치는 없다.**
+
 ## 1. 전체 표 — 현재
 
 `매니페스트`는 지금 실제 재생 길이, `Petdex`는 `pet-states.ts`의 표준 길이, `Roamling`은

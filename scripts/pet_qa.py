@@ -12,6 +12,20 @@ component has a whisker or a paw floating beside it. Both are invisible in a
 contact sheet at 100% and obvious in a table of numbers, which is why this
 exists rather than a reviewer squinting at fifty-seven frames.
 
+The centre is checked within a row rather than against the cell's middle. The
+defect this catches is the animal sliding while it animates, which is a
+statement about a frame and its neighbours; a row drawn a pixel off-centre as a
+whole is a different and much smaller problem, so it is checked separately and
+more loosely.
+
+Which measurement means "the body did not move" depends on what the row does,
+and no single one works everywhere. Measured across this pet, the silhouette's
+bounding centre holds within 0.5px on eight of nine rows -- and drifts 12.5px on
+the tail flick, where the cat is provably still and only its tail swings. The
+head band is exact there and useless on a run, where the head lunges 39.5px
+ahead of the body. So the measure is declared per row and defaults to the
+bounding centre.
+
 Exits non-zero when any frame fails, so it can gate a generation loop.
 """
 
@@ -19,12 +33,13 @@ from __future__ import annotations
 
 import argparse
 import sys
-from collections import deque
+from collections import defaultdict, deque
 from pathlib import Path
 
 from PIL import Image
 
 ALPHA_FLOOR = 8
+HEAD_BAND = 0.35
 
 
 class FrameStats:
@@ -47,7 +62,28 @@ class FrameStats:
         self.top = min(ys)
         self.visible_height = self.baseline - self.top + 1
         self.center_x = (min(xs) + max(xs)) / 2
+        self.head_x = self._head_center()
         self.components = self._components()
+
+    def _head_center(self) -> float:
+        """Bounding centre of the top band only.
+
+        A tail, a stretched hind leg or an outflung paw moves the silhouette's
+        bounding centre without moving the animal. The head does not swing, so
+        on rows where something else does, this is what "the body stayed put"
+        actually means.
+        """
+        cut = self.top + round(self.visible_height * HEAD_BAND)
+        xs = [
+            x
+            for y in range(self.top, min(cut + 1, self.height))
+            for x in range(self.width)
+            if self.mask[y][x]
+        ]
+        return (min(xs) + max(xs)) / 2
+
+    def measured(self, measure: str) -> float:
+        return self.head_x if measure == "head" else self.center_x
 
     def _components(self) -> list[int]:
         """Sizes of the 8-connected opaque regions, largest first.
@@ -102,6 +138,22 @@ def load_frames(source: Path, columns: int, rows: int) -> list[tuple[str, Image.
     return frames
 
 
+def row_of(name: str) -> int:
+    """The row a frame name belongs to; a directory of frames is one row."""
+    if not name.startswith("r") or "c" not in name:
+        return -1
+    head = name[1:].split("c")[0]
+    return int(head) if head.isdigit() else -1
+
+
+def median(values: list[float]) -> float:
+    ordered = sorted(values)
+    middle = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[middle]
+    return (ordered[middle - 1] + ordered[middle]) / 2
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("source", type=Path, help="spritesheet, or a directory of frame PNGs")
@@ -116,20 +168,39 @@ def main() -> int:
     parser.add_argument(
         "--center",
         type=float,
-        help="required horizontal centre. Defaults to the cell's own middle.",
+        help="where a row should sit in the cell. Defaults to the cell's own middle.",
     )
-    parser.add_argument("--center-tolerance", type=float, default=1.0)
+    parser.add_argument(
+        "--center-tolerance",
+        type=float,
+        default=1.0,
+        help="how far a frame may sit from its own row's centre",
+    )
+    parser.add_argument(
+        "--row-center-tolerance",
+        type=float,
+        default=3.0,
+        help="how far a whole row may sit from the cell's centre",
+    )
     parser.add_argument("--max-components", type=int, default=1)
     parser.add_argument(
         "--allow-airborne",
         action="append",
         default=[],
-        help="row index whose baseline may move, for a jump or a landing. Repeatable.",
+        help="a row index, or one frame as rRcC, whose baseline may move. Repeatable.",
+    )
+    parser.add_argument(
+        "--center-measure",
+        action="append",
+        default=[],
+        help="ROW=head to judge that row by its head band instead of its "
+        "silhouette, for a row where a tail or a limb swings. Repeatable.",
     )
     args = parser.parse_args()
 
     frames = [
-        (name, FrameStats(name, image)) for name, image in load_frames(args.source, args.columns, args.rows)
+        (name, FrameStats(name, image))
+        for name, image in load_frames(args.source, args.columns, args.rows)
     ]
     frames = [(name, stats) for name, stats in frames if not stats.empty]
     if not frames:
@@ -138,29 +209,78 @@ def main() -> int:
     baselines = sorted(stats.baseline for _, stats in frames)
     baseline = args.baseline if args.baseline is not None else baselines[len(baselines) // 2]
     center = args.center if args.center is not None else (frames[0][1].width - 1) / 2
-    airborne = {int(value) for value in args.allow_airborne}
+
+    # A bare row index exempts the row, as it did before; rRcC exempts one frame,
+    # so a jump's grounded frames stay pinned instead of the whole row going
+    # unchecked because two of its five cells leave the floor.
+    airborne_rows = {int(v) for v in args.allow_airborne if "c" not in v}
+    airborne_frames = {v for v in args.allow_airborne if "c" in v}
+
+    measures: dict[int, str] = {}
+    for item in args.center_measure:
+        key, _, value = item.partition("=")
+        if value not in ("bbox", "head"):
+            raise SystemExit(f"--center-measure {item}: want bbox or head")
+        measures[int(key)] = value
+
+    grouped: dict[int, list[tuple[str, FrameStats]]] = defaultdict(list)
+    for name, stats in frames:
+        grouped[row_of(name)].append((name, stats))
 
     print(f"target  baseline {baseline}  centre {center:.1f}  components <= {args.max_components}")
     if args.baseline is None:
         print("        (baseline taken from the median frame; pass --baseline to fix it)")
     print()
 
-    failures = []
-    for name, stats in frames:
-        row = int(name[1:].split("c")[0]) if name.startswith("r") else -1
-        problems = []
-        if row not in airborne and abs(stats.baseline - baseline) > args.baseline_tolerance:
-            problems.append(f"baseline {stats.baseline:+d}".replace("+", "") + f" (off by {stats.baseline - baseline:+d})")
-        if abs(stats.center_x - center) > args.center_tolerance:
-            problems.append(f"centre {stats.center_x:.1f} (off by {stats.center_x - center:+.1f})")
-        if len(stats.components) > args.max_components:
-            detached = stats.components[args.max_components :]
-            problems.append(f"{len(detached)} detached piece(s), {detached}px")
-        if problems:
-            failures.append((name, problems))
+    failures: list[tuple[str, list[str]]] = []
+    for row in sorted(grouped):
+        entries = grouped[row]
+        measure = measures.get(row, "bbox")
+        row_center = median([stats.measured(measure) for _, stats in entries])
+
+        # A row uniformly off-centre is a placement mistake, not the animal
+        # sliding, so it is one failure against the row rather than one per
+        # frame. Judged on the silhouette either way: a head band is measured
+        # against its own row, not against where other rows put their heads.
+        row_bbox = median([stats.center_x for _, stats in entries])
+        if abs(row_bbox - center) > args.row_center_tolerance:
+            failures.append(
+                (f"r{row}" if row >= 0 else "row", [f"row centre {row_bbox:.1f} (off by {row_bbox - center:+.1f})"])
+            )
+
+        for name, stats in entries:
+            problems = []
+            exempt = row in airborne_rows or name in airborne_frames
+            if not exempt and abs(stats.baseline - baseline) > args.baseline_tolerance:
+                problems.append(
+                    f"baseline {stats.baseline} (off by {stats.baseline - baseline:+d})"
+                )
+            drift = stats.measured(measure) - row_center
+            if abs(drift) > args.center_tolerance:
+                label = "head" if measure == "head" else "centre"
+                problems.append(
+                    f"{label} {stats.measured(measure):.1f} (off row by {drift:+.1f})"
+                )
+            if len(stats.components) > args.max_components:
+                detached = stats.components[args.max_components :]
+                problems.append(f"{len(detached)} detached piece(s), {detached}px")
+            if problems:
+                failures.append((name, problems))
 
     for name, problems in failures:
         print(f"  FAIL {name:10} {'; '.join(problems)}")
+
+    print()
+    for row in sorted(grouped):
+        entries = grouped[row]
+        measure = measures.get(row, "bbox")
+        values = [stats.measured(measure) for _, stats in entries]
+        label = f"r{row}" if row >= 0 else "frames"
+        print(
+            f"  {label:6} {len(entries):2d} frames  {measure:4}"
+            f"  spread {max(values) - min(values):4.1f}px"
+            f"  baseline {min(s.baseline for _, s in entries)}~{max(s.baseline for _, s in entries)}"
+        )
 
     heights = [stats.visible_height for _, stats in frames]
     print()

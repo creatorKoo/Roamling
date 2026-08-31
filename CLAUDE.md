@@ -136,9 +136,13 @@ Swift 런타임 작업. PNG는 직접 읽어 육안 QA할 수 있다.
   설치하지 않는다. 수동 경로가 필요하면 `docs/art/mochi-animation-prompts-ko.md`의
   코드블록을 ChatGPT 이미지에 그대로 복붙한다.
 - **생성한 frame은 합성 전에 QA 게이트를 통과시킨다.**
-  `./scripts/pyimg.sh scripts/pet_qa.py <sheet-or-frames> --baseline 176`이 baseline·중심·
-  detached component를 재고 위반 시 non-zero로 끝난다. 한 프레임의 결함은 육안으로 찾을
-  수 있는 크기가 아니다 — 기존 시트에서 22프레임이 1px 조각을 달고 있었다.
+  `scripts/pet_qa.py`가 baseline·중심·detached component를 재고 위반 시 non-zero로 끝난다.
+  한 프레임의 결함은 육안으로 찾을 수 있는 크기가 아니다 — 기존 시트에서 22프레임이 1px
+  조각을 달고 있었다. `--baseline`은 **마지막 불투명 행**이라 Mochi는 175다(미리보기가
+  긋는 지면선 176과 한 칸 다르다). 면제는 행 단위가 아니라 프레임 단위로 준다 —
+  `--allow-airborne 1`은 달리기 행의 착지 프레임 5장까지 검사에서 빼버린다. 꼬리가
+  흔들리는 행은 실루엣 중심이 12.5px 밀리므로 `--center-measure 8=head`로 머리를 잰다.
+  Mochi v3의 정식 호출은 `docs/art/mochi-v3-plan.md`에 있다.
 
 ## Python
 

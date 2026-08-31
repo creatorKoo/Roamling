@@ -102,7 +102,7 @@ def main() -> None:
     parser.add_argument("--package", action="append", required=True, help="LABEL:path")
     parser.add_argument("-o", "--out", type=Path, required=True)
     parser.add_argument("--scale", type=int, default=2)
-    parser.add_argument("--ground", type=int, default=176)
+    parser.add_argument("--ground", type=int, default=175)
     parser.add_argument("--title", default="palette comparison")
     parser.add_argument("--lede", default="")
     args = parser.parse_args()
