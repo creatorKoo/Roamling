@@ -35,7 +35,7 @@ public enum MascotPetFactory {
     private static let poseDerivedRows = 4
     private static let authoredRows = 7
     private static let standardRows = 9
-    private static let extensionSheetRows = 2
+    private static let extensionSheetRows = 3
 
     private enum Pose: Int {
         case idle
@@ -139,6 +139,11 @@ public enum MascotPetFactory {
                 (3..<7).map { (base + $0, 0.150) })
             tracks["sitting"] = track("sitting", frames:
                 (0..<4).map { (base + columns + $0, 0.600) }, loops: false)
+            // `wake` and `stretch` are one capability, and the player only
+            // restarts a track when the capability changes, so these eight run
+            // straight through both states rather than replaying the first half.
+            tracks["stretching"] = track("stretching", frames:
+                (0..<8).map { (base + columns * 2 + $0, 0.212) }, loops: false)
         }
 
         return PetAsset(
@@ -151,8 +156,8 @@ public enum MascotPetFactory {
             rows: standardRows,
             tracks: tracks,
             behaviorMappings: extensionAtlas == nil ? [:] : [
-                "gaze": "gaze", "sleep": "sleeping",
-                "caught": "caught", "sit": "sitting"
+                "gaze": "gaze", "sleep": "sleeping", "caught": "caught",
+                "sit": "sitting", "stretch": "stretching"
             ],
             extensionAtlas: extensionAtlas,
             extensionColumns: extensionColumns,

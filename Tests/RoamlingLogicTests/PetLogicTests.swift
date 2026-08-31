@@ -323,12 +323,13 @@ func petLogicTests() -> [LogicTest] {
 
             // The extension sheet draws what the nine-row contract has no word
             // for, so the built-in authors these rather than borrowing.
-            try expect(pet.addressableFrameCount == 88, "extension sheet missing")
+            try expect(pet.addressableFrameCount == 96, "extension sheet missing")
             for (capability, name) in [
                 (PetCapability.sleep, "sleeping"),
                 (.sit, "sitting"),
                 (.caught, "caught"),
-                (.gaze, "gaze")
+                (.gaze, "gaze"),
+                (.stretch, "stretching")
             ] {
                 let resolved = pet.resolver.resolution(capability)
                 try expect(resolved.track?.name == name, "\(capability) took \(resolved)")
@@ -342,10 +343,14 @@ func petLogicTests() -> [LogicTest] {
             let sitting = try require(pet.tracks["sitting"])
             try expect(sitting.frames.map(\.index) == Array(80...83))
             try expect(!sitting.loops, "the nod plays once, then the pet walks off")
+            // `stretching` fills the third extension row, one further out again.
+            let stretching = try require(pet.tracks["stretching"])
+            try expect(stretching.frames.map(\.index) == Array(88...95))
+            try expect(!stretching.loops, "waking plays once, then idle takes over")
             // Every extension frame has to land on a drawn cell. The sheet has
             // five spare cells and a wrong index reads one of them: no crash, no
             // warning, just a pet that plays nothing where it should sit down.
-            for name in ["gaze", "sleeping", "caught", "sitting"] {
+            for name in ["gaze", "sleeping", "caught", "sitting", "stretching"] {
                 for frame in try require(pet.tracks[name]).frames {
                     let image = try require(
                         pet.frameImage(at: frame.index),
@@ -359,7 +364,7 @@ func petLogicTests() -> [LogicTest] {
             // so they are pinned here to catch the two drifting apart.
             for (name, seconds) in [
                 ("idle", 1.70), ("sleeping", 2.00), ("caught", 0.60),
-                ("sitting", 2.40), ("gaze", 1.03)
+                ("sitting", 2.40), ("gaze", 1.03), ("stretching", 1.70)
             ] {
                 let total = try require(pet.tracks[name]).frames.reduce(0) { $0 + $1.duration }
                 try expect(
@@ -373,8 +378,7 @@ func petLogicTests() -> [LogicTest] {
             // user, and a drowsy pet is not asking for anything.
             // Nothing here may fall through to the last-resort placeholder.
             for (capability, name, source) in [
-                (PetCapability.dragged, "caught", PetCapability.caught),
-                (.stretch, "idle", .idle)
+                (PetCapability.dragged, "caught", PetCapability.caught)
             ] {
                 let resolved = pet.resolver.resolution(capability)
                 try expect(resolved.track?.name == name, "\(capability) took \(resolved)")

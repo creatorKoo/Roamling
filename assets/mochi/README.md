@@ -38,9 +38,14 @@ read as a bow rather than as reading, and four attempts at a dedicated `gaze`
 row that each grew the cat instead of making it alert. Read those before
 suggesting either again.
 
-## Not finished
+## Three prompts for one row
 
-`stretch` is pending. `rows/stretch/` holds its prompt and the candidates, but
-no row has been approved, so `approvals.json` has no entry for it and the
-extension sheet's cells 84–87 are still empty. Waking still plays the idle row
-for 1.7 seconds.
+`rows/stretch/` keeps all three attempts, because what changed between them is
+the useful part. `prompt.md` returned cats with cream whiskers or none at all.
+`prompt-b.md` opens by naming that failure — "an earlier attempt returned a cat
+with no whiskers at all in its first frame" — and asks for thick solid black;
+every frame came back correct. `prompt-c.md` is the same again at eight frames
+instead of four, after the four-frame version was found to step.
+
+Naming the previous failure in the prompt is what fixed it, twice. That is worth
+copying for the next row.

@@ -3,13 +3,14 @@
   "spritesheetPath": "roamling.webp",
   "frame": {
     "columns": 8,
-    "rows": 2
+    "rows": 3
   },
   "behaviors": {
     "gaze": "gaze",
     "sleep": "sleeping",
     "caught": "caught",
-    "sit": "sitting"
+    "sit": "sitting",
+    "stretch": "stretching"
   },
   "animations": {
     "gaze": {
@@ -51,6 +52,20 @@
         83
       ],
       "fps": 1.667,
+      "loop": false
+    },
+    "stretching": {
+      "frames": [
+        88,
+        89,
+        90,
+        91,
+        92,
+        93,
+        94,
+        95
+      ],
+      "fps": 4.706,
       "loop": false
     }
   }

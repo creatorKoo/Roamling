@@ -37,18 +37,24 @@ Both webp files here are the shipped `mochi-v3` package, copied in on
 Each row was reviewed and approved on its own before the next was drawn, and the
 approval record with the reasoning for each is `output/v3/approvals.json`.
 
-`mochi-extension-atlas.webp` is that package's `roamling.json` sheet: 8×2, whose
+`mochi-extension-atlas.webp` is that package's `roamling.json` sheet: 8×3, whose
 cells continue the frame index past the package grid, so cell 72 is index 72.
 It draws what the nine-row contract has no word for — sleeping curled on the
-ground (72–74), being carried (75–78), and nodding off (80–83). `gaze` is in the
-same manifest but draws nothing: it plays the package's own review row faster the
-closer the pointer gets.
+ground (72–74), being carried (75–78), nodding off (80–83), and the waking
+stretch (88–95). `gaze` is in the same manifest but draws nothing: it plays the
+package's own review row faster the closer the pointer gets.
 
-So Mochi borrows only three things now. `dragged` takes the caught pose,
-`stretch` takes idle, and `landing` takes the jumping row on purpose. `sit` and
-`sleep` used to fall back to `waiting`, which means "blocked on the user", and a
-drowsy pet looked like it was asking for approval; they now have their own rows
-here and fall back to idle elsewhere.
+So Mochi borrows only two things now, both on purpose: `dragged` takes the caught
+pose, and `landing` takes the jumping row. `sit` and `sleep` used to fall back to
+`waiting`, which means "blocked on the user", and a drowsy pet looked like it was
+asking for approval; they now have their own rows here and fall back to idle
+elsewhere.
+
+`stretching` is the row that joins two others — it leaves the curl `sleeping`
+ends on and arrives at the seat `idle` begins from, so both ends had to match
+their neighbours. `wake` and `stretch` are one capability and the player only
+rewinds on a capability change, so its eight frames run straight through both
+states rather than replaying.
 
 The factory writes out two tracks the standard set gets wrong for this art. Idle
 overrides the standard 1.10s: its six frames are one long hold and a blink, so
