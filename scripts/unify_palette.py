@@ -157,6 +157,19 @@ def main() -> None:
     parser.add_argument("package", type=Path)
     parser.add_argument("--out", type=Path, help="write here instead of in place")
     parser.add_argument("--report", action="store_true", help="print the table, change nothing")
+    parser.add_argument(
+        "--only",
+        action="append",
+        default=[],
+        help="correct only these rows, by the label the report prints "
+        "(e.g. roamling[1]). Rows already approved then stay byte-identical.",
+    )
+    parser.add_argument(
+        "--deadzone",
+        type=int,
+        default=2,
+        help="leave a family alone when its anchor is already this close",
+    )
     args = parser.parse_args()
 
     sheets = sheets_of(args.package)
@@ -190,17 +203,37 @@ def main() -> None:
 
     destination = args.out or args.package
     destination.mkdir(parents=True, exist_ok=True)
+    if args.only:
+        known = {label for label, _ in measured}
+        unknown = set(args.only) - known
+        if unknown:
+            raise SystemExit(f"no such row: {', '.join(sorted(unknown))}")
     cursor = 0
     for path, image, rows in images:
         height = image.height // rows
         result = Image.new("RGBA", image.size)
         for index, band in enumerate(bands_of(image, rows)):
-            found = measured[cursor + index][1]
-            deltas = {
-                name: tuple(targets[name][i] - found[name][i] for i in range(3))
-                for name in found
-                if name in targets
-            }
+            label, found = measured[cursor + index]
+            if args.only and label not in args.only:
+                result.paste(band, (0, index * height))
+                continue
+            # Every measured family stays an anchor even when it is not being
+            # moved. Dropping the settled ones instead hands their pixels to
+            # whichever other family is nearest, which applies somebody else's
+            # correction to them -- the pass then moves 233,337 pixels of an
+            # already-correct sheet.
+            deltas = {}
+            for name in found:
+                if name not in targets:
+                    continue
+                shift = tuple(targets[name][i] - found[name][i] for i in range(3))
+                # Anchors are the mode of a colour cloud, itself good to a level
+                # or two. Chasing that last level makes the pass non-idempotent:
+                # a second run moved another 196,824 pixels and never settled,
+                # so the sheet would depend on how many times the tool had run.
+                deltas[name] = (
+                    (0, 0, 0) if max(abs(v) for v in shift) <= args.deadzone else shift
+                )
             result.paste(translate(band, deltas, found), (0, index * height))
         cursor += rows
         result.save(destination / path.name, lossless=True)
