@@ -98,9 +98,17 @@ public extension PetCapability {
         switch self {
         case .idle: nil
         case .moveLeft, .moveRight: .motion(.idle)
-        // Sitting down borrows the seated, expectant pose, which is as close as
-        // an agent pet gets to settling.
-        case .sit: .meaning(.paw)
+        // Settling down goes to `idle` -- "between events" -- rather than to
+        // `waiting`, whose contract meaning is "blocked on the user: approval
+        // or input". A drowsy pet has not asked for anything, and borrowing
+        // `waiting` put the picture for needing approval on screen every time
+        // one got sleepy, on every Petdex pet rather than just this one.
+        //
+        // The seated pose `waiting` happens to have is not a reason to keep it:
+        // Petdex fixes what a row means and leaves the pose to whoever draws
+        // the pet, so a pet whose `waiting` is drawn standing would be no worse
+        // served by `idle`, and every pet is better served by the right signal.
+        case .sit: .meaning(.idle)
         case .sleep: .meaning(.sit)
         case .work: .motion(.moveRight)
         case .observe: .meaning(.idle)

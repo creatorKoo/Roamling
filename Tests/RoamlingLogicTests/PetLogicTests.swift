@@ -127,9 +127,10 @@ func petLogicTests() -> [LogicTest] {
             try expect(pet.frameImage(at: 0) != nil)
             try expect(pet.frameImage(at: 87) != nil)
             try expect(pet.resolver.resolve(.sleep)?.name == "sleeping")
-            // A seated pose is a better sit than a standing one, and the chain
-            // finds it without anyone naming the pair for this capability.
-            try expect(pet.resolver.resolve(.sit)?.name == "waiting")
+            // Settling goes to `idle` rather than `waiting`: a pose that
+            // happens to be seated is not worth broadcasting "blocked on the
+            // user" every time the pet gets sleepy.
+            try expect(pet.resolver.resolve(.sit)?.name == "idle")
         },
         LogicTest(name: "built-in mascots load with semantic tracks") {
             try expect(MascotPetFactory.make().manifest.displayName == "FatMochi")
@@ -322,10 +323,12 @@ func petLogicTests() -> [LogicTest] {
 
             // A Codex pet never sleeps, sits down to rest, stretches, or gets
             // picked up, so those are borrowed on purpose and reported as such.
+            // Resting borrows `idle`, not `waiting`: `waiting` means blocked on
+            // the user, and a drowsy pet is not asking for anything.
             // Nothing here may fall through to the last-resort placeholder.
             for (capability, name, source) in [
-                (PetCapability.sit, "waiting", PetCapability.paw),
-                (.sleep, "waiting", .paw),
+                (PetCapability.sit, "idle", PetCapability.idle),
+                (.sleep, "idle", .idle),
                 (.caught, "waiting", .paw),
                 (.dragged, "waiting", .paw),
                 (.stretch, "idle", .idle),
@@ -629,7 +632,8 @@ func petLogicTests() -> [LogicTest] {
             let pet = try PetLoader().load(packageAt: fixture.url)
             try expect(pet.warnings.count == 1, "\(pet.warnings)")
             // A pet from the future still renders with what this build knows.
-            try expect(pet.resolver.resolve(.sleep)?.name == "waiting")
+            // Sleep chains through `sit`, which now settles on `idle`.
+            try expect(pet.resolver.resolve(.sleep)?.name == "idle")
         },
         LogicTest(name: "the Petdex vocabulary grounds every capability") {
             // Nine capabilities mean exactly one Petdex row, and no row is

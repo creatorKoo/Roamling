@@ -211,7 +211,7 @@ requested capability
 예:
 
 ```text
-sleep      -> sleeping -> (sit) -> (paw) waiting -> idle
+sleep      -> sleeping -> (sit) -> idle
 work       -> working / typing -> running -> idle
 observe    -> observe -> review -> idle
 celebrate  -> celebrate -> waving -> idle

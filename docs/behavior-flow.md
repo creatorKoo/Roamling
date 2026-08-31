@@ -44,7 +44,8 @@ Petdex 행을 그대로 뜻하고, 나머지 7종은 Petdex에 개념이 없는 
 | `celebrate` | `celebrate` | row 3 `waving` | 앞발 들어 인사 (4프레임) | authored |
 | `sad` | `fail` | row 5 `failed` | 축 처지는 8프레임 | authored |
 | `lookAtPointer` | `gaze` | row 0 `idle` | ↑ idle과 **같은 그림** | substituted |
-| `sit` `sleep` `caught` `dragged` | `sit` `sleep` `caught` `dragged` | row 6 `waiting` | ↑ `paw`와 **같은 그림** | substituted |
+| `sit` `sleep` | `sit` `sleep` | row 0 `idle` | ↑ idle과 **같은 그림** | substituted |
+| `caught` `dragged` | `caught` `dragged` | row 6 `waiting` | ↑ `paw`와 **같은 그림** | substituted |
 | `wake` `stretch` | `stretch` | row 0 `idle` | ↑ idle과 **같은 그림** | substituted |
 | `dropped` | `landing` | row 4 `jumping` | ↑ `spark`와 **같은 그림** | substituted |
 
@@ -54,22 +55,24 @@ authored 9 · substituted 7 · placeholder 0. **아홉 행이 전부 쓰인다**
 ### 확장 시트가 바꾸는 것
 
 위 표는 **Petdex 9행만 있는 패키지**의 결과다. `roamling.json`이 있으면 그 위에 얹힌다.
-Mochi v3는 세 항목을 확장 시트에서 직접 그린다.
+Mochi v3는 네 항목을 확장 시트에서 직접 그린다.
 
 | 상태 | capability | 확장 후 재생되는 행 | 그 그림 |
 |---|---|---|---|
 | `lookAtPointer` | `gaze` | row 8 `review` 프레임을 **커서 거리에 따라 1.0~2.0배속** | 꼬리 흔들기 — 가까울수록 빨라진다 |
 | `sleep` | `sleep` | 확장 `sleeping` 3프레임 | 바닥에 웅크려 숨쉬기 |
 | `caught` | `caught` | 확장 `caught` 4프레임 | 목덜미 잡혀 뒷다리 접힌 자세 |
+| `sit` | `sit` | 확장 `sitting` 4프레임 | 앉은 채 눈 감기다 꾸벅 |
 
-`sit`과 `dragged`는 **아직 `waiting`을 빌린다.** `waiting`의 계약상 뜻은
-"사용자에게 막힘 — 승인이나 입력 대기"이므로, 졸려서 앉는 펫이 승인을 조르는 그림을
-띄우는 셈이다. 남은 간극은 `docs/art/mochi-v3-plan.md`의 `sitting` 절에 적혀 있다.
+확장 넷이 들어오면서 row 6이 감당하는 상태는 다섯(승인 대기·앉기·잠·잡힘·끌림)에서
+둘(승인 대기·끌림)로 줄었다. 남은 대체는 `dragged`·`stretch`·`landing` 셋이고 **전부
+의도된 대여다** — `stretch`는 idle에서 이어지는 회복, `landing`은 점프 프레임, `dragged`는
+잡힌 자세 그대로다. 더 그릴 행은 없다.
 
-확장 셋이 들어오면서 row 6이 감당하는 상태는 다섯(승인 대기·앉기·잠·잡힘·끌림)에서
-셋(승인 대기·앉기·끌림)으로 줄었다. 남은 대체는 `sit`·`dragged`·`stretch`·`landing`
-넷이고, 이 중 그림이 필요한 것은 `sit` 하나다 — `stretch`는 idle에서 이어지는 회복이고
-`landing`은 점프 프레임을 의도적으로 빌린다.
+Petdex 9행만 있는 패키지에서 `sit`은 `waiting`이 아니라 **`idle`을 빌린다.** `waiting`의
+계약상 뜻이 "사용자에게 막힘 — 승인이나 입력 대기"라, 졸린 펫이 승인을 조르는 신호를
+띄우기 때문이다. `waiting`이 마침 앉은 자세인 것은 근거가 못 된다 — Petdex는 행의 뜻만
+고정하고 포즈는 펫을 그리는 사람에게 맡긴다.
 
 
 ## 3. 흐름 A — 아무 일도 없을 때
@@ -81,7 +84,7 @@ idle (row 0, 앉아서 깜박)
  │   (wanderPause 12 × 0.7~1.45)      │
  │                                    └─ 목적지 도착 ──▶ idle
  │
- └─ 사용자 입력이 75초 없음 ────▶ sit (row 6 대체, 앉아서 위 보기)
+ └─ 사용자 입력이 75초 없음 ────▶ sit (확장 sitting, 꾸벅)
      + 커서가 170px 밖                │
      + 이동 중 아님                   └─ 2.4초 뒤 ──▶ findSleepSpot (row 1/2, 0.75배속 걷기)
                                                         │  안전지대까지 걸어감

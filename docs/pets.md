@@ -101,7 +101,7 @@ degrade되는지**를 지목하고, 이름 목록에는 **그 capability를 뜻�
 
 ```mermaid
 flowchart LR
-    sleep --> sit --> paw --> idle
+    sleep --> sit --> idle
     stretch --> idle
     work --> moveRight --> idle
     observe --> idle

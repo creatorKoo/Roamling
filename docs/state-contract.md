@@ -115,20 +115,20 @@ resolver는 이 선언에서 후보를 **생성한다.** 손으로 쓴 이름 �
 | `spark` (신설) | `.petdex(.jumping)` | **시작 신호** | 없음 |
 | `landing` | `.motion(.spark)` | 진짜 hop | ✗ `celebrate` 경유 |
 | `gaze` (신설) | `.meaning(.idle)` | 커서 응시 — L0에 개념 없음 | ✗ `review` 대여 |
-| `sit` | `.meaning(.paw)` | 앉은 기대 자세 | 같음 |
+| `sit` | `.meaning(.idle)` | 이벤트 사이의 중립 | ✗ `paw` 대여 |
 | `sleep` | `.meaning(.sit)` | | 같음 |
 | `stretch` | `.motion(.idle)` | | 같음 |
 | `caught` | `.meaning(.paw)` | 올려다보는 자세 | 같음 |
 | `dragged` | `.meaning(.caught)` | | 같음 |
 
-바뀐 건 넷이고 그중 둘은 신설이다. 설치된 `mochi-v2`에서의 결과.
+바뀐 건 다섯이고 그중 둘은 신설이다. 설치된 `mochi-v2`에서의 결과.
 
 ```text
 idle      -> idle          [authored]     gaze      -> idle    [substituted(idle)]
 moveLeft  -> running-left  [authored]     paw       -> waiting [authored]
 moveRight -> running-right [authored]     spark     -> jumping [authored]
-sit       -> waiting  [substituted(paw)]  celebrate -> waving  [authored]
-sleep     -> waiting  [substituted(paw)]  fail      -> failed  [authored]
+sit       -> idle     [substituted(idle)] celebrate -> waving [authored]
+sleep     -> idle     [substituted(idle)] fail      -> failed [authored]
 work      -> running       [authored]     stretch   -> idle    [substituted(idle)]
 observe   -> review        [authored]     caught·dragged -> waiting [substituted(paw)]
                                           landing   -> jumping [substituted(spark)]
