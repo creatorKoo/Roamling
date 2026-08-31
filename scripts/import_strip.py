@@ -187,6 +187,12 @@ def main() -> None:
         default=0,
         help="scale to this width across the haunches instead of to --height",
     )
+    parser.add_argument(
+        "--area",
+        type=int,
+        default=0,
+        help="scale to this many opaque pixels; for poses that change shape",
+    )
     parser.add_argument("--baseline", type=int, default=175)
     parser.add_argument("--centre", type=float, default=95.5)
     parser.add_argument("--slack", type=int, default=40, help="chroma key margin")
@@ -249,8 +255,18 @@ def main() -> None:
         ]
         return max(columns) - min(columns) + 1
 
+    def area(frame: Image.Image) -> int:
+        mask = frame.getchannel("A").point(lambda v: 255 if v > 8 else 0)
+        return sum(1 for value in mask.getdata() if value)
+
     chosen = frames[max(args.scale_frame, 0)]
-    if args.body_width:
+    if args.area:
+        # For a pose that changes the cat's shape rather than its size -- curled
+        # asleep, carried, stretched -- neither height nor haunch width survives
+        # as a yardstick. How much cat there is does: a cat that curls up does
+        # not lose mass. Scale is the square root because area grows with it.
+        scale = (args.area / area(chosen)) ** 0.5
+    elif args.body_width:
         # Total height is the wrong yardstick when a pose changes how much of it
         # is ear. Pricked ears made one strip scale down until its head was 13%
         # smaller than the approved one, which reads as a different cat -- so the

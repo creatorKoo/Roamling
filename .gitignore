@@ -7,3 +7,4 @@ DerivedData/
 output/
 *.p12
 scripts/signing.env
+__pycache__/
