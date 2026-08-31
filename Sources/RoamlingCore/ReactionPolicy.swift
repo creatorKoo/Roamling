@@ -59,7 +59,10 @@ public struct ReactionPolicy: Sendable {
         let result: CompanionReaction?
         switch event.kind {
         case .attentionRequired:
-            result = roll < 0.65 ? .paw : .observe
+            // Always the paw. Petdex answers an approval prompt with `waiting`
+            // and holds it until the user replies; rolling a third of these into
+            // `observe` meant the pet sometimes never asked at all.
+            result = .paw
         case .negative, .setback:
             result = effectiveIntensity >= 0.2 ? .sad : .glance
         case .achievement:
@@ -82,7 +85,13 @@ public struct ReactionPolicy: Sendable {
             } else {
                 result = nil
             }
-        case .activityStarted, .highIntensity:
+        case .activityStarted:
+            // A turn opening is a start, not a stare. Petdex plays `jumping`
+            // here, which Roamling reaches through `spark`.
+            result = .spark
+        case .inspecting:
+            result = .observe
+        case .highIntensity:
             result = effectiveIntensity >= 0.5 ? .work : .observe
         case .calm:
             result = .calm

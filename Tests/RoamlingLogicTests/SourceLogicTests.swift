@@ -22,7 +22,7 @@ func sourceLogicTests() -> [LogicTest] {
             let event = try require(try ClaudeCodeEventNormalizer.event(from: data, timestamp: 12))
             try expect(event.sourceID == "claude-code:session-1")
             try expect(event.sourceType == .agent)
-            try expect(event.kind == .activityStarted)
+            try expect(event.kind == .highIntensity)
             try expectNear(event.intensity, 0.72)
             try expect(event.context == .working)
             try expect(event.metadata.isEmpty)
@@ -178,7 +178,7 @@ func sourceLogicTests() -> [LogicTest] {
             """#.utf8)
             let event = try require(try CodexEventNormalizer.event(from: data, timestamp: 21))
             try expect(event.sourceID == "codex:thread-1")
-            try expect(event.kind == .activityStarted)
+            try expect(event.kind == .highIntensity)
             try expectNear(event.intensity, 0.72)
             try expect(event.context == .working)
             try expect(event.metadata.isEmpty)
@@ -611,7 +611,52 @@ func sourceLogicTests() -> [LogicTest] {
             var dragged = BehaviorController(state: .dragged, enteredAt: 0)
             dragged.handle(.beginRest, at: 1)
             try expect(dragged.state == .dragged)
-        }
+        },
+        LogicTest(name: "reading and searching are told apart from doing") {
+            // Petdex splits `pre` by tool: read, grep and glob draw `review`,
+            // everything else draws `running`. Only the name is read.
+            func kinds(_ tool: String) throws -> (CompanionEventKind?, CompanionEventKind?) {
+                let data = Data("""
+                {"session_id":"s","hook_event_name":"PreToolUse","tool_name":"\(tool)"}
+                """.utf8)
+                return (
+                    try ClaudeCodeEventNormalizer.event(from: data, timestamp: 1)?.kind,
+                    try CodexEventNormalizer.event(from: data, timestamp: 1)?.kind
+                )
+            }
+            for tool in ["Read", "grep", "Glob"] {
+                let (claude, codex) = try kinds(tool)
+                try expect(claude == .inspecting, "claude \(tool) gave \(String(describing: claude))")
+                try expect(codex == .inspecting, "codex \(tool) gave \(String(describing: codex))")
+            }
+            for tool in ["Edit", "Bash", "WebFetch"] {
+                let (claude, codex) = try kinds(tool)
+                try expect(claude == .highIntensity, "claude \(tool) gave \(String(describing: claude))")
+                try expect(codex == .highIntensity, "codex \(tool) gave \(String(describing: codex))")
+            }
+            // A hook that omits the name is doing something, not reading.
+            let unnamed = Data(#"{"session_id":"s","hook_event_name":"PreToolUse"}"#.utf8)
+            let fallback = try ClaudeCodeEventNormalizer.event(from: unnamed, timestamp: 1)?.kind
+            try expect(fallback == .highIntensity)
+        },
+        LogicTest(name: "a turn opening is an activity start, not a tool call") {
+            // `activityStarted` now means exactly what Petdex draws as `jumping`:
+            // the turn opened. Tool calls carry `highIntensity` or `inspecting`.
+            func kind(_ name: String, codex: Bool) throws -> CompanionEventKind? {
+                let data = Data("{\"session_id\":\"s\",\"hook_event_name\":\"\(name)\"}".utf8)
+                return codex
+                    ? try CodexEventNormalizer.event(from: data, timestamp: 1)?.kind
+                    : try ClaudeCodeEventNormalizer.event(from: data, timestamp: 1)?.kind
+            }
+            for name in ["SessionStart", "UserPromptSubmit"] {
+                let claude = try kind(name, codex: false)
+                let codex = try kind(name, codex: true)
+                try expect(claude == .activityStarted, "claude \(name) gave \(String(describing: claude))")
+                try expect(codex == .activityStarted, "codex \(name) gave \(String(describing: codex))")
+            }
+            let subagent = try kind("SubagentStart", codex: true)
+            try expect(subagent == .highIntensity, "subagent start gave \(String(describing: subagent))")
+        },
     ]
 }
 

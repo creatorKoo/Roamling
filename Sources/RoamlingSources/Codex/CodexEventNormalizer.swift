@@ -23,11 +23,14 @@ public struct CodexHookPayload: Decodable, Sendable {
     public let sessionID: String
     public let turnID: String?
     public let event: CodexHookEvent
+    /// The tool's name only, matched against a fixed list. See `ToolActivity`.
+    public let toolName: String?
 
     private enum CodingKeys: String, CodingKey {
         case sessionID = "session_id"
         case turnID = "turn_id"
         case hookEventName = "hook_event_name"
+        case toolName = "tool_name"
     }
 
     public init(from decoder: Decoder) throws {
@@ -43,18 +46,21 @@ public struct CodexHookPayload: Decodable, Sendable {
             )
         }
         self.event = event
+        toolName = try container.decodeIfPresent(String.self, forKey: .toolName)
     }
 }
 
-/// Reads only lifecycle identifiers. Prompt text, transcript paths, tool
-/// input/output, source code, and assistant messages are intentionally absent.
+/// Reads only lifecycle identifiers and the tool's name. Prompt text, transcript
+/// paths, tool input/output, source code, and assistant messages are
+/// intentionally absent. The name is matched against `ToolActivity`'s fixed list
+/// so the pet can tell reading from doing, which is the split Petdex draws.
 public enum CodexEventNormalizer {
     public static func event(
         from data: Data,
         timestamp: TimeInterval
     ) throws -> CompanionEvent? {
         let payload = try JSONDecoder().decode(CodexHookPayload.self, from: data)
-        guard let mapping = mapping(for: payload.event) else { return nil }
+        guard let mapping = mapping(for: payload) else { return nil }
         return CompanionEvent(
             sourceID: "codex:\(payload.sessionID)",
             sourceType: .agent,
@@ -66,15 +72,17 @@ public enum CodexEventNormalizer {
     }
 
     private static func mapping(
-        for event: CodexHookEvent
+        for payload: CodexHookPayload
     ) -> (kind: CompanionEventKind, intensity: Double)? {
-        switch event {
+        switch payload.event {
         case .sessionStart:
             (.activityStarted, 0.35)
         case .userPromptSubmit:
             (.activityStarted, 0.55)
         case .preToolUse:
-            (.activityStarted, 0.72)
+            ToolActivity.isInspecting(payload.toolName)
+                ? (.inspecting, 0.45)
+                : (.highIntensity, 0.72)
         case .postToolUse:
             (.positive, 0.08)
         case .permissionRequest:
@@ -83,8 +91,10 @@ public enum CodexEventNormalizer {
             (.achievement, 0.55)
         case .sessionEnd:
             (.activityEnded, 0.1)
+        // Petdex shows `running` for a subagent starting: it is work under way,
+        // not the opening of a turn.
         case .subagentStart:
-            (.activityStarted, 0.3)
+            (.highIntensity, 0.3)
         case .subagentStop:
             (.positive, 0.12)
         case .preCompact, .postCompact:

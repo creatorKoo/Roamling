@@ -96,6 +96,9 @@ public struct AttentionModel: Sendable {
         case .achievement: base = event.intensity >= 0.75 ? 80 : 65
         case .positive: base = 65
         case .highIntensity: base = 75
+        // Reading and searching is work worth standing beside, but it is the
+        // quietest kind, so it sits below a tool that changes something.
+        case .inspecting: base = 60
         case .activityStarted: base = 50
         case .calm: base = 30
         case .activityEnded, .idle: base = 0

@@ -18,6 +18,7 @@ public enum BehaviorState: String, CaseIterable, Codable, Hashable, Sendable {
     case stretch
     case travelToInterest
     case observe
+    case spark
     case work
     case waitingForUser
     case celebrate
@@ -27,12 +28,30 @@ public enum BehaviorState: String, CaseIterable, Codable, Hashable, Sendable {
 public enum CompanionReaction: String, Codable, Hashable, Sendable {
     case glance
     case observe
+    /// The agent just started a turn. Petdex plays `jumping` here and calls it
+    /// "Thinking…", so Roamling does the same rather than staring.
+    case spark
     case work
     case paw
     case smallCelebrate
     case largeCelebrate
     case sad
     case calm
+}
+
+public extension CompanionReaction {
+    /// True when the reaction describes a condition that lasts, rather than a
+    /// moment that passes.
+    ///
+    /// Only these may be re-applied while the pet holds a seat beside a working
+    /// agent. Re-applying a moment every tick is how a one-second "reading a
+    /// file" beat turned into a loop that ran for as long as the session did.
+    var isOngoing: Bool {
+        switch self {
+        case .work, .paw: true
+        case .glance, .observe, .spark, .smallCelebrate, .largeCelebrate, .sad, .calm: false
+        }
+    }
 }
 
 public enum BehaviorInput: Equatable, Sendable {
@@ -126,6 +145,7 @@ public struct BehaviorController: Sendable {
             switch reaction {
             case .glance: transition(to: .observe, at: timestamp)
             case .observe: transition(to: .observe, at: timestamp)
+            case .spark: transition(to: .spark, at: timestamp)
             case .work: transition(to: .work, at: timestamp)
             case .paw: transition(to: .waitingForUser, at: timestamp)
             case .smallCelebrate, .largeCelebrate: transition(to: .celebrate, at: timestamp)
@@ -161,18 +181,26 @@ public struct BehaviorController: Sendable {
     private mutating func settleTransientState(at timestamp: TimeInterval) {
         let age = timestamp - enteredAt
         switch state {
-        case .dropped where age >= 0.35:
+        case .dropped where age >= BehaviorTiming.dropped:
             transition(to: .idle, at: timestamp)
-        case .wake where age >= 0.7:
+        case .wake where age >= BehaviorTiming.wake:
             transition(to: .stretch, at: timestamp)
-        case .stretch where age >= 1.0:
+        case .stretch where age >= BehaviorTiming.stretch:
             transition(to: .idle, at: timestamp)
-        case .celebrate where age >= 2.2:
+        case .celebrate where age >= BehaviorTiming.celebrate:
             transition(to: .idle, at: timestamp)
-        case .sad where age >= 1.5:
+        case .sad where age >= BehaviorTiming.sad:
             transition(to: .idle, at: timestamp)
-        case .waitingForUser where age >= 1.2:
-            transition(to: .observe, at: timestamp)
+        // `.waitingForUser` deliberately has no timer. Petdex classes `waiting`
+        // as a steady state -- the agent is blocked on the user, so the pet keeps
+        // asking until the user answers and the next hook event arrives. The 1.2s
+        // hand-off to `.observe` used to mean the picture the user actually stared
+        // at during an approval prompt was `review`, not the paw.
+        case .spark where age >= BehaviorTiming.spark:
+            transition(to: .idle, at: timestamp)
+        case .observe where age >= BehaviorTiming.observe:
+            // `review` is a Petdex duration state: it plays once and hands back.
+            transition(to: .idle, at: timestamp)
         default:
             break
         }

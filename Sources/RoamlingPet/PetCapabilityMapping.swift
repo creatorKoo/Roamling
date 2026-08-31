@@ -22,8 +22,16 @@ public enum PetCapabilityMapping {
             return velocityDX < 0 ? .moveLeft : .moveRight
         case .sit:
             return .sit
-        case .lookAtPointer, .observe:
+        // Watching the cursor and reviewing a file are different pictures. They
+        // shared `observe` -- and so shared Petdex's `review` row, a one-second
+        // "about to read a file" beat -- which is how a cursor drifting past the
+        // pet started a loop that ran until something else interrupted it.
+        case .lookAtPointer:
+            return .gaze
+        case .observe:
             return .observe
+        case .spark:
+            return .spark
         case .caught:
             return .caught
         case .dragged:

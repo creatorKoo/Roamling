@@ -3,6 +3,14 @@
 
 import Foundation
 
+/// What Roamling asks to be shown. A superset of `PetdexState`: nine of these
+/// mean exactly one Petdex row, and the rest are desktop-pet ideas the Petdex
+/// contract has no word for.
+///
+/// Every case declares which it is -- `petdexState` for the nine, `borrows` for
+/// the rest -- and the resolver reads those declarations instead of a table of
+/// track names. A bare name list cannot say that `jumping` opens a turn, which
+/// is how celebrate came to play it.
 public enum PetCapability: String, CaseIterable, Codable, Hashable, Sendable {
     case idle
     case moveLeft
@@ -11,13 +19,110 @@ public enum PetCapability: String, CaseIterable, Codable, Hashable, Sendable {
     case sleep
     case work
     case observe
+    case gaze
     case paw
+    case spark
     case celebrate
     case fail
     case stretch
     case caught
     case dragged
     case landing
+}
+
+public extension PetCapability {
+    /// How a capability finds artwork when it has none of its own.
+    ///
+    /// The two borrowing kinds read the same to the resolver and differently to
+    /// a person, which is the point: `landing` wants the *hop*, `celebrate`
+    /// wants the *sentiment*. Recording only "falls back to" is how landing
+    /// ended up chained behind celebrate, so that fixing celebrate's meaning
+    /// would have turned every landing into a farewell wave.
+    enum Borrow: Equatable, Sendable {
+        /// Borrow what it says (a finished turn is greeted, so celebrate waves).
+        case meaning(PetCapability)
+        /// Borrow what it does (a landing really is a hop).
+        case motion(PetCapability)
+
+        public var capability: PetCapability {
+            switch self {
+            case let .meaning(value), let .motion(value): value
+            }
+        }
+    }
+
+    /// The Petdex row this capability *is*, or nil when Petdex has no such idea.
+    var petdexState: PetdexState? {
+        switch self {
+        case .idle: .idle
+        case .moveLeft: .runningLeft
+        case .moveRight: .runningRight
+        case .work: .running
+        case .observe: .review
+        case .paw: .waiting
+        case .spark: .jumping
+        case .celebrate: .waving
+        case .fail: .failed
+        case .sit, .sleep, .gaze, .stretch, .caught, .dragged, .landing: nil
+        }
+    }
+
+    /// Names a package may use for this capability under its own vocabulary.
+    /// Tried before the Petdex row name, so a package that draws the real thing
+    /// always wins over a borrowed row.
+    var authoredNames: [String] {
+        switch self {
+        case .idle: ["idle"]
+        case .moveLeft: []
+        case .moveRight: []
+        case .sit: ["sitting", "sit"]
+        case .sleep: ["sleeping", "sleep", "napping"]
+        case .work: ["working", "typing"]
+        case .observe: ["observe"]
+        // Watching the cursor is not reviewing a file. `watching` is the name a
+        // Roamling-aware package uses for it; `review` deliberately is not.
+        case .gaze: ["gaze", "watching", "looking"]
+        case .paw: ["pawing", "paw"]
+        case .spark: ["spark"]
+        case .celebrate: ["celebrate"]
+        case .fail: []
+        case .stretch: ["stretching", "stretch"]
+        case .caught: ["caught"]
+        case .dragged: ["dragged"]
+        case .landing: ["landing"]
+        }
+    }
+
+    /// What to fall back to, and in which sense.
+    var borrows: Borrow? {
+        switch self {
+        case .idle: nil
+        case .moveLeft, .moveRight: .motion(.idle)
+        // Sitting down borrows the seated, expectant pose, which is as close as
+        // an agent pet gets to settling.
+        case .sit: .meaning(.paw)
+        case .sleep: .meaning(.sit)
+        case .work: .motion(.moveRight)
+        case .observe: .meaning(.idle)
+        // Petdex has no picture for watching the cursor for as long as it is
+        // near, so this degrades to stillness rather than to `review`, which is
+        // a one-second "reading a file" beat.
+        case .gaze: .meaning(.idle)
+        case .paw: .meaning(.idle)
+        case .spark: .meaning(.celebrate)
+        case .celebrate: .meaning(.idle)
+        case .fail: .meaning(.idle)
+        case .stretch: .motion(.idle)
+        // A held pet looking up at the cursor reads as held. A jump does not:
+        // it loops, so while the cursor carries the pet it looks like the pet
+        // is bouncing under its own power, which is the opposite of caught.
+        case .caught: .meaning(.paw)
+        case .dragged: .meaning(.caught)
+        // Landing is the one that really is a hop, so it takes the jump row
+        // directly instead of routing through celebrate, which now waves.
+        case .landing: .motion(.spark)
+        }
+    }
 }
 
 public struct PetAnimationFrame: Equatable, Sendable {
@@ -115,17 +220,12 @@ public struct AnimationResolver: Sendable {
         var step = capability
         while !seen.contains(step) {
             seen.insert(step)
-            var candidates: [String] = []
-            if let explicit = explicitBehaviors[step.rawValue] {
-                candidates.append(explicit)
-            }
-            candidates.append(contentsOf: Self.candidates[step] ?? [])
-            for name in candidates {
+            for name in Self.candidates(for: step, explicit: explicitBehaviors) {
                 if let resolved = resolveTrack(named: name, visited: []) {
                     return (resolved, step == capability ? .authored : .substituted(step))
                 }
             }
-            guard let next = Self.degradesInto[step] else { break }
+            guard let next = step.borrows?.capability else { break }
             step = next
         }
         // A package with nothing recognisable still has to render something, or
@@ -174,51 +274,23 @@ public struct AnimationResolver: Sendable {
         return resolveTrack(named: fallback, visited: nextVisited)
     }
 
-    /// What each capability falls back to when the package does not author it.
+    /// Every track name that answers for one capability, best first.
     ///
-    /// The Petdex table is nine agent states -- idle, both running rows,
-    /// waving, jumping, failed, waiting, running, review -- and a Codex pet
-    /// never sleeps, sits still to rest, stretches, or gets picked up. Those
-    /// belong to a desktop pet, so no package will ever supply them and the
-    /// substitution has to be deliberate rather than accidental.
-    private static let degradesInto: [PetCapability: PetCapability] = [
-        .sleep: .sit,
-        // Sitting down borrows the seated, expectant pose, which is as close as
-        // an agent pet gets to settling.
-        .sit: .paw,
-        .stretch: .idle,
-        // A held pet looking up at the cursor reads as held. A jump does not:
-        // it loops, so while the cursor carries the pet it looks like the pet
-        // is bouncing under its own power, which is the opposite of caught.
-        .caught: .paw,
-        .dragged: .caught,
-        // Landing is the one that really is a hop, so it keeps the jump.
-        .landing: .celebrate,
-        .paw: .idle,
-        .work: .moveRight,
-        .observe: .idle,
-        .celebrate: .idle,
-        .fail: .idle,
-        .moveLeft: .idle,
-        .moveRight: .idle
-    ]
-
-    private static let candidates: [PetCapability: [String]] = [
-        .idle: ["idle"],
-        .moveLeft: ["running-left", "move-left", "move_left"],
-        .moveRight: ["running-right", "move-right", "move_right"],
-        .sit: ["sitting", "sit"],
-        .sleep: ["sleeping", "sleep", "napping"],
-        .work: ["working", "typing", "running"],
-        .observe: ["watching", "observe", "review"],
-        // Codex's `waiting` means the agent needs approval or input, which is
-        // this capability exactly. A wave is a greeting, so it comes second.
-        .paw: ["pawing", "paw", "waiting", "waving", "wave"],
-        .celebrate: ["celebrate", "jumping", "jump", "bounce", "waving"],
-        .fail: ["failed", "failure", "sad"],
-        .stretch: ["stretching", "stretch"],
-        .caught: ["caught"],
-        .dragged: ["dragged"],
-        .landing: ["landing"]
-    ]
+    /// Generated from the capability's own declaration rather than written out
+    /// per capability. The flat table this replaced listed `jumping` ahead of
+    /// `waving` under `celebrate`, which is backwards -- in the Petdex contract
+    /// `jumping` starts a turn and `waving` ends one -- and nothing in a list of
+    /// bare strings could have said so.
+    static func candidates(
+        for capability: PetCapability,
+        explicit: [String: String]
+    ) -> [String] {
+        var names: [String] = []
+        if let mapped = explicit[capability.rawValue] { names.append(mapped) }
+        names.append(contentsOf: capability.authoredNames)
+        if let state = capability.petdexState {
+            names.append(contentsOf: state.trackNames)
+        }
+        return names
+    }
 }

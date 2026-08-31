@@ -580,7 +580,11 @@ func coreLogicTests() -> [LogicTest] {
             try expect(behavior.state == .dragged)
             behavior.handle(.mouseReleased, at: 4)
             try expect(behavior.state == .dropped)
-            behavior.handle(.tick, at: 4.36)
+            // A drop borrows the jump row when a pet has no landing art, so it
+            // runs for the jump's length rather than being cut mid-air.
+            behavior.handle(.tick, at: 4 + BehaviorTiming.dropped - 0.01)
+            try expect(behavior.state == .dropped)
+            behavior.handle(.tick, at: 4 + BehaviorTiming.dropped + 0.01)
             try expect(behavior.state == .idle)
         },
         LogicTest(name: "behavior follows sit seek sleep wake lifecycle") {
@@ -611,13 +615,16 @@ func coreLogicTests() -> [LogicTest] {
             behavior.handle(.beginStretch, at: 3.2)
             try expect(behavior.state == .dragged)
         },
-        LogicTest(name: "completion celebration remains visible for its animation") {
+        LogicTest(name: "completion celebration runs for exactly one wave") {
+            // Petdex's `waving` is 0.70s and a conforming pet paces its four
+            // frames for that. Holding longer replays the greeting; holding less
+            // cuts it. Roamling therefore uses the same clock.
             var behavior = BehaviorController(state: .idle, enteredAt: 0)
             behavior.handle(.reaction(.smallCelebrate), at: 1)
             try expect(behavior.state == .celebrate)
-            behavior.handle(.tick, at: 3.19)
+            behavior.handle(.tick, at: 1 + BehaviorTiming.celebrate - 0.01)
             try expect(behavior.state == .celebrate)
-            behavior.handle(.tick, at: 3.21)
+            behavior.handle(.tick, at: 1 + BehaviorTiming.celebrate + 0.01)
             try expect(behavior.state == .idle)
         },
         LogicTest(name: "basic safe zones honor visible frame and Dock inset") {
@@ -1195,6 +1202,89 @@ func coreLogicTests() -> [LogicTest] {
             try expect(director.decide(
                 fixture.situation(at: 1, position: fixture.corner, sourceID: nil)
             ) == .hold)
+        },
+        LogicTest(name: "an approval request always shows the paw") {
+            // It used to roll a third of these into a stare. Petdex holds
+            // `waiting` until the user answers, and a pet that asks only
+            // two times in three is a pet you learn not to trust.
+            var policy = ReactionPolicy(configuration: .init(minimumInterval: 0))
+            for step in 0..<20 {
+                let reaction = policy.reaction(
+                    for: CompanionEvent(
+                        sourceID: "agent",
+                        sourceType: .agent,
+                        timestamp: Double(step),
+                        kind: .attentionRequired,
+                        intensity: 0.95,
+                        context: .working
+                    ),
+                    context: .working,
+                    currentBehavior: .idle,
+                    randomUnit: Double(step) / 20,
+                    at: Double(step)
+                )
+                try expect(reaction == .paw, "roll \(step) gave \(String(describing: reaction))")
+            }
+        },
+        LogicTest(name: "a turn opening sparks and a read observes") {
+            var policy = ReactionPolicy(configuration: .init(minimumInterval: 0))
+            func reaction(_ kind: CompanionEventKind, _ intensity: Double, at time: Double) -> CompanionReaction? {
+                policy.reaction(
+                    for: CompanionEvent(
+                        sourceID: "agent",
+                        sourceType: .agent,
+                        timestamp: time,
+                        kind: kind,
+                        intensity: intensity,
+                        context: .working
+                    ),
+                    context: .working,
+                    currentBehavior: .idle,
+                    randomUnit: 0.5,
+                    at: time
+                )
+            }
+            // Petdex: user-prompt -> jumping, pre+Read -> review, pre -> running.
+            try expect(reaction(.activityStarted, 0.55, at: 0) == .spark)
+            try expect(reaction(.inspecting, 0.45, at: 1) == .observe)
+            try expect(reaction(.highIntensity, 0.72, at: 2) == .work)
+        },
+        LogicTest(name: "waiting for the user does not time out") {
+            // Petdex classes `waiting` as steady. The old 1.2s hand-off meant the
+            // picture on screen during an approval prompt was `review`, not the
+            // paw the user was supposed to notice.
+            var behavior = BehaviorController(state: .idle, enteredAt: 0)
+            behavior.handle(.reaction(.paw), at: 0)
+            try expect(behavior.state == .waitingForUser)
+            for step in 1...60 {
+                behavior.handle(.tick, at: Double(step))
+            }
+            try expect(behavior.state == .waitingForUser, "drifted to \(behavior.state)")
+        },
+        LogicTest(name: "transient agent states hand back on the Petdex clock") {
+            var behavior = BehaviorController(state: .idle, enteredAt: 0)
+            behavior.handle(.reaction(.spark), at: 0)
+            try expect(behavior.state == .spark)
+            behavior.handle(.tick, at: BehaviorTiming.spark - 0.01)
+            try expect(behavior.state == .spark, "spark ended early")
+            behavior.handle(.tick, at: BehaviorTiming.spark + 0.01)
+            try expect(behavior.state == .idle)
+
+            behavior.handle(.reaction(.observe), at: 10)
+            try expect(behavior.state == .observe)
+            behavior.handle(.tick, at: 10 + BehaviorTiming.observe - 0.01)
+            try expect(behavior.state == .observe, "observe ended early")
+            behavior.handle(.tick, at: 10 + BehaviorTiming.observe + 0.01)
+            try expect(behavior.state == .idle, "observe never handed back")
+        },
+        LogicTest(name: "only lasting conditions are worn continuously") {
+            // What holdSeat is allowed to re-apply every tick. Re-applying a
+            // moment is what turned a one-second beat into a session-long loop.
+            try expect(CompanionReaction.work.isOngoing)
+            try expect(CompanionReaction.paw.isOngoing)
+            for moment in [CompanionReaction.observe, .glance, .spark, .smallCelebrate, .largeCelebrate, .sad, .calm] {
+                try expect(!moment.isOngoing, "\(moment) would be re-applied forever")
+            }
         },
     ]
 }

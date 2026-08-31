@@ -22,12 +22,15 @@ public struct ClaudeCodeHookPayload: Decodable, Sendable {
     public let promptID: String?
     public let event: ClaudeCodeHookEvent
     public let notificationType: String?
+    /// The tool's name only, matched against a fixed list. See `ToolActivity`.
+    public let toolName: String?
 
     private enum CodingKeys: String, CodingKey {
         case sessionID = "session_id"
         case promptID = "prompt_id"
         case hookEventName = "hook_event_name"
         case notificationType = "notification_type"
+        case toolName = "tool_name"
     }
 
     public init(from decoder: Decoder) throws {
@@ -44,11 +47,14 @@ public struct ClaudeCodeHookPayload: Decodable, Sendable {
         }
         self.event = event
         notificationType = try container.decodeIfPresent(String.self, forKey: .notificationType)
+        toolName = try container.decodeIfPresent(String.self, forKey: .toolName)
     }
 }
 
-/// Reads only lifecycle identifiers. Event-specific prompt, transcript, tool
-/// input/output, and source content are intentionally absent from the model.
+/// Reads only lifecycle identifiers and the tool's name. Event-specific prompt,
+/// transcript, tool input/output, and source content are intentionally absent
+/// from the model. The name is matched against `ToolActivity`'s fixed list so the
+/// pet can tell reading from doing, which is the split Petdex draws.
 public enum ClaudeCodeEventNormalizer {
     public static func event(
         from data: Data,
@@ -75,7 +81,9 @@ public enum ClaudeCodeEventNormalizer {
         case .userPromptSubmit:
             (.activityStarted, 0.55)
         case .preToolUse:
-            (.activityStarted, 0.72)
+            ToolActivity.isInspecting(payload.toolName)
+                ? (.inspecting, 0.45)
+                : (.highIntensity, 0.72)
         case .postToolUse:
             (.positive, 0.08)
         case .postToolUseFailure:

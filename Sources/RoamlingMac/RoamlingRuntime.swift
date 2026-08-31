@@ -835,7 +835,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         switch event.kind {
         case .attentionRequired, .achievement, .negative, .setback:
             true
-        case .activityStarted, .highIntensity, .positive, .calm, .idle, .activityEnded:
+        case .activityStarted, .inspecting, .highIntensity, .positive, .calm, .idle, .activityEnded:
             false
         }
     }
@@ -874,19 +874,22 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         )
 
         switch event.kind {
-        case .activityStarted, .highIntensity:
-            let sustained = event.kind == .highIntensity || event.intensity >= 0.65
-                ? CompanionReaction.work
-                : .observe
-            beginWatching(
-                event,
-                sustained: sustained,
-                reaction: reaction ?? sustained,
-                at: timestamp
-            )
+        case .activityStarted:
+            // The hop is the whole reaction. What the pet wears afterwards is
+            // stillness, because Petdex's `jumping` is a duration state and the
+            // next hook event -- a tool starting -- is a beat away.
+            beginWatching(event, sustained: .observe, reaction: reaction ?? .spark, at: timestamp)
+
+        case .inspecting:
+            beginWatching(event, sustained: .observe, reaction: reaction ?? .observe, at: timestamp)
+
+        case .highIntensity:
+            beginWatching(event, sustained: .work, reaction: reaction ?? .work, at: timestamp)
 
         case .attentionRequired:
-            beginWatching(event, sustained: .observe, reaction: reaction ?? .paw, at: timestamp)
+            // The paw is sustained too: the agent stays blocked until the user
+            // answers, so the pet has to keep asking rather than drift off it.
+            beginWatching(event, sustained: .paw, reaction: reaction ?? .paw, at: timestamp)
 
         case .positive:
             if let reaction { applyActivityReaction(reaction, at: timestamp) }
@@ -1164,12 +1167,17 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
             return
         }
         switch behavior.state {
-        case .observe, .work, .waitingForUser, .celebrate, .sad:
+        case .observe, .work, .waitingForUser, .celebrate, .sad, .spark:
             break
         case .wake, .stretch, .caught, .dragged:
             break
         default:
-            applyActivityReaction(activeActivityReaction ?? .observe, at: timestamp)
+            // Only a lasting condition is worn continuously. A moment -- the
+            // start hop, a glance at a file being read -- is delivered once and
+            // then the pet is simply present, which is what a companion beside a
+            // busy agent should look like.
+            guard let sustained = activeActivityReaction, sustained.isOngoing else { break }
+            applyActivityReaction(sustained, at: timestamp)
         }
     }
 

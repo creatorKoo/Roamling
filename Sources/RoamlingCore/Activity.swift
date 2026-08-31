@@ -19,6 +19,11 @@ public enum CompanionEventKind: String, Codable, Hashable, Sendable {
     case achievement
     case setback
     case attentionRequired
+    /// The source is examining rather than changing things -- reading a file,
+    /// running a search. Petdex draws this as `review`, distinct from the
+    /// `running` it shows for every other tool, so the split is carried here
+    /// rather than folded into `highIntensity`.
+    case inspecting
     case highIntensity
     case calm
     case idle

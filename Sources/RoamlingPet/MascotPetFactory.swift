@@ -72,9 +72,9 @@ public enum MascotPetFactory {
     /// Mochi ships the standard 8x9 Codex/Petdex row set rather than the
     /// seven-row layout the other built-in uses. Every row is authored art, and
     /// `AnimationResolver` already maps this taxonomy: work resolves to running,
-    /// observe to review, paw to waiting, celebrate to jumping, fail to failed,
-    /// caught and dragged to waiting. Only sit, sleep, and stretch
-    /// have no row here and fall back to idle.
+    /// observe to review, paw to waiting, fail to failed, caught and dragged to
+    /// waiting. Only sit, sleep, and stretch have no row here and fall back to
+    /// idle.
     private static func makeStandardMochi(atlas: CGImage) -> PetAsset {
         let manifest = PetManifest(
             id: BuiltInPetKind.mochi.manifestID,
@@ -89,16 +89,13 @@ public enum MascotPetFactory {
             )
         )
         var tracks = StandardPetAnimations.tracks(columns: columns)
+        let waveRow = 3 * columns
         let jumpRow = 4 * columns
 
-        // MVP 2 asks a completion to hold real motion for about 2.2 seconds and
-        // end at rest. The standard jumping track is a short loop, so the
-        // celebration plays the arc out and back and settles on the neutral pose.
-        tracks["jumping"] = track("jumping", frames: [
-            (jumpRow, 0.16), (jumpRow + 1, 0.14), (jumpRow + 2, 0.18),
-            (jumpRow + 3, 0.16), (jumpRow + 4, 0.20), (jumpRow + 3, 0.16),
-            (jumpRow + 2, 0.18), (jumpRow + 1, 0.14), (jumpRow, 0.88)
-        ], loops: false)
+        // A finished turn waves, and this sheet authors that row, so nothing
+        // needs writing out here: `.celebrate` resolves straight to `waving` at
+        // the Petdex length. `jumping` is left alone -- it opens a turn.
+        _ = waveRow
 
         // Without this, `.landing` falls through to jumping and the pet throws a
         // full celebration every time it is dropped.
@@ -170,11 +167,14 @@ public enum MascotPetFactory {
             ),
             "watching": track("watching", frames: idleFrames),
             "failed": track("failed", frames: [(24, 0.8)]),
-            "jumping": track(
-                "jumping",
+            "celebrate": track(
+                "celebrate",
                 frames: hop + hop + hop + [(53, 0.16)],
                 loops: false
             ),
+            // The opening hop is one bound, not three: Petdex plays `jumping`
+            // when a turn starts and hands back inside a second.
+            "jumping": track("jumping", frames: hop, loops: false),
             "stretching": track(
                 "stretching",
                 frames: [(40, 0.14), (41, 0.15), (42, 0.18),
@@ -251,16 +251,21 @@ public enum MascotPetFactory {
             ),
             "watching": track("watching", frames: idleFrames),
             "failed": track("failed", frames: [(24, 0.8)]),
+            // One bound: Petdex plays `jumping` when a turn opens and hands back
+            // inside a second.
             "jumping": track(
                 "jumping",
-                frames: [
-                    // Two complete, reversible hops keep moving for the full
-                    // completion reaction instead of freezing on the apex.
-                    (48, 0.10), (49, 0.09), (50, 0.10), (52, 0.18),
-                    (51, 0.08), (50, 0.08), (49, 0.10), (48, 0.22),
-                    (49, 0.09), (50, 0.10), (52, 0.18), (51, 0.08),
-                    (50, 0.08), (49, 0.10), (48, 0.62)
-                ],
+                frames: [(48, 0.10), (49, 0.09), (50, 0.10),
+                         (52, 0.18), (51, 0.08), (48, 0.29)],
+                loops: false
+            ),
+            // Roamling's own name for a finished turn. This sheet has no wave,
+            // so the completion is a hop -- but it runs for `waving`'s 0.70s,
+            // not the jump's, because that is how long the state holds.
+            "celebrate": track(
+                "celebrate",
+                frames: [(48, 0.09), (49, 0.08), (50, 0.09),
+                         (52, 0.16), (51, 0.07), (48, 0.21)],
                 loops: false
             ),
             "stretching": track(
@@ -347,15 +352,17 @@ public enum MascotPetFactory {
             ),
             "watching": track("watching", frames: [(22, 0.8)]),
             "failed": track("failed", frames: [(23, 0.8)]),
+            // One hop, returning to the exact resting silhouette, held for
+            // `waving`'s 0.70s.
+            "celebrate": track(
+                "celebrate",
+                frames: [(24, 0.16), (21, 0.14), (3, 0.12), (0, 0.28)],
+                loops: false
+            ),
+            // A turn opening is one of those hops, not all three.
             "jumping": track(
                 "jumping",
-                frames: [
-                    // Mochi uses the approved caught/idle poses for three
-                    // small hops, returning to the exact resting silhouette.
-                    (24, 0.14), (21, 0.12), (3, 0.10), (0, 0.22),
-                    (24, 0.14), (21, 0.12), (3, 0.10), (0, 0.22),
-                    (24, 0.14), (21, 0.12), (3, 0.10), (0, 0.68)
-                ],
+                frames: [(24, 0.14), (21, 0.12), (3, 0.10), (0, 0.48)],
                 loops: false
             ),
             "stretching": track(
