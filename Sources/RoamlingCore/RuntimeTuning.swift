@@ -111,6 +111,17 @@ public struct RuntimeTuning: Codable, Equatable, Sendable {
     /// gait reads correctly at its own cadence even when the pet moves faster,
     /// and retiming it made the walk look busy. It stays a deliberate opt-in at
     /// 1.0 so the default motion is untouched no matter how the speed is tuned.
+    ///
+    /// Re-examined when Mochi's walk was retimed from 0.727s to the Petdex
+    /// standard 1.06s, which is a 46% slower cycle over unchanged ground speed
+    /// and stretched the stride from 1.89 body lengths to 2.77. Left at 1.0
+    /// anyway: the row is a bounding gait with three of its eight frames
+    /// airborne and a different paw touching down in each of the rest, so no paw
+    /// is planted long enough to slip against the ground, and there is no
+    /// mechanical error for a cadence multiplier to correct. Whether the longer
+    /// stride reads well is a judgment, and this is the knob for it --
+    /// `scripts/preview_gait.py` renders the walk over scrolling ground at the
+    /// tuned speed so the two can be compared without launching the app.
     public var locomotionAnimationRate: Double { gaitCadence }
 
     /// Evading has to outrun strolling. Fixed evade speeds meant a fast walking
