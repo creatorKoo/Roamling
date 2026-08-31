@@ -16,6 +16,17 @@ public final class PetAsset {
     public let behaviorMappings: [String: String]
     public let warnings: [String]
 
+    /// A second sheet holding the frames Petdex has no room for.
+    ///
+    /// The package sheet is exactly the nine-row contract and stays that way;
+    /// sleeping, being carried and watching the cursor live here instead. Frames
+    /// on this sheet are addressed by continuing the index past the end of the
+    /// package's own grid, so a track's frame list needs no notion of which
+    /// sheet it is reading from.
+    public let extensionAtlas: CGImage?
+    public let extensionColumns: Int
+    public let extensionRows: Int
+
     private var frameCache: [Int: CGImage] = [:]
 
     public init(
@@ -28,6 +39,9 @@ public final class PetAsset {
         rows: Int,
         tracks: [String: PetAnimationTrack],
         behaviorMappings: [String: String] = [:],
+        extensionAtlas: CGImage? = nil,
+        extensionColumns: Int = 0,
+        extensionRows: Int = 0,
         warnings: [String] = []
     ) {
         self.manifest = manifest
@@ -39,6 +53,9 @@ public final class PetAsset {
         self.rows = rows
         self.tracks = tracks
         self.behaviorMappings = behaviorMappings
+        self.extensionAtlas = extensionAtlas
+        self.extensionColumns = extensionColumns
+        self.extensionRows = extensionRows
         self.warnings = warnings
     }
 
@@ -46,21 +63,39 @@ public final class PetAsset {
         AnimationResolver(tracks: tracks, explicitBehaviors: behaviorMappings)
     }
 
+    /// Cells on the package sheet. Extension frames start at this index.
     public var frameCount: Int { columns * rows }
+
+    /// Cells across both sheets, which is what a frame index is checked against.
+    public var addressableFrameCount: Int {
+        frameCount + (extensionAtlas == nil ? 0 : extensionColumns * extensionRows)
+    }
+
     public var supportsDirectionalLook: Bool { rows >= 11 && columns >= 8 }
 
     public func frameImage(at index: Int) -> CGImage? {
-        guard index >= 0, index < frameCount else { return nil }
+        guard index >= 0, index < addressableFrameCount else { return nil }
         if let cached = frameCache[index] { return cached }
-        let column = index % columns
-        let row = index / columns
+        let source: CGImage
+        let offset: Int
+        let stride: Int
+        if index < frameCount {
+            source = atlas
+            offset = index
+            stride = columns
+        } else {
+            guard let extensionAtlas else { return nil }
+            source = extensionAtlas
+            offset = index - frameCount
+            stride = extensionColumns
+        }
         let rect = CGRect(
-            x: column * frameWidth,
-            y: row * frameHeight,
+            x: (offset % stride) * frameWidth,
+            y: (offset / stride) * frameHeight,
             width: frameWidth,
             height: frameHeight
         )
-        guard let image = atlas.cropping(to: rect) else { return nil }
+        guard let image = source.cropping(to: rect) else { return nil }
         frameCache[index] = image
         return image
     }

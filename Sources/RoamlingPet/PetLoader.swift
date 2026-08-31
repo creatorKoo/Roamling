@@ -48,35 +48,18 @@ public struct PetLoader {
         var warnings: [String] = []
         var tracks = StandardPetAnimations.tracks(columns: layout.columns)
 
-        if let customAnimations = manifest.animations {
-            for (name, definition) in customAnimations {
-                guard !name.isEmpty else {
-                    warnings.append("Ignored a custom animation with an empty name")
-                    continue
-                }
-                guard definition.frames.count <= Self.maximumFrames,
-                      definition.frames.allSatisfy({ $0 >= 0 && $0 < layout.columns * layout.rows }) else {
-                    warnings.append("Ignored animation '\(name)' because a frame index is out of range")
-                    continue
-                }
-                let fps = definition.fps ?? 12
-                guard fps > 0, fps <= 60 else {
-                    warnings.append("Ignored animation '\(name)' because fps must be in 0...60")
-                    continue
-                }
-                let frames = definition.frames.map {
-                    PetAnimationFrame(index: $0, duration: 1 / fps)
-                }
-                tracks[name] = PetAnimationTrack(
-                    name: name,
-                    frames: frames,
-                    loops: definition.loop ?? true,
-                    fallback: definition.fallback
-                )
-            }
-        }
+        let baseFrames = layout.columns * layout.rows
+        install(
+            manifest.animations,
+            into: &tracks,
+            addressable: baseFrames,
+            warnings: &warnings
+        )
 
         var behaviorMappings: [String: String] = [:]
+        var extensionAtlas: CGImage?
+        var extensionColumns = 0
+        var extensionRows = 0
         let extensionURL = package.appendingPathComponent("roamling.json")
         if FileManager.default.fileExists(atPath: extensionURL.path) {
             do {
@@ -84,13 +67,27 @@ public struct PetLoader {
                     RoamlingManifest.self,
                     from: Data(contentsOf: extensionURL)
                 )
-                if extensionManifest.schemaVersion == 1 {
-                    behaviorMappings = extensionManifest.behaviors
-                } else {
-                    warnings.append("Ignored roamling.json schemaVersion \(extensionManifest.schemaVersion)")
+                guard extensionManifest.schemaVersion == RoamlingManifest.currentSchemaVersion else {
+                    throw PetLoadError.unsupportedExtensionSchema(extensionManifest.schemaVersion)
                 }
+                behaviorMappings = extensionManifest.behaviors
+                if let path = extensionManifest.spritesheetPath {
+                    let grid = try requireExtensionGrid(extensionManifest.frame)
+                    let url = try safeAssetURL(path: path, inside: package)
+                    extensionAtlas = try loadExtensionAtlas(at: url, grid: grid, layout: layout)
+                    extensionColumns = grid.columns
+                    extensionRows = grid.rows
+                }
+                // Installed after the package's own tracks, so an extension can
+                // add what Petdex has no word for and correct what it does.
+                install(
+                    extensionManifest.animations,
+                    into: &tracks,
+                    addressable: baseFrames + extensionColumns * extensionRows,
+                    warnings: &warnings
+                )
             } catch {
-                warnings.append("Ignored malformed roamling.json: \(error.localizedDescription)")
+                warnings.append("Ignored roamling.json: \(error.localizedDescription)")
             }
         }
 
@@ -104,8 +101,82 @@ public struct PetLoader {
             rows: layout.rows,
             tracks: tracks,
             behaviorMappings: behaviorMappings,
+            extensionAtlas: extensionAtlas,
+            extensionColumns: extensionColumns,
+            extensionRows: extensionRows,
             warnings: warnings
         )
+    }
+
+    /// Turns declared frame lists into tracks, dropping the ones that would not
+    /// render. A bad entry is reported and skipped rather than failing the load:
+    /// one unusable name should not cost the user the whole pet.
+    /// The extension sheet must share the package's cell size, so its pixel
+    /// dimensions follow from the grid rather than being declared again.
+    private func loadExtensionAtlas(
+        at url: URL,
+        grid: PetExtensionGrid,
+        layout: Layout
+    ) throws -> CGImage {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw PetLoadError.missingSpritesheet(url.path)
+        }
+        if let byteCount = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+           byteCount > Self.maximumEncodedBytes {
+            throw PetLoadError.spritesheetTooLarge(byteCount)
+        }
+        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+              let atlas = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+            throw PetLoadError.unsupportedImage(url.path)
+        }
+        let expected = (grid.columns * layout.frameWidth, grid.rows * layout.frameHeight)
+        guard atlas.width == expected.0, atlas.height == expected.1 else {
+            throw PetLoadError.invalidFrameLayout(
+                "extension sheet is \(atlas.width)x\(atlas.height), expected \(expected.0)x\(expected.1)"
+            )
+        }
+        return atlas
+    }
+
+    private func requireExtensionGrid(_ grid: PetExtensionGrid?) throws -> PetExtensionGrid {
+        guard let grid, grid.columns > 0, grid.rows > 0 else {
+            throw PetLoadError.invalidFrameLayout("extension sheet needs a frame grid")
+        }
+        guard grid.columns * grid.rows <= Self.maximumFrames else {
+            throw PetLoadError.invalidFrameLayout("extension grid is larger than \(Self.maximumFrames) cells")
+        }
+        return grid
+    }
+
+    private func install(
+        _ animations: [String: PetAnimationManifest]?,
+        into tracks: inout [String: PetAnimationTrack],
+        addressable: Int,
+        warnings: inout [String]
+    ) {
+        guard let animations else { return }
+        for (name, definition) in animations {
+            guard !name.isEmpty else {
+                warnings.append("Ignored a custom animation with an empty name")
+                continue
+            }
+            guard definition.frames.count <= Self.maximumFrames,
+                  definition.frames.allSatisfy({ $0 >= 0 && $0 < addressable }) else {
+                warnings.append("Ignored animation '\(name)' because a frame index is out of range")
+                continue
+            }
+            let fps = definition.fps ?? 12
+            guard fps > 0, fps <= 60 else {
+                warnings.append("Ignored animation '\(name)' because fps must be in 0...60")
+                continue
+            }
+            tracks[name] = PetAnimationTrack(
+                name: name,
+                frames: definition.frames.map { PetAnimationFrame(index: $0, duration: 1 / fps) },
+                loops: definition.loop ?? true,
+                fallback: definition.fallback
+            )
+        }
     }
 
     private func safeAssetURL(path: String, inside package: URL) throws -> URL {

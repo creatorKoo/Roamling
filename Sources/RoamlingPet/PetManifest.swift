@@ -59,13 +59,70 @@ public struct PetManifest: Codable, Equatable, Sendable {
     }
 }
 
+/// The optional `roamling.json` beside a Petdex package.
+///
+/// Roamling needs pictures Petdex has no word for -- sleeping, being carried,
+/// watching the cursor -- and the nine-row contract has neither names nor cells
+/// for them. They live here, on a sheet of their own, so `pet.json` and
+/// `spritesheet.webp` stay exactly the contract and nothing has to be argued
+/// about when the package is submitted to the gallery.
+///
+/// Frames on the extension sheet are addressed by continuing the index past the
+/// end of the package grid: with an 8x9 package, index 72 is the extension
+/// sheet's first cell. A track may therefore mix the two -- `landing` reuses the
+/// package's jump frames and needs no drawing of its own.
+///
+/// A package without this file is the important compatibility path and behaves
+/// as it always did.
 public struct RoamlingManifest: Codable, Equatable, Sendable {
-    public let schemaVersion: Int
-    public let behaviors: [String: String]
+    public static let currentSchemaVersion = 1
 
-    public init(schemaVersion: Int = 1, behaviors: [String: String]) {
+    public let schemaVersion: Int
+    /// The extension sheet, relative to the package directory. Omit it when the
+    /// file only remaps behaviours onto frames the package already has.
+    public let spritesheetPath: String?
+    /// The extension sheet's grid. Cell size comes from the package, so the two
+    /// sheets always share one cell geometry.
+    public let frame: PetExtensionGrid?
+    public let behaviors: [String: String]
+    public let animations: [String: PetAnimationManifest]?
+
+    public init(
+        schemaVersion: Int = RoamlingManifest.currentSchemaVersion,
+        spritesheetPath: String? = nil,
+        frame: PetExtensionGrid? = nil,
+        behaviors: [String: String] = [:],
+        animations: [String: PetAnimationManifest]? = nil
+    ) {
         self.schemaVersion = schemaVersion
+        self.spritesheetPath = spritesheetPath
+        self.frame = frame
         self.behaviors = behaviors
+        self.animations = animations
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try container.decode(Int.self, forKey: .schemaVersion)
+        spritesheetPath = try container.decodeIfPresent(String.self, forKey: .spritesheetPath)
+        frame = try container.decodeIfPresent(PetExtensionGrid.self, forKey: .frame)
+        behaviors = try container.decodeIfPresent([String: String].self, forKey: .behaviors) ?? [:]
+        animations = try container.decodeIfPresent(
+            [String: PetAnimationManifest].self,
+            forKey: .animations
+        )
+    }
+}
+
+/// The extension sheet's grid. Only the column and row counts: the cell size is
+/// the package's, because a pet drawn at two scales is not one pet.
+public struct PetExtensionGrid: Codable, Equatable, Sendable {
+    public let columns: Int
+    public let rows: Int
+
+    public init(columns: Int, rows: Int) {
+        self.columns = columns
+        self.rows = rows
     }
 }
 
@@ -78,6 +135,7 @@ public enum PetLoadError: LocalizedError, Equatable {
     case spritesheetTooLarge(Int)
     case unsupportedImage(String)
     case invalidFrameLayout(String)
+    case unsupportedExtensionSchema(Int)
 
     public var errorDescription: String? {
         switch self {
@@ -87,6 +145,8 @@ public enum PetLoadError: LocalizedError, Equatable {
             "Invalid pet.json: \(message)"
         case let .unsupportedSpriteVersion(version):
             "Unsupported spriteVersionNumber \(version); expected 1 or 2"
+        case let .unsupportedExtensionSchema(version):
+            "Unsupported roamling.json schemaVersion \(version); expected \(RoamlingManifest.currentSchemaVersion)"
         case let .unsafeSpritesheetPath(path):
             "spritesheetPath must stay inside the pet package: \(path)"
         case let .missingSpritesheet(path):

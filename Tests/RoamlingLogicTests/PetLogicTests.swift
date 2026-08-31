@@ -305,7 +305,10 @@ func petLogicTests() -> [LogicTest] {
                 (.work, "running"),
                 (.observe, "review"),
                 (.paw, "waiting"),
-                (.celebrate, "jumping"),
+                // `jumping` opens a turn, so it belongs to `spark`; a finished
+                // one waves. This sheet authors both rows, so neither is borrowed.
+                (.celebrate, "waving"),
+                (.spark, "jumping"),
                 (.fail, "failed"),
                 (.landing, "landing")
             ] {
@@ -325,7 +328,10 @@ func petLogicTests() -> [LogicTest] {
                 (.sleep, "waiting", .paw),
                 (.caught, "waiting", .paw),
                 (.dragged, "waiting", .paw),
-                (.stretch, "idle", .idle)
+                (.stretch, "idle", .idle),
+                // Watching the cursor has no Petdex row. It goes quiet rather
+                // than borrowing `review`, which means "about to read a file".
+                (.gaze, "idle", .idle)
             ] {
                 let resolved = pet.resolver.resolution(capability)
                 try expect(resolved.track?.name == name, "\(capability) took \(resolved)")
@@ -362,17 +368,33 @@ func petLogicTests() -> [LogicTest] {
                 "Mochi walk frames must remain centered while the runtime moves the sprite"
             )
         },
-        LogicTest(name: "built-in completion tracks animate through the full reaction") {
-            for kind in [BuiltInPetKind.fatMochi, .mochi] {
+        LogicTest(name: "built-in reactions run for exactly as long as the state holds") {
+            // Roamling holds a transient state for the Petdex length, so a track
+            // any longer loops or gets cut. The built-ins are the one place we
+            // author both sides, and they have to agree.
+            for kind in BuiltInPetKind.allCases {
                 let pet = MascotPetFactory.make(kind)
-                let celebration = try require(pet.tracks["jumping"])
-                let duration = celebration.frames.reduce(0) { $0 + $1.duration }
-
-                try expect(!celebration.loops)
-                try expect(duration >= 2.19)
-                try expect(duration <= 2.21)
-                try expect(Set(celebration.frames.map(\.index)).count >= 4)
-                try expect(celebration.frames.last?.index == (kind == .fatMochi ? 48 : 32))
+                for (capability, budget) in [
+                    (PetCapability.celebrate, BehaviorTiming.celebrate),
+                    (.spark, BehaviorTiming.spark),
+                    (.fail, BehaviorTiming.sad)
+                ] {
+                    let track = try require(
+                        pet.resolver.resolve(capability),
+                        "\(kind) has no \(capability)"
+                    )
+                    let duration = track.frames.reduce(0) { $0 + $1.duration }
+                    try expect(
+                        duration <= budget + 0.01,
+                        "\(kind) \(capability) runs \(duration)s into a \(budget)s state"
+                    )
+                }
+                // A completion still has to be motion, not one held pose.
+                let celebration = try require(pet.resolver.resolve(.celebrate))
+                try expect(
+                    Set(celebration.frames.map(\.index)).count >= 4,
+                    "\(kind) celebrates with \(celebration.frames.count) frames"
+                )
             }
         },
         LogicTest(name: "loader keeps valid custom animation and isolates invalid track") {
@@ -476,7 +498,177 @@ func petLogicTests() -> [LogicTest] {
             let rgba = try require(sampleRGBA(image))
             try expect(rgba.0 > 200, "Expected red top row, got \(rgba)")
             try expect(rgba.2 < 50, "Expected little blue in top row, got \(rgba)")
-        }
+        },
+        LogicTest(name: "roamling.json adds the rows Petdex has no word for") {
+            // The extension sheet exists so `pet.json` and its spritesheet stay
+            // exactly the nine-row contract. Extension frames continue the index
+            // past the end of the package grid, so a track can mix the two.
+            let fixture = try FixturePackage(frameWidth: 1, frameHeight: 1, rows: 9)
+            defer { fixture.remove() }
+            try fixture.write(manifest: PetManifest(
+                id: "fixture",
+                displayName: "Fixture",
+                description: "",
+                spritesheetPath: "spritesheet.png",
+                frame: .init(width: 1, height: 1, columns: 8, rows: 9)
+            ))
+            try fixture.writeExtensionSheet(named: "roamling.png", columns: 8, rows: 1)
+            try fixture.write(extension: RoamlingManifest(
+                spritesheetPath: "roamling.png",
+                frame: .init(columns: 8, rows: 1),
+                behaviors: ["sleep": "sleeping", "gaze": "gaze"],
+                animations: [
+                    "sleeping": .init(frames: [72, 73, 74, 75], fps: 2, loop: true),
+                    "gaze": .init(frames: [76, 77], fps: 1, loop: true),
+                    // Reaching back into the package sheet is the point of one
+                    // index space: a drop borrows the jump and draws nothing.
+                    "landing": .init(frames: [34, 35, 36], fps: 8, loop: false)
+                ]
+            ))
+            let pet = try PetLoader().load(packageAt: fixture.url)
+            try expect(pet.warnings.isEmpty, "\(pet.warnings)")
+            try expect(pet.frameCount == 72)
+            try expect(pet.addressableFrameCount == 80)
+            try expect(pet.frameImage(at: 79) != nil, "last extension cell is unreadable")
+            try expect(pet.frameImage(at: 80) == nil, "read past the extension sheet")
+
+            for (capability, name) in [
+                (PetCapability.sleep, "sleeping"),
+                (.gaze, "gaze"),
+                (.landing, "landing")
+            ] {
+                let resolved = pet.resolver.resolution(capability)
+                try expect(resolved.track?.name == name, "\(capability) took \(resolved)")
+                try expect(resolved.provenance == .authored, "\(capability) is \(resolved.provenance)")
+            }
+            try expect(pet.resolver.resolve(.celebrate)?.name == "waving")
+        },
+        LogicTest(name: "an extension sheet must match the package cell size") {
+            let fixture = try FixturePackage(frameWidth: 1, frameHeight: 1, rows: 9)
+            defer { fixture.remove() }
+            try fixture.write(manifest: PetManifest(
+                id: "fixture",
+                displayName: "Fixture",
+                description: "",
+                spritesheetPath: "spritesheet.png",
+                frame: .init(width: 1, height: 1, columns: 8, rows: 9)
+            ))
+            // Four columns of art described as eight.
+            try fixture.writeExtensionSheet(named: "roamling.png", columns: 4, rows: 1)
+            try fixture.write(extension: RoamlingManifest(
+                spritesheetPath: "roamling.png",
+                frame: .init(columns: 8, rows: 1),
+                animations: ["gaze": .init(frames: [72, 73], fps: 1, loop: true)]
+            ))
+            let pet = try PetLoader().load(packageAt: fixture.url)
+            try expect(pet.warnings.count == 1, "\(pet.warnings)")
+            try expect(pet.extensionAtlas == nil)
+            // A pet whose extension sheet is wrong still renders its nine rows.
+            try expect(pet.resolver.resolve(.idle)?.name == "idle")
+        },
+        LogicTest(name: "an unknown extension schema is ignored, not fatal") {
+            let fixture = try FixturePackage(frameWidth: 1, frameHeight: 1, rows: 9)
+            defer { fixture.remove() }
+            try fixture.write(manifest: PetManifest(
+                id: "fixture",
+                displayName: "Fixture",
+                description: "",
+                spritesheetPath: "spritesheet.png",
+                frame: .init(width: 1, height: 1, columns: 8, rows: 9)
+            ))
+            try fixture.write(extension: RoamlingManifest(
+                schemaVersion: 99,
+                behaviors: ["sleep": "sleeping"]
+            ))
+            let pet = try PetLoader().load(packageAt: fixture.url)
+            try expect(pet.warnings.count == 1, "\(pet.warnings)")
+            // A pet from the future still renders with what this build knows.
+            try expect(pet.resolver.resolve(.sleep)?.name == "waiting")
+        },
+        LogicTest(name: "the Petdex vocabulary grounds every capability") {
+            // Nine capabilities mean exactly one Petdex row, and no row is
+            // claimed twice. A duplicate would mean two different intents
+            // silently sharing one picture, which is the class of bug that put
+            // `jumping` under celebrate.
+            var claimed: [PetdexState: PetCapability] = [:]
+            for capability in PetCapability.allCases {
+                guard let state = capability.petdexState else { continue }
+                try expect(
+                    claimed[state] == nil,
+                    "\(state) is claimed twice, second by \(capability)"
+                )
+                claimed[state] = capability
+            }
+            try expect(
+                claimed.count == PetdexState.allCases.count,
+                "\(PetdexState.allCases.count - claimed.count) Petdex rows have no capability"
+            )
+            try expect(claimed[.waving] == .celebrate)
+            try expect(claimed[.jumping] == .spark)
+            try expect(claimed[.review] == .observe)
+            try expect(claimed[.waiting] == .paw)
+        },
+        LogicTest(name: "every borrow chain ends at idle") {
+            // A cycle here would hand the resolver a capability it has already
+            // tried and end in the placeholder, which reads as a pet that lost
+            // its artwork rather than one that borrowed some.
+            for capability in PetCapability.allCases {
+                var seen: Set<PetCapability> = [capability]
+                var step = capability
+                while let next = step.borrows?.capability {
+                    try expect(!seen.contains(next), "\(capability) loops at \(next)")
+                    seen.insert(next)
+                    step = next
+                }
+                try expect(step == .idle, "\(capability) ends at \(step), not idle")
+            }
+        },
+        LogicTest(name: "a landing keeps the hop when celebrate stops jumping") {
+            // Landing used to reach `jumping` by way of celebrate. Now that
+            // celebrate waves, that route would have made every drop a farewell.
+            try expect(PetCapability.landing.borrows == .motion(.spark))
+            let resolver = AnimationResolver(tracks: [
+                "idle": PetAnimationTrack(name: "idle", frames: [.init(index: 0, duration: 0.2)]),
+                "jumping": PetAnimationTrack(name: "jumping", frames: [.init(index: 1, duration: 0.2)]),
+                "waving": PetAnimationTrack(name: "waving", frames: [.init(index: 2, duration: 0.2)])
+            ])
+            try expect(resolver.resolve(.landing)?.name == "jumping")
+            try expect(resolver.resolve(.celebrate)?.name == "waving")
+        },
+        LogicTest(name: "watching the cursor never borrows the review row") {
+            // `review` is a one-second "about to read a file" beat. Wearing it
+            // for as long as a cursor lingers is what made the pet look busy
+            // doing nothing.
+            let resolver = AnimationResolver(tracks: [
+                "idle": PetAnimationTrack(name: "idle", frames: [.init(index: 0, duration: 0.2)]),
+                "review": PetAnimationTrack(name: "review", frames: [.init(index: 1, duration: 0.2)])
+            ])
+            try expect(resolver.resolve(.gaze)?.name == "idle")
+            try expect(resolver.resolve(.observe)?.name == "review")
+
+            // A package that draws the real thing still wins.
+            let authored = AnimationResolver(tracks: [
+                "idle": PetAnimationTrack(name: "idle", frames: [.init(index: 0, duration: 0.2)]),
+                "watching": PetAnimationTrack(name: "watching", frames: [.init(index: 1, duration: 0.2)])
+            ])
+            try expect(authored.resolution(.gaze).provenance == .authored)
+        },
+        LogicTest(name: "BehaviorTiming matches the Petdex contract") {
+            // Core cannot import RoamlingPet, so the borrowed durations are
+            // copied. This is the only thing keeping the two in step: if it
+            // fails, upstream moved and the numbers need porting, not relaxing.
+            try expectNear(BehaviorTiming.spark, PetdexState.jumping.standardDuration)
+            try expectNear(BehaviorTiming.observe, PetdexState.review.standardDuration)
+            try expectNear(BehaviorTiming.celebrate, PetdexState.waving.standardDuration)
+            try expectNear(BehaviorTiming.sad, PetdexState.failed.standardDuration)
+            // A drop with no `landing` art borrows the jump, so it gets the
+            // jump's clock or it is cut mid-air.
+            try expectNear(BehaviorTiming.dropped, PetdexState.jumping.standardDuration)
+            try expect(PetdexState.review.isTransient)
+            try expect(PetdexState.jumping.isTransient)
+            try expect(!PetdexState.waiting.isTransient)
+            try expect(!PetdexState.running.isTransient)
+        },
     ]
 }
 
@@ -684,6 +876,30 @@ private final class FixturePackage {
         let imageURL = url.appendingPathComponent("spritesheet.png")
         guard let destination = CGImageDestinationCreateWithURL(
             imageURL as CFURL,
+            UTType.png.identifier as CFString,
+            1,
+            nil
+        ) else { throw FixtureError.destination }
+        CGImageDestinationAddImage(destination, image, nil)
+        guard CGImageDestinationFinalize(destination) else { throw FixtureError.destination }
+    }
+
+    func write(extension manifest: RoamlingManifest) throws {
+        try JSONEncoder().encode(manifest).write(to: url.appendingPathComponent("roamling.json"))
+    }
+
+    func writeExtensionSheet(named name: String, columns: Int, rows: Int) throws {
+        guard let context = CGContext(
+            data: nil,
+            width: columns,
+            height: rows,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ), let image = context.makeImage() else { throw FixtureError.context }
+        guard let destination = CGImageDestinationCreateWithURL(
+            url.appendingPathComponent(name) as CFURL,
             UTType.png.identifier as CFString,
             1,
             nil
