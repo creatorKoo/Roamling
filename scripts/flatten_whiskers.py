@@ -188,6 +188,81 @@ def cheek_near(image: Image.Image, x: int, y: int) -> tuple[int, int, int]:
     return (254, 240, 216)
 
 
+def components(mask: list[list[bool]]) -> list[list[tuple[int, int]]]:
+    """Every 8-connected opaque region, largest first."""
+    height, width = len(mask), len(mask[0])
+    seen = [[False] * width for _ in range(height)]
+    found: list[list[tuple[int, int]]] = []
+    for y in range(height):
+        for x in range(width):
+            if not mask[y][x] or seen[y][x]:
+                continue
+            queue = deque([(y, x)])
+            seen[y][x] = True
+            group = []
+            while queue:
+                cy, cx = queue.popleft()
+                group.append((cy, cx))
+                for dy in (-1, 0, 1):
+                    for dx in (-1, 0, 1):
+                        ny, nx = cy + dy, cx + dx
+                        if (
+                            0 <= ny < height
+                            and 0 <= nx < width
+                            and mask[ny][nx]
+                            and not seen[ny][nx]
+                        ):
+                            seen[ny][nx] = True
+                            queue.append((ny, nx))
+            found.append(group)
+    found.sort(key=len, reverse=True)
+    return found
+
+
+def mend(image: Image.Image, drop_below: int, reconnect: int) -> tuple[int, int]:
+    """Clear the specks and walk a loose whisker back to the cheek.
+
+    A generated whisker arrives in pieces: a stroke that stops short of the face
+    and a speck or two beside it. The art rules call a detached piece grounds for
+    redrawing the frame, and four attempts at redrawing this pet's whiskers never
+    produced an attached one -- the generator's grid is coarser than the stroke.
+
+    So the two failures are told apart. A speck is noise and goes. A whole stroke
+    sitting a few pixels off its cheek is the drawn whisker, and it is walked
+    inward along its own row until it meets the body: this adds pixels in line
+    with a stroke that is already there rather than inventing one, and the
+    alternative -- deleting it -- leaves that frame a whisker short and the row
+    flickers.
+    """
+    dropped = 0
+    bridged = 0
+    pixels = image.load()
+    groups = components(alpha_mask(image))
+    if not groups:
+        return (0, 0)
+    body = set(groups[0])
+    centre = sum(x for _, x in groups[0]) / len(body)
+    for group in groups[1:]:
+        if len(group) < drop_below:
+            for y, x in group:
+                pixels[x, y] = (0, 0, 0, 0)
+            dropped += len(group)
+            continue
+        if not reconnect:
+            continue
+        step = 1 if sum(x for _, x in group) / len(group) < centre else -1
+        # From the end of the stroke that already faces the body, so the bridge
+        # continues the whisker instead of crossing it.
+        y, x = max(group, key=lambda p: p[1] * step)
+        for _ in range(reconnect):
+            x += step
+            if not (0 <= x < image.width) or (y, x) in body:
+                break
+            pixels[x, y] = (*INK, 255)
+            bridged += 1
+    return (dropped, bridged)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("cells", type=Path)
@@ -206,6 +281,18 @@ def main() -> None:
         type=int,
         default=0,
         help="narrow each stroke to this many pixels; 0 leaves the width alone",
+    )
+    parser.add_argument(
+        "--drop-strays",
+        type=int,
+        default=0,
+        help="clear detached pieces smaller than this many pixels",
+    )
+    parser.add_argument(
+        "--reconnect",
+        type=int,
+        default=0,
+        help="walk a detached stroke this many pixels toward the body to rejoin it",
     )
     parser.add_argument(
         "--dry-run", action="store_true", help="report what was found, change nothing"
@@ -235,6 +322,10 @@ def main() -> None:
             found = keep
         for y, x in found:
             pixels[x, y] = (*INK, 255)
+        if args.drop_strays or args.reconnect:
+            dropped, bridged = mend(image, args.drop_strays, args.reconnect)
+            if dropped or bridged:
+                print(f"    mended: -{dropped}px speck, +{bridged}px bridge")
         image.save(args.out / path.name)
     if not args.dry_run:
         print(f"-> {args.out}")
