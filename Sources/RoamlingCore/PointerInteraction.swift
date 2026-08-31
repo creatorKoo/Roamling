@@ -44,6 +44,20 @@ public struct PointerInteractionConfiguration: Equatable, Sendable {
     }
 }
 
+public extension PointerInteractionConfiguration {
+    /// Unhurried at the edge of awareness, twice as quick within catching range.
+    ///
+    /// Tied to the same two radii the rest of pointer behaviour uses, so moving
+    /// one of them in the tuning panel moves this with it rather than leaving a
+    /// second, invisible idea of "close".
+    func attentionRate(atDistance distance: Double) -> Double {
+        let span = awarenessDistance - catchDistance
+        guard span > 0 else { return 1 }
+        let closeness = ((awarenessDistance - distance) / span).clamped(to: 0...1)
+        return 1 + closeness
+    }
+}
+
 public struct PointerKinematics: Equatable, Sendable {
     public let velocity: WorldVector
     public let speed: Double
@@ -56,6 +70,15 @@ public struct PointerDecision: Equatable, Sendable {
     public let kinematics: PointerKinematics
     public let escapeVelocity: WorldVector
     public let lookDirectionDegrees: Double?
+
+    /// How fast to play the watching animation, as a multiple of its own speed.
+    ///
+    /// Proximity is three coarse bands, but the distance behind them is
+    /// continuous, and a cat's tail is the part of it that tracks interest
+    /// continuously too. Driving the flick's speed from the distance spends that
+    /// resolution instead of throwing it away: the pet quickens as the pointer
+    /// closes rather than snapping between two states at a threshold.
+    public let attentionRate: Double
 
     public var shouldArmCatch: Bool { proximity == .catchable }
 }
@@ -144,7 +167,8 @@ public struct PointerInteractionModel: Sendable {
             proximity: proximity,
             kinematics: kinematics,
             escapeVelocity: away * escapeSpeed,
-            lookDirectionDegrees: Self.lookDirectionDegrees(from: pet, to: pointer)
+            lookDirectionDegrees: Self.lookDirectionDegrees(from: pet, to: pointer),
+            attentionRate: configuration.attentionRate(atDistance: distance)
         )
     }
 

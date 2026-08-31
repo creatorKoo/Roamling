@@ -41,16 +41,38 @@ def load_manifest(package: Path) -> tuple[dict, dict]:
 def tracks_from(manifest: dict, extension: dict) -> dict[str, dict]:
     """Manifest tracks, then extension tracks on top -- the loader's order."""
     tracks = dict(manifest.get("animations") or {})
-    if extension.get("schemaVersion") == 2:
+    if extension.get("schemaVersion") == 1:
         tracks.update(extension.get("animations") or {})
     return tracks
 
 
-def frame_image(sheet: Image.Image, index: int, frame: dict) -> Image.Image:
-    columns = frame["columns"]
+def extension_sheet(package: Path, extension: dict) -> tuple[Image.Image | None, int]:
+    """The extension sheet and its column count, or nothing if there is none."""
+    if extension.get("schemaVersion") != 1:
+        return None, 0
+    path = extension.get("spritesheetPath")
+    grid = extension.get("frame") or {}
+    if not path or not grid.get("columns"):
+        return None, 0
+    return Image.open(package / path).convert("RGBA"), grid["columns"]
+
+
+def frame_image(
+    sheet: Image.Image,
+    index: int,
+    frame: dict,
+    extension: Image.Image | None = None,
+    extension_columns: int = 0,
+) -> Image.Image:
+    """Frames continue past the package grid onto the extension sheet."""
     width, height = frame["width"], frame["height"]
-    column, row = index % columns, index // columns
-    return sheet.crop(
+    base_cells = frame["columns"] * frame["rows"]
+    if index < base_cells or extension is None:
+        source, offset, stride = sheet, index, frame["columns"]
+    else:
+        source, offset, stride = extension, index - base_cells, extension_columns
+    column, row = offset % stride, offset // stride
+    return source.crop(
         (column * width, row * height, (column + 1) * width, (row + 1) * height)
     )
 
@@ -94,12 +116,17 @@ def render(
     out: Path,
     scale: int,
     ground: int | None,
+    extension: Image.Image | None = None,
+    extension_columns: int = 0,
 ) -> str:
     indices = track["frames"]
     fps = track.get("fps") or 12
     runs = collapse(indices, max(20, round(1000 / fps)))
     frames = [
-        compose(frame_image(sheet, index, frame), scale, ground) for index, _ in runs
+        compose(
+            frame_image(sheet, index, frame, extension, extension_columns), scale, ground
+        )
+        for index, _ in runs
     ]
 
     # One palette for the whole track. Quantising each frame on its own lets the
@@ -239,10 +266,11 @@ def main() -> None:
             if not key.startswith("_")
         }
 
-    manifest, extension = load_manifest(args.package)
+    manifest, extension_manifest = load_manifest(args.package)
     sheet = Image.open(args.package / manifest["spritesheetPath"]).convert("RGBA")
     frame = manifest["frame"]
-    tracks = tracks_from(manifest, extension)
+    extension, extension_columns = extension_sheet(args.package, extension_manifest)
+    tracks = tracks_from(manifest, extension_manifest)
     wanted = args.only or sorted(tracks)
 
     args.out.mkdir(parents=True, exist_ok=True)
@@ -253,7 +281,12 @@ def main() -> None:
             print(f"{name}: no such track")
             continue
         track = tracks[name]
-        print(render(name, track, sheet, frame, args.out, args.scale, ground))
+        print(
+            render(
+                name, track, sheet, frame, args.out, args.scale, ground,
+                extension, extension_columns,
+            )
+        )
         fps = track.get("fps") or 12
         record = approvals.get(name, {})
         entries.append(

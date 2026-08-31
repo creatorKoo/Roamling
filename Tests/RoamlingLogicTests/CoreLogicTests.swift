@@ -1286,6 +1286,35 @@ func coreLogicTests() -> [LogicTest] {
                 try expect(!moment.isOngoing, "\(moment) would be re-applied forever")
             }
         },
+        LogicTest(name: "watching quickens as the pointer closes") {
+            // Proximity is three bands; the distance behind it is continuous, and
+            // so is a tail. The rate spends that resolution rather than snapping
+            // between two speeds at a threshold.
+            let config = PointerInteractionConfiguration()
+            try expectNear(config.attentionRate(atDistance: 400), 1.0)
+            try expectNear(config.attentionRate(atDistance: config.awarenessDistance), 1.0)
+            try expectNear(config.attentionRate(atDistance: config.catchDistance), 2.0)
+            try expectNear(config.attentionRate(atDistance: 0), 2.0)
+
+            let mid = (config.awarenessDistance + config.catchDistance) / 2
+            try expectNear(config.attentionRate(atDistance: mid), 1.5)
+
+            // Monotonic: never slower for being nearer.
+            var previous = 0.0
+            for step in stride(from: 400.0, through: 0, by: -10) {
+                let rate = config.attentionRate(atDistance: step)
+                try expect(rate >= previous, "rate dropped at \(step)")
+                previous = rate
+            }
+        },
+        LogicTest(name: "the watching rate follows the tuned radii") {
+            // One idea of "close". Widening awareness in the tuning panel has to
+            // stretch this ramp with it, not leave a second hidden threshold.
+            let wide = PointerInteractionConfiguration(awarenessDistance: 320, catchDistance: 80)
+            try expectNear(wide.attentionRate(atDistance: 320), 1.0)
+            try expectNear(wide.attentionRate(atDistance: 200), 1.5)
+            try expectNear(wide.attentionRate(atDistance: 80), 2.0)
+        },
     ]
 }
 

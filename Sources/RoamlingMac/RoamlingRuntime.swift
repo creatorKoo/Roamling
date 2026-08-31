@@ -624,10 +624,15 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     /// Only the states that actually travel at the tuned walking speed scale
     /// their cadence. Evade and catch run on their own speeds and keep the
     /// authored timing.
+    ///
+    /// Watching the pointer scales too, but on distance rather than on tuning:
+    /// the closer the pointer, the faster the pet's tail goes.
     private var locomotionAnimationRate: Double {
         switch behavior.state {
         case .wander, .findSleepSpot, .travelToInterest:
             tuning.locomotionAnimationRate
+        case .lookAtPointer:
+            lastPointerDecision?.attentionRate ?? 1
         default:
             1
         }

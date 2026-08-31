@@ -181,6 +181,12 @@ def main() -> None:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--frames", type=int, default=4)
     parser.add_argument("--height", type=int, default=148, help="target visible height")
+    parser.add_argument(
+        "--body-width",
+        type=int,
+        default=0,
+        help="scale to this width across the haunches instead of to --height",
+    )
     parser.add_argument("--baseline", type=int, default=175)
     parser.add_argument("--centre", type=float, default=95.5)
     parser.add_argument("--slack", type=int, default=40, help="chroma key margin")
@@ -225,12 +231,38 @@ def main() -> None:
         box = frame.getchannel("A").point(lambda v: 255 if v > 8 else 0).getbbox()
         return box[3] - box[1]
 
-    reference_height = (
-        max(visible_height(frame) for frame in frames)
-        if args.scale_frame < 0
-        else visible_height(frames[args.scale_frame])
-    )
-    scale = args.height / reference_height
+    def body_width(frame: Image.Image) -> int:
+        """Width across the haunches, where no ear or tail reaches."""
+        mask = frame.getchannel("A").point(lambda v: 255 if v > 8 else 0)
+        pixels = mask.load()
+        box = mask.getbbox()
+        height = box[3] - box[1]
+        band = range(
+            box[3] - round(height * 0.22) - round(height * 0.16),
+            box[3] - round(height * 0.04),
+        )
+        columns = [
+            x
+            for x in range(frame.width)
+            for y in band
+            if 0 <= y < frame.height and pixels[x, y]
+        ]
+        return max(columns) - min(columns) + 1
+
+    chosen = frames[max(args.scale_frame, 0)]
+    if args.body_width:
+        # Total height is the wrong yardstick when a pose changes how much of it
+        # is ear. Pricked ears made one strip scale down until its head was 13%
+        # smaller than the approved one, which reads as a different cat -- so the
+        # body is matched instead and the ears are allowed to add height.
+        scale = args.body_width / body_width(chosen)
+    else:
+        reference_height = (
+            max(visible_height(frame) for frame in frames)
+            if args.scale_frame < 0
+            else visible_height(chosen)
+        )
+        scale = args.height / reference_height
 
     args.out.mkdir(parents=True, exist_ok=True)
     for index, frame in enumerate(frames):
