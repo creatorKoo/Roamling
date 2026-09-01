@@ -69,15 +69,89 @@ macOS에서는 ImageIO가 공짜로 해주던 일이라 결정이 필요한 줄 
 
 ## 3. 결정
 
-### Swift on Windows로 간다
+### 왜 지금 다시 여는가
 
-**Options:** Swift on Windows 단일 저장소, Rust/C# 쉘 + Swift core FFI, Core 재작성.
+`docs/architecture.md`의 "Swift core now, extraction later"가 원래 결정이다.
 
-**Chosen:** Swift on Windows. `docs/architecture.md`의 "Swift core now, extraction later"는
-미확인 Windows 요구 때문에 FFI를 미뤘는데, 요구가 확인된 지금도 결론은 같다. Core가 이미
-순수 Foundation이고 **테스트 자산이 언어 독립이 아니라 Swift로 돼 있다.** FFI 경계를 그으면
-3,156줄 Core는 넘어가지만 B1의 1,732줄과 테스트는 경계 밖에 남는다 — C ABI가 사주는 것이
-없다. Rust 쉘은 Swift-on-Windows가 실제로 막혔다는 증거가 나온 뒤의 카드로 남긴다.
+> **Chosen:** Swift pure module. boundary와 tests는 얻되 미확인 Windows 요구를 위해
+> FFI를 선행하지 않는다.
+
+Swift가 최선이라서가 아니라 **의도적인 유예**였다. Windows가 아직 가정일 때 FFI 세금을
+미리 내지 않고 경계와 테스트만 확보해 둔 것이고, 그 규율이 지켜져서 3,156줄이 되도록
+Core에 플랫폼 import가 들어가지 않았다. 지금 선택지를 논할 수 있는 것이 그 결과다.
+**"Windows가 실제가 되면 다시 연다"가 계획이었고 지금이 그 시점이다.**
+
+### 선택지는 넷이다
+
+**Options:**
+
+| | 코드베이스 | Swift가 Windows에서 빌드돼야? | Win32 난이도 | 새로 쓸 코드 | 영구 비용 |
+|---|---|---|---|---|---|
+| **A. Swift 단일** | 1벌 | 예 | 높음 | ~1,500줄 | 없다 |
+| **A′. Swift core + C# 쉘** | 1.5벌 | 예 | 낮음 | ~2,000줄 | 두 언어 seam |
+| **B. C# 전체** | **2벌** | 아니오 | 낮음 | ~13,000줄 | **로직 영구 중복** |
+| **C. Rust 전면 재작성** | 1벌 | 아니오 | 중간 | ~16,000줄 | macOS까지 재검증 |
+
+**Chosen: A.** 이유는 "Swift가 Windows에서 좋아서"가 아니다 — **포팅 대상의 88%가 UI가
+아니기 때문이다.** 1절 표대로 진짜 macOS 전용 코드는 1,540줄뿐이고 나머지 11,481줄
+(로직 7,932 + 테스트 3,549)은 이미 쓰여 있고 이미 게이트를 통과했다. 포트의 어려운 부분은
+작지만 하필 Swift가 제일 약한 영역이고, 큰 부분은 Swift가 제일 강한 영역이다.
+
+재구현 안(B·C)의 숨은 비용은 코드가 아니라 **검증**이다. MVP 0~0.7의 값들 — walk 40pt/s,
+pause 12초, catch radius 74pt, notice 170pt — 은 유닛테스트가 아니라 사용자가 3-display
+앞에 앉아 닫은 값이다. 재구현하면 그 판정을 전부 다시 받아야 하고, "귀엽다"는 회귀
+테스트로 잡히지 않는다.
+
+### A′는 A의 대안이 아니라 대피로다
+
+경계 후보 타입이 전부 `Codable`이라(`DisplaySnapshot`, `WindowSnapshot`,
+`PointerSnapshot`, `FocusSnapshot`, `DesktopWorldSnapshot`, `WorldPoint`, `WorldRect`)
+구조체 마샬링을 손으로 쓸 필요가 없다. 경계는 "스냅샷 in → 표시할 프레임 out"에 둔다.
+프레임 rect 표를 시작할 때 한 번 넘기면 C# 쪽은 아틀라스 규격을 몰라도 되고
+`CLAUDE.md`의 행별 프레임 수 계약이 두 언어로 갈라지지 않는다.
+
+다만 **A′도 Swift가 Windows에서 빌드돼야 한다** — Core를 Windows DLL로 만들어야 하므로
+W0의 1·2번은 그대로 남고 회피되는 것은 4번뿐이다. 대가는 한 앱에 두 언어·두 빌드
+시스템·두 디버거, `RoamlingPet` 2,094줄의 분할, 그리고 Swift 런타임 DLL과 .NET 런타임을
+모두 싣는 가장 무거운 배포다.
+
+### Rust는 포팅 결정이 아니라 재작성 결정이다
+
+**C를 "A가 실패하면 가는 대피로"로 두지 않는다.** 대피로는 원래 계획보다 작아야 하는데
+C는 신규 ~16,000줄에 더해 **이미 동작하는 macOS 앱까지 갈아엎는다.** Swift-on-Windows가
+막혔다는 사실이 C를 싸게 만들어주지도 않는다 — C의 비용은 처음부터 그 값이다. A의 작은
+대피로는 A′다.
+
+장기적으로 C가 최선의 최종 형태인 것은 맞다. 1벌이고, 바이너리 하나로 배포되며(Swift는
+Windows에서 런타임 DLL 동봉), `windows-rs`가 Microsoft 공식이고, `image` 크레이트가
+WebP를 그냥 디코드해 B3가 사라진다.
+
+**다만 배터리 이득은 기대만큼 크지 않다.** `docs/architecture.md`의 성능 모델대로 이 앱의
+비용은 active travel의 60Hz 재그리기와 capture 주기(1회 62ms, 3~6초 간격)가 지배하며 둘 다
+언어와 무관하다. Swift도 ARC가 붙은 네이티브 코드지 VM이 아니다. 실제 이득은 배포 단순함과
+메모리 소폭, 그리고 1벌이라는 구조다.
+
+**판단 시점은 "A가 실패했을 때"가 아니라 "Swift 코드베이스가 제 역할을 다했을 때"다.**
+지금은 MVP 4 진행 중이고 5·6이 남았다 — 아직 발견 중인 동작 스펙을 재작성하면 움직이는
+과녁을 두 번 구현하고 게이트를 양쪽에서 다시 받게 된다. 사다리가 멈춘 뒤에 그 자체의
+근거로 결정한다.
+
+### W0가 판정표다
+
+이 결정은 지금 확정하지 않는다. W0의 결과가 분기를 정한다.
+
+```text
+W0 1·2번(툴체인/Core 빌드/테스트) 통과 + 4번(layered window) 통과
+        -> A. Swift 단일. 가장 단순하다.
+
+W0 1·2번 통과 + 4번이 Swift에서 지옥
+        -> A'. Core는 살리고 UI만 C#으로.
+
+W0 1·2번부터 막힘
+        -> B. Swift on Windows 자체를 포기한다.
+
+어느 경우든 C는 여기서 고르지 않는다.
+```
 
 ### 리팩터가 먼저, Windows 코드는 나중
 
@@ -86,6 +160,11 @@ macOS에서는 ImageIO가 공짜로 해주던 일이라 결정이 필요한 줄 
 **Chosen:** 리팩터 선행. W1·W2는 Windows 코드가 0줄이고 전부 macOS에서 검증된다. 이걸 먼저
 끝내면 Windows 작업이 "adapter 채우기"로 줄어든다. 순서를 뒤집으면 검증되지 않은 두 플랫폼
 위에서 동시에 리팩터하게 된다.
+
+**W1·W2는 A·A′·B 어느 쪽으로 가도 버려지지 않는다.** Runtime을 macOS 모듈에서 빼내고
+`PetAsset`을 `CGImage`가 아닌 데이터 포맷으로 만드는 일은, 어떤 언어로 포팅하든
+"무엇을 재구현해야 하는가"를 정의해준다. C로 가더라도 그 경계가 이식 명세가 된다.
+즉 이 리팩터는 언어 선택에 건 베팅이 아니다.
 
 ## 4. 게이트
 
@@ -103,6 +182,21 @@ macOS에서는 ImageIO가 공짜로 해주던 일이라 결정이 필요한 줄 
 
 3번과 4번이 진짜 미지수다. `Sources/RoamlingMac/LocalizedText.swift`가 20줄이라 `.strings`가
 안 되면 JSON 로더로 갈아끼우면 되지만, **모르는 상태로 W4를 계획하지 않는다.**
+
+#### 4번은 Rust로도 만든다 — 대조군
+
+오버레이 창이 이 포트에서 가장 위험한 단일 항목이다: per-pixel alpha + click-through +
+always-on-top + 멀티모니터 + per-monitor DPI v2. 이걸 Swift(`WinSDK`)와
+Rust(`windows-rs`) **양쪽으로 각각 200줄쯤** 만든다.
+
+Swift 하나만 해서 실패하면 **Swift 탓인지 Windows 탓인지 구분되지 않는다.** 판정은 이렇다:
+
+- 둘 다 된다 → 제품 요구가 Windows에서 성립한다. Swift가 얼마나 더 아픈지 실측치를 얻는다
+- Rust만 된다 → 문제는 Windows가 아니라 Swift다. A′ 또는 B로 간다
+- 둘 다 안 된다 → 언어 문제가 아니라 **요구사항을 다시 봐야 한다.** 가장 중요한 정보다
+
+**엄격히 오버레이 창만 만든다.** 로직을 Rust로 옮겨 "느낌을 보는" 순간 그것이 C의
+시작이고, C는 W0에서 고르는 선택지가 아니다.
 
 ### W1 — Runtime 추출 (macOS, 동작 변화 0)
 
