@@ -236,7 +236,76 @@ Window / Focus / Capture. 5절 참조.
 
 ### W6 — 패키징
 
-`build-app.sh` 대응물, Authenticode 서명(없으면 SmartScreen 경고), 자동시작 등록.
+10절의 실측(17파일 · 56.0 MB · zip 21.3 MB · 단일 파일 불가)이 이 게이트의 입력이다.
+
+**Inno Setup + per-user 설치.** `scripts/build-installer.ps1`이 `scripts/build-app.sh`의
+대응물이 된다:
+
+```text
+1. swift build -c release -Xlinker /SUBSYSTEM:WINDOWS -Xlinker /ENTRY:mainCRTStartup
+2. exe + *.resources + 런타임 DLL 16개를 스테이징
+3. iscc roamling.iss  ->  Roamling-Setup.exe (약 21 MB)
+```
+
+2번의 DLL 수집은 `dumpbin /dependents`를 재귀 순회해 실제로 쓰이는 것만 모은다. W0에서
+그 방법으로 56 MB 폴더를 만들어 **PATH에서 Swift를 지운 채 실행되는 것까지 확인했다.**
+
+**per-user 설치가 핵심 선택이다.** `%LOCALAPPDATA%\Programs\Roamling`에 깔면 **UAC 프롬프트가
+아예 뜨지 않고**, 자동시작도 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`이라 권한이
+필요 없다. 데스크톱 펫을 설치하는데 관리자 승인을 묻는 것은 그 자체로 *Never annoying* 위반이다.
+
+포터블 zip도 같이 낸다(공짜로 나온다). winget 매니페스트는 GitHub 릴리스의 exe를 가리키기만
+하면 되므로 나중에 붙인다.
+
+**MSI/WiX는 쓰지 않는다** — 기업 배포 수요 없이 복잡도만 는다. **MSIX/Store도 아니다** —
+서명·심사·샌드박스 마찰이 이 단계에 맞지 않는다.
+
+#### 반드시 걸릴 함정 — `*.resources`
+
+`CLAUDE.md`가 macOS에 대해 경고하는 그것이 Windows에서 그대로 재발한다. `build-app.sh`가
+`$BIN_DIR/*.bundle`을 복사하듯, Windows 설치 스크립트는 **`*.resources` 디렉터리**를
+복사해야 한다 — W0의 l10n 탐침에서 `L10nProbe_L10nProbe.resources`로 확인된 형태다.
+**빠지면 `Bundle.module`이 런타임에 trap한다.** 91개 UI 문자열과 Mochi 아틀라스가 거기 있다.
+
+#### 서명
+
+서명 없는 설치 파일은 SmartScreen 경고가 뜬다. 초기에는 서명 없이 내고 README에 설명하되,
+**Azure Trusted Signing**을 우선 검토한다 — 전통적 OV/EV 인증서보다 싸고 Microsoft가 CA라
+평판이 빨리 쌓인다. **가격과 자격 요건은 바뀌므로 착수 시점에 직접 확인할 것.**
+
+macOS의 `scripts/signing.env` 패턴을 그대로 가져온다 — identity를 git-ignore된 파일에 두고,
+없으면 서명 없이 빌드해서 기여자 빌드가 깨지지 않게 한다.
+
+### W7 — 자동 업데이트 (양 플랫폼 공통)
+
+**첫 배포부터 넣는다.** 나중에 붙이면 이미 설치된 사용자에게 도달할 방법이 없다.
+
+**Sparkle(macOS) + WinSparkle(Windows).** 둘은 **같은 appcast XML 피드 형식**을 쓴다. 피드
+하나와 릴리스 절차 하나에 얇은 플랫폼 어댑터 둘 — 이 저장소의 모듈 경계와 같은 모양이다.
+Sparkle은 Swift에서 그대로 쓰이고 WinSparkle은 C DLL이라 Windows 쪽에서 얇은 shim이 필요하다.
+
+**대안은 Velopack이다.** Windows·macOS를 한 도구로 덮고 델타 업데이트를 준다. Swift 바인딩
+유무는 착수 전에 확인해야 한다. Sparkle 계열의 강점은 macOS에서 사실상 표준이라는 것이고,
+Velopack의 강점은 릴리스 파이프라인이 하나라는 것이다. **둘 다 착수 시점에 현재 상태를
+확인하고 정한다** — WinSparkle의 유지보수 상태와 Sparkle 2.x와의 appcast 호환도 같이 본다.
+
+#### 이 게이트의 진짜 비용은 업데이터가 아니라 서명이다
+
+- **macOS**: Sparkle의 EdDSA 서명은 공짜지만, 앱 자체가 Developer ID 서명 + notarize가
+  안 되면 Gatekeeper가 막는다. `CLAUDE.md`가 이미 경고하듯 ad-hoc 서명은 빌드마다 다른 앱으로
+  보여 Accessibility 권한까지 잃는다.
+- **Windows**: 서명이 없으면 **업데이트할 때마다** SmartScreen 경고를 보게 된다.
+
+**서명 없이 자동 업데이트를 먼저 붙이면 업데이트가 없느니만 못하다.** 사용자가 매번 경고를
+클릭하게 된다. 순서는 서명 → 업데이터다.
+
+#### 제품 원칙과 충돌하지 않게
+
+업데이트 알림은 *Never annoying*이 금지하는 종류의 방해다. **백그라운드에서 조용히 받고 다음
+실행에 적용한다.** 모달을 띄우지 않고, 재시작을 요구하지 않는다. Sparkle이 이 모드를 지원한다.
+
+GPL-3.0이므로 배포하는 각 버전에 대응하는 소스를 계속 제공해야 한다 — 릴리스마다 태그를
+남기면 충족된다.
 
 ## 5. 매핑 표에 더할 것
 
@@ -308,11 +377,17 @@ MVP 4 exit rule 충족
    (macOS 머신) W1 -> W2
         |
         v
-   W3 -> W4 -> W5 -> W6
-             ^
+   W3 -> W4 -> W5 -> W6 -> W7
+             ^                ^
+             |                +-- 자동 업데이트. 양 플랫폼 공통이고 macOS도 함께 받는다.
+             |                    서명이 선행 조건이다 (W6).
+             |
              +-- 진입 전에 보조 화면을 primary 왼쪽/위로 옮겨 음수 좌표만 확인
                  (다중 디스플레이 본체는 2026-09-01에 통과, 9절)
 ```
+
+**W7만 Windows 전용이 아니다.** 자동 업데이트는 macOS에도 없는 기능이라 이 게이트에서 양쪽이
+같이 생긴다. 그래서 피드 형식과 릴리스 절차를 한 번만 정하는 것이 중요하다.
 
 모듈이 실제로 움직이면 `CLAUDE.md`의 모듈 경계 절과 `docs/architecture.md`의 Future
 migration 절을 같이 고친다.
