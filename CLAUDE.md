@@ -58,6 +58,12 @@ RoamlingApp/      entry point
 `docs/mvp.md`(현재 **MVP 4: It Finds Empty Space**)에 있다. exit rule이 있으므로 사용자가
 실사용 확인을 하기 전에 다음 MVP로 넘어가지 않는다.
 
+**이 경계가 Windows port의 전제다.** `docs/windows.md`에 모듈별 실측 이식 비용, 언어
+선택 네 가지의 비교, 그리고 2026-09-01에 Windows에서 실행한 W0 스파이크 결과가 있다.
+`RoamlingCore`는 실제 `Package.swift`로 Windows에서 무수정 빌드되고 Core 테스트 72개가
+통과한다. **포팅·언어 선택·Rust 재작성 논의를 시작하기 전에 그 문서를 읽는다** — 특히
+11절이 Rust 전환 판단에 필요한 실측치를 모아 둔 브리프다.
+
 ## 상태 어휘는 Petdex가 정본이다
 
 `PetdexState` 9종의 **뜻·표준 길이·transient/steady 분류는 우리가 정하지 않는다.** upstream
