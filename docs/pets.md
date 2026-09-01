@@ -149,38 +149,54 @@ flowchart LR
 ## 5. 실측 커버리지
 
 ```text
-FatMochi (내장, 8×7)        authored 16 / 대체 0
+FatMochi (내장, 8×7)              authored 16 / 대체 0
   트랙: caught · dragged · sitting · sleeping · stretching · landing ·
         idle · running-left/right · failed · celebrate · jumping · review ·
         running · waiting · watching · waving · working
 
-Mochi (내장, 9행)           authored 10 / 대체 6
-  대체: caught · dragged · gaze · sit · sleep · stretch
+Mochi v3 (내장, 8×9 + 확장 8×3)   authored 15 / 대체 1
+  대체: dragged ← caught
 
-Mochi (외부 패키지, 8×9)     authored  9 / 대체 7
-  대체: 위 6종 + landing
+Mochi v3 (외부 패키지, 같은 시트)  authored 14 / 대체 2
+  대체: dragged ← caught · landing ← jumping
+
+표준 9행만 있는 패키지             authored  9 / 대체 7
+  대체: caught · dragged · gaze · sit · sleep · stretch · landing
 ```
 
-FatMochi만 완전한 이유는 **Petdex 규격을 따르지 않기 때문이다.** 8×7에 Roamling 자체
-행 배치를 쓰고, 없는 에이전트 상태(review·waiting·jumping 등)는 팩토리가 idle과 걷기에서
-합성해 채운다. 정확히 반대편이 비어 있고, 그 반대편은 합성으로 메울 수 있다.
+**확장 시트가 간격을 거의 닫았다.** 표준 아홉 행은 `idle` · 걷기 둘 · `celebrate` ·
+`spark` · `fail` · `paw` · `work` · `observe` 아홉을 준다. 확장 시트가 `gaze` · `sleep` ·
+`caught` · `sit` · `stretch` 다섯을 더해 열넷이 되고, 남는 둘은 의도된 대여다 —
+`dragged`는 `caught`와 물리적으로 같은 상황이고, `landing`은 진짜로 hop이라 점프 프레임이
+맞는 그림이다. 내장 빌드는 그 `landing`을 점프 셀에서 역순·논루프로 다시 타이밍한 자기
+트랙으로 들고 있어서 하나가 더 authored다. 이 값들은
+`Tests/RoamlingLogicTests/PetLogicTests.swift`가 고정한다.
 
-**자는 그림·잡히는 그림이 진짜인 펫은 지금 FatMochi뿐이다.**
+FatMochi가 열여섯 전부인 이유는 **Petdex 규격을 따르지 않기 때문이다.** 8×7에 Roamling
+자체 행 배치를 쓰고, 없는 에이전트 상태(review·waiting·jumping 등)는 팩토리가 idle과
+걷기에서 합성해 채운다. 정확히 반대편이 비어 있고, 그 반대편은 합성으로 메울 수 있다.
 
 ## 6. Roamling 전용 펫을 만든다면
 
 선택은 셋이다. 가운데가 나중에 생겼고, 대개 그게 맞다.
 
-| | Petdex 규격 그대로 | 빈 셀 + `roamling.json` v2 | 행을 늘린 Roamling 확장 |
+| | Petdex 규격 그대로 | 별도 확장 시트 + `roamling.json` | 행을 늘린 Roamling 확장 |
 |---|---|---|---|
-| 격자 | 8×9 또는 8×11 | **8×9 그대로** | 자유 (`frame`으로 선언) |
+| 격자 | 8×9 또는 8×11 | **`pet.json`은 8×9 그대로**, 확장은 자기 시트 | 자유 (`frame`으로 선언) |
 | 갤러리 제출 | 가능 | **가능** (`pet.json`이 규격 그대로) | 불가 |
-| sleep·sit·gaze·caught | 영구 대체 | 진짜 그림 (칸이 닿는 만큼) | 진짜 그림 |
-| 만드는 비용 | 9행 | 9행 + 빈 셀 11~15칸 | 14~15행 |
+| sleep·sit·gaze·caught | 영구 대체 | 진짜 그림 | 진짜 그림 |
+| 만드는 비용 | 9행 | 9행 + 확장 행 | 14~15행 |
 
-가운데 방식은 표준 9행이 쓰지 않는 셀에 그림을 넣고, 그 인덱스를 `roamling.json`의
-`animations`로 선언한다. 격자가 안 변하므로 Petdex 검증을 통과하고, Codex는 선언하지 않은
-이름을 그냥 보지 못한다. 현재 Mochi 패키지에는 그런 셀이 15칸 있다.
+**Mochi v3가 가운데 방식이고, 이게 대개 맞다.** `roamling.json`이 자기 `spritesheetPath`와
+`frame`을 선언하면 확장 그림은 그 시트에 산다. `pet.json`과 `spritesheet.webp`는 9행 계약
+그대로 남아 Petdex 검증을 통과하고, Codex는 선언하지 않은 이름을 그냥 보지 못한다.
+
+인덱스는 두 시트를 하나로 이어 센다 — 패키지가 8×9면 72번이 확장 시트의 첫 칸이다.
+**그래서 한 트랙이 두 시트를 섞을 수 있다.** Mochi v3의 `gaze`가 그 경우로, 확장 시트에
+새 그림을 그리는 대신 표준 `review` 행(64~69)을 커서 거리에 따라 다시 타이밍한다.
+
+표준 9행이 쓰지 않는 빈 셀(Mochi 기준 15칸)에 넣는 것도 같은 방식으로 되지만, 확장이
+15칸에 묶인다. Mochi v3는 `stretching` 한 행만으로 8칸을 쓰므로 별도 시트를 택했다.
 
 행까지 늘린다면 이렇게 구성하는 걸 권한다. 앞 9행을 규격 순서 그대로 두는 것이 핵심이다 —
 그러면 같은 시트를 잘라 Petdex용 8×9를 그대로 뽑아낼 수 있다.

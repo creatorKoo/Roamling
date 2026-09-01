@@ -1,15 +1,16 @@
 # Behavior flow: 어떤 상황에 어떤 그림이 뜨는가
 
 `docs/architecture.md`는 모듈 경계를, `docs/pets.md`는 capability와 패키지 사이의 간격을,
-`docs/art/mochi-v2-animation-spec.md`는 지금 시트에 무엇이 그려져 있는지를 다룬다. 이
-문서는 그것들을 **시간 순서로 이어 붙인 것**이다 — 펫이 idle에서 시작해서 무엇 때문에
+`docs/art/mochi-v3-plan.md`의 "완료 — 실제로 만들어진 것"은 지금 시트에 무엇이 그려져
+있는지를 다룬다. 이 문서는 그것들을 **시간 순서로 이어 붙인 것**이다 — 펫이 idle에서 시작해서 무엇 때문에
 무엇으로 넘어가고, 그 순간 화면에 실제로 어떤 그림이 뜨는가.
 
 행을 새로 그리기 전에 이 문서를 읽는다. 그림의 좋고 나쁨은 그림만 봐서는 판단할 수 없고,
 **그 그림이 몇 초 동안 떠 있느냐**에 달려 있기 때문이다. 0.35초 스치는 자리와 40초 도는
 자리는 같은 기준으로 그리면 안 된다.
 
-기준 패키지는 `~/.codex/pets/mochi-v2` (8열 × 9행)이다.
+기준 패키지는 `~/.codex/pets/mochi-v3`다 — 표준 `spritesheet.webp` 8열 × 9행에 확장
+`roamling.webp` 8열 × 3행이 얹힌다. 내장 마스코트도 같은 바이트를 쓴다.
 
 이 문서는 **지금 그렇게 동작한다**는 기록이다. 그 어휘를 왜 그렇게 쌓았는지는
 `docs/state-contract.md`에 있다.
@@ -31,7 +32,7 @@ ReactionPolicy  BehaviorController    PetCapabilityMapping    AnimationResolver
 어휘를 어떻게 쌓았는지는 `docs/state-contract.md`에 있다. 요약하면 capability 9종은
 Petdex 행을 그대로 뜻하고, 나머지 7종은 Petdex에 개념이 없는 확장이다.
 
-## 2. mochi-v2가 실제로 보여주는 것
+## 2. 표준 9행만 있을 때 보여주는 것
 
 | 상태 | capability | 실제 재생되는 행 | 그 그림 | 출처 |
 |---|---|---|---|---|
@@ -134,9 +135,10 @@ idle (row 0, 앉아서 깜박)
 이미 비켜 주므로, 75초를 채운 자리가 덮여 있을 일이 거의 없다. 어느 갈래를 탔는지는
 진단 로그 `rest` 항목에 남는다.
 
-**여기서 눈으로 확인되는 사실**: 잠들기·자기·깨기·기지개가 전부 이미 보고 있던 두 그림
-(row 6, row 0)으로 처리된다. 75초를 기다려 재운 결과가 "앉은 자세 그대로"라서, 지금
-빌드에서는 펫이 잤는지 아닌지 사용자가 알 수 없다.
+**확장 시트가 들어오기 전에는** 이 네 상태가 전부 이미 보고 있던 두 그림(row 6, row 0)
+으로 처리됐다. 75초를 기다려 재운 결과가 "앉은 자세 그대로"라서 펫이 잤는지 아닌지
+알 수가 없었다. 지금은 넷이 각자 그림을 갖는다 — 꾸벅이는 `sitting`, 웅크린 `sleeping`,
+그 둘을 잇는 `stretching`.
 
 ## 4. 흐름 B — 커서가 다가올 때
 
@@ -281,7 +283,7 @@ steady로 분류한다. 이전에는 1.2초 만에 `observe`로 넘어가서, �
 1. **row 7 `running`** — 검색 외 모든 tool 실행 중. 타이머가 없어 툴이 도는 내내 돈다.
 2. **row 0 `idle`** — 기본값. 확장 시트가 없는 패키지에서는 `wake` · `stretch` · 커서 응시가 모두 여기로 떨어진다.
 3. **row 1/2 걷기** — 배회, 이동, 도망, 잠자리 찾기(자리가 안 좋을 때만).
-4. **row 6 `waiting`** — 승인 대기(응답까지), 앉기 2.4초, 잠, 잡힘.
+4. **row 6 `waiting`** — 승인 대기(응답까지)와 끌림. 앉기·잠·잡힘은 확장 행으로 나갔다.
 5. **row 8 `review`** — 파일을 읽거나 검색할 때 1.03초씩.
 6. **row 3 `waving`** — 턴 완료 0.70초.
 7. **row 4 `jumping`** — 턴 시작과 착지 각 0.84초.
@@ -296,24 +298,33 @@ steady로 분류한다. 이전에는 1.2초 만에 `observe`로 넘어가서, �
 
 ## 8. 이 흐름을 보고 알 수 있는 것
 
-- **row 6이 여전히 다섯 상태를 겸한다.** 승인 대기·앉기·잠·잡힘·끌림이 한 그림이다.
-  집어 올려도, 자고 있어도 화면이 안 바뀐다.
-- 대체로 도는 상태 중 **그릴 그림이 없는 것은 이제 없다.** `gaze`는 커서 거리로 `review`
-  행의 재생 속도를 바꾸는 방식으로, 나머지는 확장 시트로 해결됐다.
-  `gaze`는 조용해진 대신 아무 반응이 없어졌으므로, 빈 셀의 첫 수요다.
-- **빈 셀이 15칸 있다.** 행 단위로는 꽉 찼지만 셀 단위로는 그렇지 않다.
+- **row 6이 겸하는 상태가 다섯에서 둘로 줄었다.** 남은 것은 승인 대기와 끌림이고, 앉기·
+  잠·잡힘은 확장 행이 가져갔다. 이제 집어 올리면 화면이 바뀐다.
+- 대체로 도는 상태 중 **그릴 그림이 없는 것은 없다.** `gaze`는 커서 거리로 `review` 행의
+  재생 속도를 바꾸는 방식으로, 나머지는 확장 시트로 해결됐다.
+- **빈 셀은 표준 15칸 · 확장 5칸이다.** 행 단위로는 꽉 찼지만 셀 단위로는 그렇지 않다.
 
   ```text
-  0 idle           XXXXXX..     3 waving   XXXX....     6 waiting  XXXXXX..
-  1 running-right  XXXXXXXX     4 jumping  XXXXX...     7 running   XXXXXX..
-  2 running-left   XXXXXXXX     5 failed   XXXXXXXX     8 review    XXXXXX..
+  표준 spritesheet.webp (8×9, 57/72)          확장 roamling.webp (8×3, 19/24)
+  0 idle           XXXXXX..                    9  sleeping+caught  XXXXXXX.
+  1 running-right  XXXXXXXX                    10 sitting          XXXX....
+  2 running-left   XXXXXXXX                    11 stretching       XXXXXXXX
+  3 waving         XXXX....
+  4 jumping        XXXXX...
+  5 failed         XXXXXXXX
+  6 waiting        XXXXXX..
+  7 running        XXXXXX..
+  8 review         XXXXXX..
   ```
 
-  다만 확장은 이 칸이 아니라 **`roamling.json`이 가리키는 자기 시트**에 둔다. 그래야
-  `pet.json`과 `spritesheet.webp`가 9행 계약 그대로 남고 확장이 15칸에 묶이지 않는다.
-- **`jumping` 행의 시작·끝 프레임이 지면선보다 25px 아래다.** 이제 이 행은 턴 시작과 착지
-  둘 다에 쓰이므로 더 자주 보인다. `pet_qa.py`의 `--allow-airborne 4`가 이 행을 면제해서
-  게이트가 잡지 못한다. 실측은 `docs/art/mochi-v2-animation-spec.md`에 있다.
+  확장은 표준 시트의 빈 칸이 아니라 **`roamling.json`이 가리키는 자기 시트**에 둔다.
+  그래야 `pet.json`과 `spritesheet.webp`가 9행 계약 그대로 남는다. 인덱스는 패키지 격자
+  끝에서 이어지므로 72번이 확장 시트의 첫 칸이다 — 그래서 한 트랙이 두 시트를 섞을 수
+  있고, `gaze`가 표준 64~69를 빌리는 것이 그 경우다.
+- **지면선이 모든 행에서 175로 맞았다.** `jumping`의 시작·끝 프레임이 25px 가라앉아 턴이
+  시작될 때마다 바닥에 잠기던 것이 이때 고쳐졌다. `pet_qa.py`의 면제도 행 단위(`--allow-airborne 4`)
+  에서 프레임 단위(`--allow-airborne r4c1`)로 좁혀져서, 지금 면제되는 여덟 프레임은 전부
+  실제로 공중에 있다. 정식 게이트는 57프레임 0실패다 — 명령은 `docs/art/mochi-v3-plan.md` 0.5절.
 
 
 ## 9. 확인 방법

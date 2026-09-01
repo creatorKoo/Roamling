@@ -80,9 +80,10 @@ failed 8 · waiting 6 · running 6 · review 6. 더 그리면 뒤는 아무도 �
 점프 프레임을 그대로 빌린다.
 
 층 구조와 결정 근거는 `docs/state-contract.md`, 어떤 상황에 어떤 그림이 뜨는지는
-`docs/behavior-flow.md`, 현재 시트에 무엇이 그려져 있는지는
-`docs/art/mochi-v2-animation-spec.md`, 무엇을 어떻게 다시 만드는지는
-`docs/art/mochi-v3-plan.md`에 있다. **행을 새로 그리기 전에 네 문서를 읽는다.**
+`docs/behavior-flow.md`, **지금 시트에 무엇이 그려져 있는지는 `docs/art/mochi-v3-plan.md`의
+"완료 — 실제로 만들어진 것"** 절에 있다. 같은 문서의 나머지는 v3를 만들기 전의 진단과
+계획이라 현재 상태가 아니고, `docs/art/mochi-v2-animation-spec.md`는 v2 시트의 기록이다.
+**행을 새로 그리기 전에 이 문서들을 읽는다.**
 
 ## Atlas 규격은 두 종류다 — 절대 섞지 말 것
 
@@ -95,7 +96,7 @@ failed 8 · waiting 6 · running 6 · review 6. 더 그리면 뒤는 아무도 �
 내장 7행 레이아웃(FatMochi)은 Roamling 내부 asset이지 새 Petdex 규격이 아니다.
 
 **내장 Mochi는 이제 shipped `mochi-v3` 패키지와 같은 파일이다.**
-`mochi-standard-atlas.webp`(8×9)와 `mochi-extension-atlas.webp`(8×2)가
+`mochi-standard-atlas.webp`(8×9)와 `mochi-extension-atlas.webp`(8×3)가
 `~/.codex/pets/mochi-v3`의 `spritesheet.webp` · `roamling.webp`와 같은 바이트다.
 패키지가 바뀌면 두 파일을 같이 복사하고, 매니페스트 타이밍은 `MascotPetFactory`에
 옮겨 적혀 있으므로 같이 고친다 — 테스트가 트랙 길이와 프레임이 그려진 칸에
