@@ -55,7 +55,7 @@ RoamlingApp/      entry point
 
 의존 방향은 항상 바깥 → Core다. Core에 AppKit이나 agent-specific 타입을 넣지 않는다.
 자세한 근거는 `docs/architecture.md`, 현재 게이트와 acceptance criteria는
-`docs/mvp.md`(현재 **MVP 2: Claude + Codex**)에 있다. exit rule이 있으므로 사용자가
+`docs/mvp.md`(현재 **MVP 4: It Finds Empty Space**)에 있다. exit rule이 있으므로 사용자가
 실사용 확인을 하기 전에 다음 MVP로 넘어가지 않는다.
 
 ## 상태 어휘는 Petdex가 정본이다
@@ -102,7 +102,7 @@ failed 8 · waiting 6 · running 6 · review 6. 더 그리면 뒤는 아무도 �
 옮겨 적혀 있으므로 같이 고친다 — 테스트가 트랙 길이와 프레임이 그려진 칸에
 떨어지는지를 고정한다.
 
-Petdex 9종과 Roamling capability 14종의 간격, 무엇이 항상 대체되는지, Roamling 전용
+Petdex 9종과 Roamling capability 16종의 간격, 무엇이 항상 대체되는지, Roamling 전용
 펫을 만들 때의 행 구성은 `docs/pets.md`에 있다. 펫이 "동작을 안 한다"고 보일 때 로직을
 파기 전에 그 문서의 커버리지 절을 먼저 읽는다.
 
@@ -161,10 +161,13 @@ Swift 런타임 작업. PNG는 직접 읽어 육안 QA할 수 있다.
 `output/`은 git 미추적이고 `.gitignore`에 있다(수백 MB의 중간 산출물). **커밋에
 포함하지 않는다.** `git add -A` 대신 대상 경로를 명시한다.
 
-진행 중인 sprite 작업의 승인 상태는
-`output/hatch-pet/mochi-row-review/run/qa/approvals.json` 이 유일한 기록이다. 어떤
-row가 approved/pending인지 판단할 때 이 파일을 먼저 읽는다. 승인 근거는 notes 한
-줄뿐이므로, 반려된 후보를 다시 제안하기 전에 사용자에게 확인한다.
+sprite 작업의 승인 상태는 **`output/v3/approvals.json`** 이 유일한 기록이다. 어떤
+트랙이 approved/pending인지 판단할 때 이 파일을 먼저 읽는다. 승인 근거는 notes 한
+줄뿐이므로, 반려된 후보를 다시 제안하기 전에 사용자에게 확인한다. 반려된 후보 자체는
+`output/v3/bcuts/`에 무엇이 틀렸는지와 함께 남아 있다.
+
+`output/hatch-pet/mochi-row-review/run/qa/approvals.json`은 표준 9행만 다루던 이전
+리뷰 런의 기록이라 확장 트랙이 없다. 그쪽을 보지 않는다.
 
 ## Commit
 
