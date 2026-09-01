@@ -116,6 +116,7 @@ Tests/                  pure and loader tests
 docs/research.md        upstream/API research with source locations
 docs/architecture.md    boundaries, decisions, and milestone architecture
 docs/mvp.md             current MVP gate, scope, and acceptance criteria
+docs/windows.md         Windows port measurement, decisions, and gates
 ```
 
 Roamling is an independent project and is not affiliated with OpenAI,

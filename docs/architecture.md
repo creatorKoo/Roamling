@@ -530,6 +530,9 @@ Petdex loader는 사용자 package와 fixtures로 계속 검증한다.
 
 ## Future migration
 
+실측·결정·게이트 순서는 `docs/windows.md`에 있다. 아래 표는 그 문서의 5절에서 몇 군데가
+더 싼 경로로 갱신됐다 — capture는 BitBlt, focus는 `GetGUIThreadInfo`를 먼저 시도한다.
+
 Windows 구현은 아래 domain protocol을 채운다.
 
 ```text
