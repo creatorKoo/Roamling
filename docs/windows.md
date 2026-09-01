@@ -65,7 +65,8 @@ macOS에서는 ImageIO가 공짜로 해주던 일이라 결정이 필요한 줄 
 - 두 hook installer의 하드코딩된 `/usr/bin/curl` (Windows 10 1803+ 는 System32에 `curl.exe`)
 - `PetCatalog`의 `Library/Application Support/Roamling/Pets` → `%APPDATA%\Roamling\Pets`
 - `scripts/test.sh`가 zsh, `scripts/build-app.sh`가 codesign 전제
-- `Localizable.strings`를 `Bundle.module`로 읽는 경로 — corelibs-foundation에서 미확인
+- ~~`Localizable.strings`를 `Bundle.module`로 읽는 경로~~ — **9절에서 해소됐다.
+  Windows에서 그대로 동작하므로 할 일이 아니다.**
 
 ## 3. 결정
 
@@ -138,7 +139,8 @@ WebP를 그냥 디코드해 B3가 사라진다.
 
 ### W0가 판정표다
 
-이 결정은 지금 확정하지 않는다. W0의 결과가 분기를 정한다.
+**2026-09-01에 W0를 실행했고 분기는 A로 닫혔다. 실측치는 9절에 있다.** 아래는 그때
+세워둔 판정 기준이며, 되돌아와 재검토할 때를 위해 남긴다.
 
 ```text
 W0 1·2번(툴체인/Core 빌드/테스트) 통과 + 4번(layered window) 통과
@@ -170,18 +172,19 @@ W0 1·2번부터 막힘
 
 `docs/mvp.md`와 같은 규칙이다 — 한 게이트의 exit 조건을 닫기 전에 다음으로 넘어가지 않는다.
 
-### W0 — 스파이크 (버리는 코드, **Windows 머신에서 한다**)
+### W0 — 스파이크 ✅ 완료 2026-09-01 (버리는 코드, **Windows 머신에서 했다**)
 
-하루 안에 답을 봐야 하는 네 가지:
+**결과는 9절에 있다. 아래는 실행 전에 세운 질문이고, 예측이 빗나간 곳은 그대로 둔다 —
+무엇을 잘못 예상했는지가 다음 게이트의 정보다.**
 
 1. Windows 툴체인에서 `RoamlingCore`가 빌드되는가 (`Package.swift`의 `.linkedFramework`에
-   `.when(platforms:)` 조건이 필요할 것이다)
-2. `RoamlingLogicTests`가 Windows에서 통과하는가
-3. **`Bundle.module`이 리소스를 찾고 `.lproj`/`Localizable.strings`가 읽히는가**
-4. `WinSDK` import로 layered window에 per-pixel alpha가 찍히는가
+   `.when(platforms:)` 조건이 필요할 것이다) — **빌드된다. 조건은 필요 없었다.**
+2. `RoamlingLogicTests`가 Windows에서 통과하는가 — **Core 72개 통과**
+3. **`Bundle.module`이 리소스를 찾고 `.lproj`/`Localizable.strings`가 읽히는가** — **읽힌다**
+4. `WinSDK` import로 layered window에 per-pixel alpha가 찍히는가 — **찍힌다**
 
-3번과 4번이 진짜 미지수다. `Sources/RoamlingMac/LocalizedText.swift`가 20줄이라 `.strings`가
-안 되면 JSON 로더로 갈아끼우면 되지만, **모르는 상태로 W4를 계획하지 않는다.**
+3번과 4번이 진짜 미지수라고 봤는데, 실제로는 **둘 다 통과했고 예상하지 못한 곳(툴체인
+환경변수, 그리고 남은 공백인 다중 디스플레이 미검증)에서 비용이 나왔다.**
 
 #### 4번은 Rust로도 만든다 — 대조군
 
@@ -273,32 +276,138 @@ Windows에서는 성립하지 않는다 — 캡처가 항상 가능하다.
 
 ## 7. 리스크
 
-1. **Swift on Windows로 GUI 상주앱을 만든 전례가 드물다.** Core·Runtime·Sources는 확신이
-   있지만 W4가 미지수다. W0가 이걸 겨냥한다.
-2. **`.lproj` 로컬라이제이션이 corelibs-foundation에서 약할 수 있다.** 확인 필요, 대안은 저렴.
-3. **W2가 렌더링 회귀를 부를 수 있다.** 바이트 비교 게이트로 막는다.
-4. **COM interop** — UIA가 필요해지는 지점.
+W0가 둘을 없애고 하나를 새로 만들었다.
+
+1. ~~Swift on Windows로 GUI 상주앱을 만든 전례가 드물다~~ — **해소.** layered window의
+   7가지 요구가 Swift에서 전부 동작했고, Rust 대조군과 결과가 같았다(9절).
+2. ~~`.lproj` 로컬라이제이션이 corelibs-foundation에서 약할 수 있다~~ — **해소.** 무수정 동작.
+3. **W2가 렌더링 회귀를 부를 수 있다.** 바이트 비교 게이트로 막는다. *(남아 있음)*
+4. **COM interop** — UIA가 필요해지는 지점. 5절대로 `GetGUIThreadInfo`를 먼저 시도해
+   피할 수 있는지 본다. *(남아 있음)*
+5. **다중 디스플레이가 미검증이다.** W0를 돌린 머신에 모니터가 하나뿐이었다. Roamling은
+   다중 디스플레이가 본질인 제품이라 이게 지금 가장 큰 공백이다. **W4 전에 닫는다.** *(신규)*
+6. **툴체인 환경이 macOS보다 무겁다.** vcvars64 + `SDKROOT`이 없으면 `swift build`가
+   깨진 툴체인처럼 실패한다. CI와 기여자 문서에 그대로 비용이 된다. *(신규)*
 
 ## 8. 순서와 머신 제약
 
 리팩터(W1·W2)는 `swift build`로 검증되지 않는 변경을 만들지 않기 위해 **macOS 머신에서
-한다.** 반대로 **W0 스파이크는 Windows 머신의 작업이다** — 툴체인·번들·layered window는
-Windows에서만 확인된다.
+한다.** 반대로 **W0 스파이크는 Windows 머신의 작업이었고 2026-09-01에 끝났다** —
+툴체인·번들·layered window는 Windows에서만 확인된다.
 
 MVP 4가 현재 게이트이고 `RoamlingRuntime`과 capture를 지금 건드리는 중이다. W1을 게이트
 중간에 넣으면 충돌한다.
 
 ```text
-MVP 4 exit rule 충족
+(Windows 머신) W0 스파이크  ✅ 2026-09-01 완료 -> 분기 A
         |
-        +---- (Windows 머신) W0 스파이크 -- 지금 해도 된다. 독립적이고 정보 이득이 크다
+MVP 4 exit rule 충족
         |
         v
    (macOS 머신) W1 -> W2
         |
         v
    W3 -> W4 -> W5 -> W6
+             ^
+             +-- 진입 전에 다중 디스플레이에서 W0.4 재실행 (7절 리스크 5)
 ```
 
 모듈이 실제로 움직이면 `CLAUDE.md`의 모듈 경계 절과 `docs/architecture.md`의 Future
 migration 절을 같이 고친다.
+
+## 9. W0 실행 결과 (2026-09-01)
+
+### 환경
+
+Windows 11 build 26200, **단일** 2560×1600 디스플레이, DPI 144(1.5배).
+Swift 6.3.3 `x86_64-unknown-windows-msvc`, Rust 1.98.0, MSVC 14.44 + Windows SDK 10.0.26100.
+탐침은 `output/w0/`에 있다(git 미추적, 버리는 코드).
+
+### 결과
+
+| 항목 | 결과 |
+|---|---|
+| W0.0 실제 `Package.swift`로 `RoamlingCore` 빌드 | **PASS — 무수정** |
+| W0.1 Core 3,156줄 / 20파일 빌드 | **PASS** |
+| W0.2 `CoreLogicTests` 72개 실행 | **PASS — 72/72** |
+| W0.3 `Bundle.module` + `.lproj` 7개 체크 | **PASS — 7/7** |
+| W0.4a Swift layered window 7종 | **PASS** (컴파일 수정 3곳) |
+| W0.4b Rust layered window 7종 | **PASS** |
+| 캡처 제외 대조 실험 | **PASS** |
+
+### 예상과 달랐던 것 셋
+
+**1. 로컬라이제이션이 그냥 됐다.** 이 문서가 최대 미지수로 꼽았던 항목이다. corelibs-foundation이
+`.strings`를 파싱하고, `ko.lproj`가 해석되고(`menu.pet` → `펫`), 없는 키는 키를 돌려주고,
+`String(format:)` 인자도 살아남는다. **`LocalizedText.swift`는 한 줄도 안 고쳐도 된다.**
+JSON 로더 대안은 필요 없다.
+
+**2. 블로커는 매니페스트가 아니라 소스의 import 두 줄이다.** `.linkedFramework("AppKit")`
+같은 설정이 문제를 일으킬 거라고 4절에 적어뒀는데 **틀렸다** — SwiftPM은 그 타겟을 빌드하지
+않는 한 무시하고, `platforms: [.macOS(.v13)]`도 Windows에서 그냥 무시된다. 실제로 멈추는 곳은
+정확히 두 줄이다:
+
+```text
+Sources/RoamlingSources/Shared/LoopbackHookReceiver.swift:5   import Network        -> W3
+Sources/RoamlingPet/MascotPetFactory.swift:4                  import CoreGraphics   -> W2
+```
+
+`.when(platforms:)` 조건은 지금 당장은 필요 없다. W2·W3의 범위가 그만큼 좁아진다.
+
+**3. Swift Win32 코드가 Rust보다 짧았다.** 같은 7가지를 하는 데 주석 제외 Swift 166줄,
+Rust 261줄(대조 실험 함수를 빼면 약 226줄). 줄 수가 곧 ergonomics는 아니지만, "Swift로
+Win32는 지옥"이라는 가설과는 반대 방향의 증거다.
+
+### 캡처 경로가 실측으로 확인됐다
+
+5절이 근거 없이 주장하던 두 가지를 대조 실험으로 검증했다.
+
+```text
+WDA_NONE             -> BitBlt가 스프라이트 픽셀 17,129개를 읽음
+WDA_EXCLUDEFROMCAPTURE -> 0개
+```
+
+BitBlt는 화면을 실제로 읽고(Windows Graphics Capture 없이 충분), `SetWindowDisplayAffinity`는
+펫을 캡처에서 진짜로 제외한다. MVP 4의 "펫이 자기 자리를 바빠 보이게 만들면 안 된다"가
+Windows에서는 한 줄로 해결된다.
+
+### 툴체인 마찰 — 기록해 둘 것
+
+**Swift on Windows는 자체 링커가 없다. MSVC의 `link.exe`를 부른다.** 평범한 셸에서
+`swift build`를 하면 `toolchain is invalid: could not find CLI tool 'link'`로 죽고,
+`SDKROOT`이 없으면 `unable to load standard library for target 'x86_64-unknown-windows-msvc'`로
+죽는다. 둘 다 툴체인이 깨진 것처럼 보이지만 환경변수 문제다.
+
+macOS에서 `swift build`는 그냥 된다. 이 차이가 CI와 기여자 문서에 그대로 비용이 된다.
+`output/w0/vcvars.ps1`이 그 환경을 만든다.
+
+### Swift 마찰의 실제 크기
+
+탐침에 10곳을 `FRICTION`으로 표시했지만, Rust와 비교했을 때 **진짜 Swift 고유 비용은 셋**이다:
+
+- wide string 리터럴이 없다 — Rust는 `w!()`, Swift는 `[UInt16]` 버퍼를 수명까지 관리
+- 캐스팅 매크로를 importer가 버린다 — `DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2`를
+  `bitPattern: -4`로 손수 재구성
+- nullable import — `CreateCompatibleDC`가 Optional로 들어온다
+
+나머지(`@convention(c)` 캡처 불가, `BLENDFUNCTION` 좁히기 변환, 상수 캐스팅)는 **Rust도 똑같이
+낸 C interop 세금**이다. 세 항목 모두 작은 shim 하나로 흡수된다 — 한 번 쓰면 나머지 코드는
+평범하게 읽힌다. **A′로 대피할 근거가 나오지 않았다.**
+
+### 검증하지 못한 것 — 이게 남은 공백이다
+
+**이 머신은 모니터가 하나라 6번(멀티모니터 이동, 음수 좌표 디스플레이)이 검증되지 않았다.**
+탐침은 `stop 0`과 `stop 1` 모두 같은 원점 `(0,0)`에 착지했고, `negative-origin display
+present: false`였다.
+
+Roamling은 다중 디스플레이가 본질인 제품이다 — MVP 0은 비대칭 3-display 배치에서 닫혔고,
+`DisplayTopology`의 seam·portal·cross-display drag가 전부 거기에 걸려 있다. **W4에 들어가기
+전에 다중 디스플레이 환경에서 탐침을 한 번 더 돌려야 한다.** 그때까지 6번은 미검증이다.
+
+눈으로만 확인 가능한 항목(알파 경계가 부드러운가, 작업표시줄에 버튼이 안 뜨는가, 포커스를
+안 뺏는가, 클릭이 통과하는가)도 사용자 확인이 남아 있다.
+
+### 판정
+
+**A — Swift 단일 코드베이스.** 3절 분기표의 "1·2번 통과 + 4번 통과" 경로다.
+W1·W2로 진행하며, 그 둘은 macOS 머신에서 한다.
