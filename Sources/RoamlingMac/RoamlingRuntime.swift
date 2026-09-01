@@ -969,10 +969,17 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         return cachedFocus
     }
 
+    /// The capture the pet is allowed to judge with right now.
+    ///
+    /// Revoking screen recording has to take effect on the next decision rather
+    /// than leave the pet trusting an old capture, and both callers -- seat
+    /// planning and the nap check -- have to read that the same way.
+    private var judgeableLuminance: LuminanceField? {
+        captureProvider.isAuthorized ? cachedLuminance : nil
+    }
+
     private func planningWorld(focus: FocusSnapshot?) -> DesktopWorldSnapshot {
-        // Revoking screen recording has to take effect on the next seat rather
-        // than leave the pet trusting an old capture.
-        let luminance = captureProvider.isAuthorized ? cachedLuminance : nil
+        let luminance = judgeableLuminance
         guard focus != nil || luminance != nil else { return world }
         return DesktopWorldSnapshot(
             displays: world.displays,
@@ -1299,9 +1306,25 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         // seat. Walking it to a display corner to sleep would throw that away
         // and put the trip back that this gate exists to remove.
         if napInPlace {
+            record("rest", "sleeping in place, on a vetted seat", at: timestamp)
             enterSleep(at: timestamp)
             return
         }
+
+        // Away from an agent, the spot has to answer for itself. Standing on a
+        // clear patch of desktop is the ordinary case, and getting up to walk
+        // to a corner from it is the trip the user actually sees: a pet that
+        // was nodding off suddenly striding across the screen.
+        if BasicSafeZonePlanner.napsInPlace(
+            at: movement.position,
+            objectSize: overlay.objectSize,
+            in: judgeableLuminance
+        ) {
+            record("rest", "sleeping in place, spot reads clear", at: timestamp)
+            enterSleep(at: timestamp)
+            return
+        }
+        record("rest", "tucking into a safe zone, spot unvetted", at: timestamp)
 
         let zones = safeZoneProvider.currentSafeZones(in: world)
         let restWorld = DesktopWorldSnapshot(

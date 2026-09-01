@@ -667,6 +667,39 @@ func coreLogicTests() -> [LogicTest] {
             try expect(left.visibleFrame.insetBy(dx: 48, dy: 52).contains(destination.point))
             try expect(destination.point.distance(to: pointer) > 400)
         },
+        LogicTest(name: "a nap stays in place only on a spot the capture vetted") {
+            // Getting up from a doze to walk to a corner is the trip the user
+            // sees, so it now has to be earned: the pet sleeps where it dozed
+            // off unless the screen says it is sitting on something.
+            let bounds = WorldRect(x: 0, y: 0, width: 800, height: 400)
+            let columns = 40
+            let rows = 20
+            var samples: [Double] = []
+            for row in 0..<rows {
+                for column in 0..<columns {
+                    let text = column < columns / 2
+                    samples.append(text && (column + row).isMultiple(of: 3) ? 0.78 : 0.86)
+                }
+            }
+            let field = try require(LuminanceField(
+                bounds: bounds, columns: columns, rows: rows, samples: samples
+            ))
+            let pet = WorldSize(width: 96, height: 104)
+
+            func naps(at point: WorldPoint, in field: LuminanceField?) -> Bool {
+                BasicSafeZonePlanner.napsInPlace(at: point, objectSize: pet, in: field)
+            }
+
+            try expect(naps(at: WorldPoint(x: 620, y: 200), in: field))
+            try expect(!naps(at: WorldPoint(x: 150, y: 200), in: field))
+
+            // No capture is not permission to sleep anywhere. Without one the
+            // stroll that put the pet here never scored its destination either,
+            // so the safe zone is the only vetted spot on offer.
+            try expect(!naps(at: WorldPoint(x: 620, y: 200), in: nil))
+            // Same answer when the pet stands outside the captured display.
+            try expect(!naps(at: WorldPoint(x: 4_000, y: 4_000), in: field))
+        },
         LogicTest(name: "rest timing is bounded") {
             let rest = RestConfiguration(
                 idleBeforeRest: 1,

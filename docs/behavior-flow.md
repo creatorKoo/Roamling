@@ -94,17 +94,45 @@ idle (row 0, 앉아서 깜박)
  │
  └─ 사용자 입력이 75초 없음 ────▶ sit (확장 sitting, 꾸벅)
      + 커서가 170px 밖                │
-     + 이동 중 아님                   └─ 2.4초 뒤 ──▶ findSleepSpot (row 1/2, 0.75배속 걷기)
-                                                        │  안전지대까지 걸어감
-                                                        │  (에이전트 옆 좋은 자리면 제자리)
-                                                        └─ 도착 ──▶ sleep (확장 sleeping, 웅크림)
-                                                                     │
-                                    입력 0.8초 안에 발생 or 커서 접근 ─┘
-                                                                     ▼
-                                                              wake (확장 stretching 시작)
-                                                                └ 0.7초 ─▶ stretch (확장 stretching, 기지개)
-                                                                             └ 1.0초 ─▶ idle
+     + 이동 중 아님                   └─ 2.4초 뒤 ──▶ 취침 자리 판정 (3.1)
+                                                        │
+                                       제자리 ──────────┤
+                                                        │
+                                       findSleepSpot ───┤  row 1/2, 0.75배속 걷기
+                                       안전지대까지 걸어감    도착하면
+                                                        ▼
+                                                      sleep (확장 sleeping, 웅크림)
+                                                        │
+                       입력 0.8초 안에 발생 or 커서 접근 ─┘
+                                                        ▼
+                                                 wake (확장 stretching 시작)
+                                                   └ 0.7초 ─▶ stretch (확장 stretching, 기지개)
+                                                                └ 1.0초 ─▶ idle
 ```
+
+### 3.1 취침 자리 판정
+
+`sit`이 끝나는 순간 한 번만 묻는다 — **지금 자리가 오래 자도 되는 자리인가.** `sleep`은
+타이머가 없는 유일한 상태라, 서 있는 동안 "옮길 만큼 나쁘지는 않은" 자리로는 부족하다.
+서 있을 때 사용자 작업을 피해 주던 규칙(`PlacementDirector.strollVerdict`의 2.5초 체류
+검사)이 휴식이 movement를 가져가는 순간 멈추기 때문이다.
+
+| 지금 자리 | 결정 | 판정 위치 |
+|---|---|---|
+| 에이전트 옆 — 디렉터가 `.sleepInPlace`를 줌 | 제자리 | `PlacementDirector` 우선순위 8 |
+| 밝기 점수 ≥ `holdEmptiness`(0.55) | 제자리 | `BasicSafeZonePlanner.napsInPlace` |
+| 덮여 있음 | `findSleepSpot` | 〃 |
+| 잴 수 없음 — 화면 기록 권한 없음, 캡처 실패, 캡처된 디스플레이 밖 | `findSleepSpot` | 〃 |
+
+**"못 잰다"가 여기서는 거절이다.** 에이전트 자리에서 캡처가 없는 것은 통과인데
+(`PlacementDirector`의 `evaluation?.isHoldable ?? true`) 여기서는 반대다. 자리를 고른
+경위가 다르기 때문이다 — 에이전트 자리는 일부러 고른 자리지만, 배회 목적지는 밝기가
+없으면 `VisualEmptiness.firstComfortable`이 nil을 주고 후보 목록의 첫 번째로 떨어진다.
+즉 아무도 검증한 적 없는 지점이고, 그걸 무기한 깔고 자게 두느니 구석으로 접는 편이 낫다.
+
+권한이 켜져 있으면 이 갈래는 사실상 항상 제자리다. 자리가 덮이면 2.5초 체류 검사가
+이미 비켜 주므로, 75초를 채운 자리가 덮여 있을 일이 거의 없다. 어느 갈래를 탔는지는
+진단 로그 `rest` 항목에 남는다.
 
 **여기서 눈으로 확인되는 사실**: 잠들기·자기·깨기·기지개가 전부 이미 보고 있던 두 그림
 (row 6, row 0)으로 처리된다. 75초를 기다려 재운 결과가 "앉은 자세 그대로"라서, 지금
@@ -219,7 +247,7 @@ steady로 분류한다. 이전에는 1.2초 만에 `observe`로 넘어가서, �
 | `idle` | 8.4~17.4초 | 배회 스케줄러 | `RuntimeTuning.wanderDelay` |
 | `wander` | 목적지까지 (160pt/s) | 도착 | `MovementController` |
 | `sit` | 2.4초 | 고정 타이머 | `RestConfiguration.sittingDuration` |
-| `findSleepSpot` | 목적지까지 (120pt/s) | 도착 | `beginRestTravel` |
+| `findSleepSpot` | 목적지까지 (120pt/s) — 자리가 검증되면 아예 건너뜀 (3.1) | 도착 | `beginRestTravel` |
 | `sleep` | 무제한 | 입력 0.8초 or 커서 접근 | `updateRestLifecycle` |
 | `wake` | 0.7초 | 고정 | `BehaviorTiming.wake` |
 | `stretch` | 1.0초 | 고정 | `BehaviorTiming.stretch` |
@@ -246,7 +274,7 @@ steady로 분류한다. 이전에는 1.2초 만에 `observe`로 넘어가서, �
 
 1. **row 7 `running`** — 검색 외 모든 tool 실행 중. 타이머가 없어 툴이 도는 내내 돈다.
 2. **row 0 `idle`** — 기본값. 확장 시트가 없는 패키지에서는 `wake` · `stretch` · 커서 응시가 모두 여기로 떨어진다.
-3. **row 1/2 걷기** — 배회, 이동, 도망, 잠자리 찾기.
+3. **row 1/2 걷기** — 배회, 이동, 도망, 잠자리 찾기(자리가 안 좋을 때만).
 4. **row 6 `waiting`** — 승인 대기(응답까지), 앉기 2.4초, 잠, 잡힘.
 5. **row 8 `review`** — 파일을 읽거나 검색할 때 1.03초씩.
 6. **row 3 `waving`** — 턴 완료 0.70초.

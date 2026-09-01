@@ -24,6 +24,39 @@ public enum BasicSafeZonePlanner {
         world.displays.flatMap { safeZones(on: $0) }
     }
 
+    /// Whether the spot the pet dozed off on is fit to sleep on, or whether it
+    /// should tuck into a safe zone first.
+    ///
+    /// Asked once, when sitting ends. Sleep is the one state with no timer, so
+    /// the spot has to be good enough to hold for as long as the user is away,
+    /// and the roaming rule that keeps a standing pet off the user's work stops
+    /// running the moment rest owns movement.
+    ///
+    /// A field that cannot judge answers no, which is the opposite of how an
+    /// agent seat reads a missing capture. The difference is that a seat was
+    /// deliberately chosen and a roaming spot was not: without a capture,
+    /// `VisualEmptiness.firstComfortable` returns nil and the stroll falls back
+    /// to its first candidate, so the pet is standing somewhere nothing ever
+    /// vetted. Walking that to a corner is the whole point of the safe zone.
+    public static func napsInPlace(
+        at position: WorldPoint,
+        objectSize: WorldSize,
+        in field: LuminanceField?,
+        atLeast threshold: Double = BasicInterestPositionPlanner.holdEmptiness
+    ) -> Bool {
+        guard let field,
+              let score = VisualEmptiness.score(
+                of: WorldRect(
+                    x: position.x - objectSize.width / 2,
+                    y: position.y - objectSize.height / 2,
+                    width: objectSize.width,
+                    height: objectSize.height
+                ),
+                in: field
+              ) else { return false }
+        return score >= threshold
+    }
+
     public static func destination(
         in world: DesktopWorldSnapshot,
         currentPosition: WorldPoint,
