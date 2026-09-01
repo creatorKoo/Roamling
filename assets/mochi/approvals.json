@@ -64,7 +64,9 @@
     "exceptions": [
       "Whiskers were repainted programmatically (scripts/flatten_whiskers.py): found by morphological opening inside the muzzle band, flattened to solid black, and narrowed to 2px. Four generation attempts could not produce them -- pale and invisible once, then outlined brown twigs three times. The generator's working grid is far coarser than a 192x208 cell, so its thinnest stroke is already wide enough to want an outline. No pixel was moved and nothing was pasted from another image; only the colour of pixels already identified as whisker changed.",
       "Frames were shifted horizontally to hold the body centroid still (0.8px across the row). The generated art has the torso drawn at different offsets relative to the paws, so no single anchor holds both: the paws now travel 5.5px instead. Whole-frame translation only."
-    ]
+    ],
+    "amended_at": "2026-09-01",
+    "amendment": "Narrowed 0.955x horizontally. The row stood 147.5 tall against idle's 148.0 but ran 3-8px wider at every height from the ears down -- the same cat five percent stouter, which the user saw as the pet looking chubby whenever it watched something. A uniform scale could not fix it: matching the width costs 7px of height, so the pet would have shrunk vertically on the cut into idle instead. Head width 97.7 -> 92.8 against idle's 94.0, area 13,136 -> 12,543 against 12,676. Resampling is followed by a snap back to the frame's own colours, so no new colour survives, and the frames are re-seated on their original head centre rather than their bounding box -- centring the box slid the body by however far the tail reached and pushed the row's head drift from 0.5px to 12px before that was fixed. `gaze` plays these same frames and is corrected with them."
   },
   "gaze": {
     "status": "approved",
