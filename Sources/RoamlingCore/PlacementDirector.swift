@@ -30,6 +30,11 @@ public enum PlacementIntent: Equatable, Sendable {
     case travel(InterestDestination, reason: PlacementTravelReason)
     case sleepInPlace
     case stroll(WorldPoint)
+    /// The spot the pet is standing on turned out to be covered, so this is a
+    /// walk it owes the user rather than one it fancied. Kept apart from
+    /// `.stroll` because callers rank it differently: an aimless walk yields to
+    /// the cursor, and getting off someone's paragraph does not.
+    case escape(WorldPoint)
 
     public var travelReason: PlacementTravelReason? {
         guard case let .travel(_, reason) = self else { return nil }
@@ -51,8 +56,13 @@ public struct PetSituation: Sendable {
     public var objectSize: WorldSize
     public var pointerPosition: WorldPoint?
     public var walkingSpeed: Double
-    /// The pointer owns the pet: caught, dragged, or reacting to a near cursor.
+    /// The pointer owns the pet outright: caught, dragged, evading, or close
+    /// enough to be reaching for it. Nothing placement decides survives this.
     public var isPointerOwned: Bool
+    /// The weaker claim: the cursor is in the outer band and the pet has
+    /// stopped to look at it. It is a moment, and it stops the pet exactly
+    /// where it stands -- which may be the paragraph the user is reading.
+    public var isPointerWatching: Bool
     public var isEvading: Bool
     /// A walk is already under way, so nothing here should start another one.
     public var isWalking: Bool
@@ -80,6 +90,7 @@ public struct PetSituation: Sendable {
         pointerPosition: WorldPoint? = nil,
         walkingSpeed: Double = 160,
         isPointerOwned: Bool = false,
+        isPointerWatching: Bool = false,
         isEvading: Bool = false,
         isWalking: Bool = false,
         isResting: Bool = false,
@@ -98,6 +109,7 @@ public struct PetSituation: Sendable {
         self.pointerPosition = pointerPosition
         self.walkingSpeed = walkingSpeed
         self.isPointerOwned = isPointerOwned
+        self.isPointerWatching = isPointerWatching
         self.isEvading = isEvading
         self.isWalking = isWalking
         self.isResting = isResting
@@ -217,6 +229,13 @@ public struct PlacementDirector: Sendable {
         // verdict is current when the pointer lets go. Gating the reading as
         // well as the moving is what froze the seat watch next to the cursor.
         if situation.isPointerOwned || situation.isEvading { return .none }
+        // The glance is the one pointer claim that loses, and only to the one
+        // answer that outranks it. Standing on the user's work is a condition;
+        // looking up at the cursor is a moment, and the moment happens to stop
+        // the pet right where the condition is. Everything else still waits.
+        if situation.isPointerWatching {
+            guard case .escape = verdict else { return .none }
+        }
         return verdict
     }
 
@@ -494,8 +513,15 @@ public struct PlacementDirector: Sendable {
               situation.position.distance(to: escape) > configuration.minimumTravelDistance
         else { return carried }
 
-        self.parkedSince = nil
-        return .stroll(escape)
+        // `parkedSince` deliberately survives this. The decision is only worth
+        // making if it is still here when it can be acted on, and `decide`
+        // throws away every answer while the pointer owns the pet -- so
+        // clearing the dwell here meant a cursor drifting past at the wrong
+        // moment restarted the wait, over and over, and the pet kept the
+        // paragraph it was supposed to be leaving. Walking clears it instead,
+        // at the top of this function, which is the point at which the answer
+        // has actually been used.
+        return .escape(escape)
     }
 
     private func comfortable(among situation: PetSituation) -> WorldPoint? {

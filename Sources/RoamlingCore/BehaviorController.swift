@@ -85,8 +85,14 @@ public struct BehaviorController: Sendable {
     /// a route can be cancelled without ever arriving. Omitting any of them
     /// strands the pet: the caller lays a route the state machine refuses, and
     /// the pet walks it wearing the wrong animation.
+    ///
+    /// `.lookAtPointer` is here for one caller only. Placement refuses to start
+    /// an aimless walk while the cursor is being watched, so the sole route
+    /// that arrives in this state is the one that takes the pet off the user's
+    /// work -- and refusing that left the pet holding the paragraph for as long
+    /// as the cursor sat beside it.
     public static let wanderEntryStates: Set<BehaviorState> = [
-        .idle, .dropped, .wander, .observe, .work
+        .idle, .dropped, .wander, .observe, .work, .lookAtPointer
     ]
 
     /// States that `.beginRest` may start sitting from.

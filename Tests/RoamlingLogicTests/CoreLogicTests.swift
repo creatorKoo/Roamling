@@ -603,6 +603,20 @@ func coreLogicTests() -> [LogicTest] {
             behavior.handle(.tick, at: 21.72)
             try expect(behavior.state == .idle)
         },
+        LogicTest(name: "a pet watching the cursor can still walk off the text") {
+            // Placement only ever hands this state a route that is taking the
+            // pet off the user's work, so refusing the transition here is what
+            // made that route land on a pet the state machine would not move.
+            var behavior = BehaviorController(state: .idle, enteredAt: 0)
+            behavior.handle(.pointer(.watching), at: 1)
+            try expect(behavior.state == .lookAtPointer)
+            try expect(behavior.handle(.beginWander, at: 2).to == .wander)
+
+            // Being carried is still not a state you walk out of.
+            var held = BehaviorController(state: .idle, enteredAt: 0)
+            held.handle(.catchBegan, at: 1)
+            try expect(held.handle(.beginWander, at: 2).to == .caught)
+        },
         LogicTest(name: "manual stretch preview settles without breaking drag") {
             var behavior = BehaviorController(state: .idle, enteredAt: 0)
             behavior.handle(.beginStretch, at: 1)
@@ -1161,7 +1175,7 @@ func coreLogicTests() -> [LogicTest] {
             try expect(director.decide(roaming(at: 1, position: parked)) == .hold)
 
             let escaped = director.decide(roaming(at: 6, position: parked))
-            try expect(escaped == .stroll(clear), "got \(escaped)")
+            try expect(escaped == .escape(clear), "got \(escaped)")
 
             // Once it is standing somewhere clear, nothing sends it off again.
             for step in 0..<10 {
@@ -1211,6 +1225,92 @@ func coreLogicTests() -> [LogicTest] {
                     try expect(intent == .hold, "\(label) pet was re-routed: \(intent)")
                 }
             }
+        },
+        LogicTest(name: "text under the pet outlives the cursor that interrupted it") {
+            let fixture = DirectorFixture()
+            var director = PlacementDirector()
+            let parked = WorldPoint(x: 300, y: 400)
+            let clear = WorldPoint(x: 900, y: 300)
+            let covered = try require(fixture.field(busyAround: parked, delta: 0.06))
+
+            func decide(at timestamp: TimeInterval, pointerOwned: Bool) -> PlacementIntent {
+                director.decide(fixture.situation(
+                    at: timestamp,
+                    position: parked,
+                    sourceID: nil,
+                    luminance: covered,
+                    isPointerOwned: pointerOwned,
+                    strollCandidates: [clear]
+                ))
+            }
+
+            // The cursor arrives while the pet is still serving its dwell, and
+            // stays. Every one of these ticks decides the escape and throws it
+            // away, which is exactly when the dwell used to be reset -- so the
+            // wait restarted faster than it could ever mature, and the pet kept
+            // the paragraph for as long as the cursor sat next to it.
+            _ = decide(at: 0, pointerOwned: false)
+            for step in 0..<20 {
+                try expect(decide(at: 3 + Double(step) * 0.5, pointerOwned: true) == .none)
+            }
+            // The cursor leaves. The text is still there, so the walk is still
+            // owed, and it is owed now rather than one dwell from now.
+            try expect(decide(at: 13, pointerOwned: false) == .escape(clear))
+        },
+        LogicTest(name: "a glance stops an aimless walk but not one off the text") {
+            // The cursor parked beside a pet that is standing on a paragraph is
+            // the ordinary case, not a corner one: the pet is on the text
+            // because that is where the user is working, so that is where their
+            // cursor is. Holding the glance above the walk meant the pet kept
+            // the paragraph for as long as the user read it.
+            let fixture = DirectorFixture()
+            let parked = WorldPoint(x: 300, y: 400)
+            let clear = WorldPoint(x: 900, y: 300)
+            let covered = try require(fixture.field(busyAround: parked, delta: 0.06))
+
+            var owed = PlacementDirector()
+            func watched(at timestamp: TimeInterval) -> PlacementIntent {
+                owed.decide(fixture.situation(
+                    at: timestamp,
+                    position: parked,
+                    sourceID: nil,
+                    luminance: covered,
+                    isPointerWatching: true,
+                    strollCandidates: [clear]
+                ))
+            }
+            // Still serving its dwell, so there is nothing yet that outranks
+            // the glance.
+            try expect(watched(at: 0) == PlacementIntent.none)
+            try expect(watched(at: 3) == .escape(clear))
+
+            // A walk the pet merely fancied still yields. Nothing is under it,
+            // so there is nothing for the glance to be in the way of.
+            var whim = PlacementDirector()
+            try expect(whim.decide(fixture.situation(
+                at: 0,
+                position: fixture.corner,
+                sourceID: nil,
+                luminance: fixture.flatField(),
+                isPointerWatching: true,
+                isStrollDue: true,
+                strollCandidates: [clear]
+            )) == PlacementIntent.none)
+
+            // And a cursor close enough to reach for the pet takes it back.
+            var reached = PlacementDirector()
+            func owned(at timestamp: TimeInterval) -> PlacementIntent {
+                reached.decide(fixture.situation(
+                    at: timestamp,
+                    position: parked,
+                    sourceID: nil,
+                    luminance: covered,
+                    isPointerOwned: true,
+                    strollCandidates: [clear]
+                ))
+            }
+            try expect(owned(at: 0) == PlacementIntent.none)
+            try expect(owned(at: 3) == PlacementIntent.none)
         },
         LogicTest(name: "a stroll destination passes the same emptiness bar as a seat") {
             // Defect 4: the rule about empty space lived only on the agent-seat
@@ -1399,6 +1499,7 @@ private struct DirectorFixture {
         focus: FocusSnapshot? = nil,
         luminance: LuminanceField? = nil,
         isPointerOwned: Bool = false,
+        isPointerWatching: Bool = false,
         isEvading: Bool = false,
         isWalking: Bool = false,
         isResting: Bool = false,
@@ -1419,6 +1520,7 @@ private struct DirectorFixture {
             objectSize: objectSize,
             pointerPosition: WorldPoint(x: 600, y: 100),
             isPointerOwned: isPointerOwned,
+            isPointerWatching: isPointerWatching,
             isEvading: isEvading,
             isWalking: isWalking,
             isResting: isResting,

@@ -107,6 +107,10 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     private var dragOffset = WorldVector.zero
     private var lastPointerDecision: PointerDecision?
     private var isEvadeTransitioning = false
+    /// The current walk is one the pet owes the user: it is standing on their
+    /// work and leaving. Cleared by the tick as soon as the route is gone,
+    /// however it went, so no cancel path has to remember to reset it.
+    private var escapeRouteActive = false
     private var restDestination: RestDestination?
     /// The window the pet is watching. It outlives any one walk: a parked pet
     /// still has to know which window to judge its seat against.
@@ -134,7 +138,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     private static let focusRefreshInterval: TimeInterval = 0.5
     /// States where the pointer, not placement, decides where the pet goes.
     private static let pointerOwnedStates: Set<BehaviorState> = [
-        .caught, .dragged, .evadePointer, .lookAtPointer
+        .caught, .dragged, .evadePointer
     ]
     /// Destinations offered to the emptiness score before a stroll. Enough to
     /// usually find a clear one, few enough that roaming stays aimless.
@@ -518,6 +522,8 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
             }
         }
 
+        if !movement.hasRoute { escapeRouteActive = false }
+
         let decision = pointerModel.evaluate(
             pointer: pointer.position,
             pet: movement.position,
@@ -588,7 +594,8 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
                 deltaTime: deltaTime
             ) {
                 // Rest owns movement until input wakes the creature.
-            } else if isPointerAvoidanceEnabled {
+            } else if isPointerAvoidanceEnabled,
+                      !escapeOutranksPointer(intent, decision.proximity) {
                 behavior.handle(.pointer(decision.proximity), at: now)
                 switch decision.proximity {
                 case .slowEvade, .fastEvade:
@@ -619,6 +626,27 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         renderCurrentFrame()
 
         scheduleNextTick(after: preferredTickInterval)
+    }
+
+    /// Whether leaving the user's work outranks the cursor on this tick, either
+    /// because the walk is under way or because this is the tick it starts.
+    ///
+    /// Stopping to look at the cursor is a moment; standing on the user's work
+    /// is a condition, and a moment must not cancel the remedy for a condition.
+    /// Letting it did more than delay the walk: the glance cancels the route,
+    /// so the pet stayed wherever the cursor happened to catch it -- which is
+    /// the middle of the paragraph it was in the act of leaving.
+    ///
+    /// Only the outer band gives way. A cursor close enough to evade or to
+    /// catch still owns the pet, and neither of those can strand it on the
+    /// text: one moves it, the other picks it up.
+    private func escapeOutranksPointer(
+        _ intent: PlacementIntent,
+        _ proximity: PointerProximity
+    ) -> Bool {
+        guard proximity == .watching else { return false }
+        if case .escape = intent { return true }
+        return escapeRouteActive && movement.hasRoute
     }
 
     /// Only the states that actually travel at the tuned walking speed scale
@@ -725,6 +753,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         case .hold: "hold"
         case .sleepInPlace: "sleep in place"
         case let .stroll(point): String(format: "stroll to %.0f,%.0f", point.x, point.y)
+        case let .escape(point): String(format: "escape to %.0f,%.0f", point.x, point.y)
         case let .travel(destination, reason):
             String(
                 format: "travel %@ to %.0f,%.0f",
@@ -1098,7 +1127,9 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
             walkingSpeed: tuning.walkingSpeed,
             isPointerOwned: catchIsArmed
                 || Self.pointerOwnedStates.contains(behavior.state)
-                || (isPointerAvoidanceEnabled && proximity != .far),
+                || (isPointerAvoidanceEnabled && proximity != .far && proximity != .watching),
+            isPointerWatching: isPointerAvoidanceEnabled
+                && (proximity == .watching || behavior.state == .lookAtPointer),
             isEvading: isEvadeTransitioning,
             isWalking: movement.hasRoute,
             isResting: behavior.state.isResting,
@@ -1123,6 +1154,9 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
             travelToSeat(destination, at: timestamp, deltaTime: deltaTime)
         case let .stroll(point):
             beginStroll(to: point, at: timestamp, deltaTime: deltaTime)
+        case let .escape(point):
+            beginStroll(to: point, at: timestamp, deltaTime: deltaTime)
+            escapeRouteActive = movement.hasRoute
         case .hold, .sleepInPlace, .none:
             // `.sleepInPlace` lands here when rest declined to start — the
             // pointer came close, or the state machine was mid-transition. The
