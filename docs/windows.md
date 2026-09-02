@@ -702,9 +702,10 @@ macOS에서 `objc2`로 만들어 보는 것. 그게 없으면 C는 측정되지 
    `GetGUIThreadInfo` 탐침을 VS Code · Windows Terminal · Chrome에서 돌려 캐럿 rect가
    나오는지 본다. **Electron 계열이 위험군**이다 — 네이티브 캐럿을 노출하지 않으면 거기서만
    UIA가 필요해진다. 탐침은 W0.4와 같은 크기의 버리는 코드다.
-4. **macOS 쪽 `objc2` 스파이크를 먼저 돌릴 것인가.** → **지금은 아니오.** 2번의 답이
-   "일단 W1·W2"인 이상 C의 미측정 절반을 지금 재도 결정에 쓰이지 않는다. C를 실제로
-   저울에 올리는 시점(W2 종료 후)에 같이 연다.
+4. **macOS 쪽 `objc2` 스파이크를 먼저 돌릴 것인가.** → **돌렸다. 2026-09-02, 결과는
+   12절.** 처음에는 "W2 뒤로 미룬다"고 답했는데 사용자가 지금 재기로 정했다. C의 미측정
+   절반이 더는 미측정이 아니다 — 오버레이 10개 검사가 전부 통과했고, 같은 날 잰 제3길
+   (Rust core + 기존 Swift 셸)의 FFI 실측이 이 절의 선택지 표에 다섯 번째 줄을 만들었다.
 
 ### 이 브리프의 권고
 
@@ -715,3 +716,187 @@ Runtime을 macOS 모듈에서 빼내고 `PetAsset`을 데이터 포맷으로 만
 포팅하든 이식 명세가 된다. **C로 갈 경우에도 그 경계가 재작성의 설계도가 된다.**
 
 그러니 W1·W2는 결정을 기다릴 필요가 없고, 그 사이에 위 네 질문의 답이 모인다.
+
+## 12. macOS 스파이크 실행 결과 (2026-09-02)
+
+11절 4번이 "C의 미측정 절반"이라고 부른 자리를 실제로 쟀다. **버리는 코드이고
+`output/spikes/`(git 미추적)에 있다.** W0와 같은 규칙이다 — 코드가 아니라 판정을 남긴다.
+
+환경: macOS 26.5(Darwin 25.5), Apple Swift 6.3.3, **Rust 1.98.0**(W0가 Windows에서 쓴 것과
+같은 버전), `objc2` 0.6.4 / `objc2-app-kit` 0.3.2, `uniffi` 0.32. 실측 머신은 3-display
+(1920×1080@2x, 1728×1117@2x, 1920×1080@1x).
+
+### W0m.1 — objc2 오버레이 프로브 (C의 macOS 절반)
+
+`PetOverlayPanel.swift`가 하는 일곱 가지에 권한 게이트 둘을 더해 Rust/objc2로 다시 만들었다.
+W0.4가 Windows에서 세운 것과 같은 구조의 대조 실험이다.
+
+| 검사 | 결과 |
+|---|---|
+| W0m.1 borderless · non-activating `NSPanel`, floating, clear bg, never key | **PASS** |
+| W0m.2 per-pixel alpha `CGImage`, `NSImageInterpolation.none` | **PASS** |
+| W0m.3 click-through 토글 (`ignoresMouseEvents`) | **PASS** |
+| W0m.4 `canJoinAllSpaces｜fullScreenAuxiliary｜stationary｜ignoresCycle` | **PASS** |
+| W0m.5 `sharingType = .none` (캡처 제외) | **PASS** |
+| W0m.6 `NSScreen` frames + `backingScaleFactor` (3-display 혼합 DPI) | **PASS** |
+| W0m.7 `NSView` 서브클래스, 타원 hit region | **PASS** |
+| W0m.7b 합성 클릭 라우팅 (`CGEventPost`) | **PASS** |
+| W0m.8 `AXIsProcessTrusted` 호출 가능 | **PASS (약한 검사)** |
+| W0m.9 `CGPreflightScreenCaptureAccess` 호출 가능 | **PASS (약한 검사)** |
+
+**per-pixel alpha는 두 층에서 확인했다.** 뷰의 백킹 비트맵을 직접 읽어 불투명 3,625 ·
+반투명 1,400 · 투명 4,959 픽셀(테스트 이미지의 원+반투명 링 구조와 정확히 일치), 그리고
+화면 합성 후 스크린샷에서 반경 34pt 원이 예상 좌표에 그대로 나왔다.
+
+**캡처 제외 대조 실험** — W0가 Windows에서 한 `WDA_NONE` → `WDA_EXCLUDEFROMCAPTURE`
+실험의 macOS 판이다:
+
+```text
+sharingType = .readOnly  -> screencapture가 스프라이트 픽셀 14,500개를 읽음
+sharingType = .none      -> 0개
+```
+
+MVP 4의 "펫이 자기 자리를 바빠 보이게 만들면 안 된다"가 objc2에서도 한 줄이다.
+
+**마찰은 아홉 개, 전부 기계적이었다.** 첫 빌드에서 컴파일 에러 9개가 나왔고 네 번의
+수정으로 닫혔다. 성질별로:
+
+- `CGDataProvider::with_data`가 C 시그니처 그대로(info·ptr·len·release 콜백 4인자)라
+  `CFData`를 경유해야 했다. `CGImage::width(Some(&img))`도 메서드가 아니라 자유 함수 모양이다.
+- **`CGRect`에 점 포함 헬퍼가 없다.** `NSPointInRect`도 바인딩돼 있지 않아 직접 썼다.
+- `define_class!`로 내보내는 ObjC 메서드는 `bool`이 아니라 `runtime::Bool`을 돌려줘야 한다.
+  실제로는 `containsPet:`을 ObjC 셀렉터에서 빼고 평범한 Rust 메서드로 내리는 게 맞았다 —
+  AppKit이 부르지 않는 것을 셀렉터로 내보낼 이유가 없다.
+- `alloc()`에 `AnyThread`, `retain()`에 `Message` 트레이트를 각각 import해야 한다.
+- 이름이 Swift 프로퍼티가 아니라 ObjC 셀렉터를 따른다 (`canBecomeKeyWindow`).
+
+**objc2 탓이 아닌 마찰이 하나 있었고 이게 제일 오래 걸렸다.** `NSRunLoop::runUntilDate`만
+돌리면 창이 합성되지도, 클릭이 배달되지도 않는다. AppKit 이벤트는
+`nextEventMatchingMask` + `sendEvent:`가 돌아야 흐르고, 그건 `NSApplication::run`이 하는
+일이다. **Swift로 썼어도 똑같이 겪는다** — W0의 "Rust도 같은 C interop 세금을 냈다"와
+같은 종류의 발견이다.
+
+**줄 수는 사실상 동률이다.** 오버레이 구현부만 Rust 216줄, `PetOverlayPanel.swift` 202줄
+(주석·빈 줄 제외). 다만 정확히 같은 것을 세지는 않았다 — Rust 쪽엔 테스트 이미지 생성기가
+들어 있고 Swift 쪽엔 world 좌표를 다루는 `MacOverlayProvider`가 들어 있다. **"objc2가
+AppKit보다 몇 배 장황하다"는 직관은 이 워크로드에서 성립하지 않는다.** release 바이너리는
+541 KB.
+
+**이 프로브가 재지 않은 것 — 여기가 여전히 공백이다.**
+
+- W0m.8·W0m.9는 **심볼이 붙는다는 것만** 증명한다. 실제 캐럿 rect를 `AXUIElement`로 읽는
+  것도, ScreenCaptureKit로 한 프레임을 실제로 뜨는 것도 하지 않았다. MVP 3·4의 본체가
+  거기 있으므로 **C를 진지하게 저울에 올릴 때 이 둘은 따로 재야 한다.**
+- Spaces 전환·fullscreen 진입 시의 실제 거동, 서명된 번들에서의 TCC 프롬프트, 메뉴바
+  아이템, 튜닝 창 — 전부 미측정.
+- 프로브는 서명되지 않은 CLI라 TCC 신원을 부모 프로세스에서 물려받는다. 그래서 `AXIsProcessTrusted`가
+  `true`를 돌려줬고, 이는 앱의 권한 상태와 무관하다.
+
+### W0m.2 — 제3길 프로브: Rust core + 기존 Swift 셸 (uniffi)
+
+`BasicSafeZonePlanner`와 그것이 쓰는 geometry·world 타입을 Rust로 포팅하고 uniffi로
+Swift에 노출한 뒤, **진짜 `RoamlingCore`와 같은 입력을 넣어 결과를 대조했다.**
+
+```text
+402개 world (실측 3-display + 단일 + 무작위 400) x
+  safe zone 전체 비교 + 펫/포인터를 화면 전체로 쓸어가며 destination 35회
+= safe-zone 불일치 0, destination 불일치 0 (14,070 질의)
+```
+
+**Swift의 `max(by:)`가 동점에서 마지막 원소를 돌려준다**는 것까지 맞춰야 0이 나왔다.
+`min_by`/fold의 tie-breaking을 그대로 옮기지 않으면 조용히 다른 모서리에 앉는다 —
+포팅이 "기계적"이라는 말이 "안전하다"는 뜻은 아니라는 증거다.
+
+**성능 — 직관과 반대 방향이었다.** 100,000회 호출, 양쪽 다 release 빌드:
+
+| | µs/call | |
+|---|---:|---|
+| Swift `RoamlingCore` (release, native) | **1.913** | 지금 |
+| Rust native (FFI 없음) | **1.302** | 1.47배 빠름 |
+| Swift → Rust, world를 매 호출 전달 | 8.590 | 순진한 설계 |
+| Swift → Rust, world를 Rust가 보유 | **4.656** | 현실적 설계 |
+| uniffi 크로싱만 (페이로드 없음) | **0.027** | 사실상 공짜 |
+
+**크로싱 자체는 27 ns로 공짜다. 비싼 것은 직렬화다** — 3개 display와 문자열이 든 world를
+매 호출 넘기면 3.9 µs가 붙는다. world를 Rust 쪽 객체에 얹고 tick마다 점 세 개만 넘기면
+4.656 µs이고, 남은 3.4 µs는 `String` 두 개(`display_id`, `reason`)를 든 반환값의 마샬링이다.
+
+판정은 이렇다. **제3길은 성능 이득이 아니다** — 이 워크로드에서 Rust의 원시 이득은 1.47배뿐이고
+FFI를 거치면 Swift로 그냥 두는 것보다 2.4배 느리다. 그러나 **성능 문제도 아니다**: tick당
+한 번이면 4.656 µs는 60 Hz 프레임 예산 16,666 µs의 **0.028%**다. 그러므로 제3길의 근거는
+속도가 아니라 구조여야 한다 — 로직 1벌, Swift-on-Windows 의존 제거, 실사용으로 조율된
+macOS 셸 보존.
+
+**설계 지침 세 줄** (제3길로 갈 경우):
+
+- 상태는 Rust가 들고, tick마다 넘기는 것은 값 몇 개로 줄인다.
+- **tick마다 돌려주는 값에 `String`을 넣지 않는다.** `reason` 같은 진단 문자열은 열거형
+  인덱스로 넘기고 표시할 때 Swift에서 해석한다.
+- 경계는 A′ 절이 이미 설계한 "스냅샷 in → 표시할 프레임 out" 그대로다. **W1이 만든
+  `PlatformServices`가 정확히 그 자리다** — Swift가 tick을 몰고, 플랫폼 상태를 모아 넘기고,
+  무엇을 그릴지 돌려받는다. 콜백 방향이 없으므로 uniffi callback interface가 필요 없다.
+
+**비용.** Rust 포팅본 300줄(벤치 헬퍼 포함) — Swift 원본은 플래너 143줄 + 그것이 기대는
+geometry·world 282줄이다. uniffi가 만드는 Swift 바인딩 989줄은 **생성물이라 유지보수 대상이
+아니다.** 손으로 쓴 브리지는 10줄. cdylib 551 KB, 바인딩 dylib 253 KB, cold `cargo build
+--release` 99초.
+
+**타입 이름이 충돌한다.** uniffi가 만드는 `WorldPoint`·`WorldRect`·`DisplaySnapshot`이
+`RoamlingCore`의 같은 이름과 부딪혀 프로브에서는 모듈로 한정해야 했다. 진짜 제3길에서는
+Rust 쪽이 **유일한** 정의가 되므로 이 충돌은 사라진다 — 다만 그 말은 곧 **전환이 부분적일 수
+없다는 뜻**이다. 두 벌을 나란히 두면 매 참조를 한정해야 한다.
+
+### 선택지 표에 다섯 번째 줄
+
+| | 로직 | macOS 셸 | Windows 셸 | Swift on Windows 필요? | macOS 재검증 |
+|---|---|---|---|---|---|
+| **A** (현재) | Swift | Swift/AppKit 그대로 | Swift/`WinSDK` 신규 | 예 | 없음 |
+| **A′** | Swift DLL | Swift/AppKit 그대로 | C# | 예 | 없음 |
+| **B** | C# 2벌 | Swift/AppKit 그대로 | C# | 아니오 | 없음 |
+| **C** | Rust 신규 | **Rust/objc2 신규** | Rust/`windows-rs` | 아니오 | **전부** |
+| **D. 제3길** | Rust 신규 | **Swift/AppKit 그대로** | Rust/`windows-rs` | **아니오** | **없음** |
+
+D는 C에서 **측정되지 않은 절반을 뺀 것**이다. 로직은 결정적이고 테스트 126개가 덮고 있어
+포팅이 검증 가능하지만, 셸은 사용자가 3-display 앞에 앉아 닫은 값들이 사는 곳이라 재검증이
+비싸다. D는 비싼 쪽을 건드리지 않는다. **그리고 Swift on Windows 의존이 사라진다** — 툴체인이
+공식이긴 해도 가장 큰 기여자였던 The Browser Company가 Atlassian에 인수되고 Windows용 Arc가
+멈춘 지금, 이건 값이 있는 성질이다.
+
+D의 대가는 macOS 빌드에 두 언어·두 빌드 시스템이 들어오는 것, 그리고 위의 "전환이 부분적일
+수 없다"는 제약이다.
+
+### 바인딩 생태계 — 공식이 어디까지인가 (2026-09-02 조사)
+
+| | 성격 | stars | 최근 push |
+|---|---|---:|---|
+| `microsoft/windows-rs` | **Microsoft 공식**, winmd에서 생성 | 12,719 | 2026-09-02 |
+| `madsmtm/objc2` | 비공식. **Xcode SDK 헤더에서 생성**, 단일 메인테이너 | 1,023 | 2026-08-27 |
+| `thebrowsercompany/swift-winrt` | 비공식(Browser Company). 최신 릴리스 2026-03 | 851 | 2026-04-10 |
+| `servo/core-foundation-rs` (`cocoa`) | 손으로 쓴 바인딩. 생태계가 objc2로 이탈 중 | 1,281 | 2026-05-08 |
+| `ryanmcgrath/cacao` | 고수준 래퍼. 18개월 정체 | 2,077 | 2025-02-03 |
+| `mozilla/uniffi-rs` | Mozilla. 활발 | 4,925 | 2026-08-31 |
+| `chinedufn/swift-bridge` | 개인. uniffi 대안 | 1,129 | 2026-01-06 |
+
+**Apple 공식 Rust 바인딩은 없다. objc2가 사실상 유일한 실전 후보다.** 공식은 아니지만
+공식에 가장 가까운 이유는 셋이다 — Xcode SDK 헤더에서 생성하므로 커버리지가 사람 손에
+달려 있지 않고(`objc2-app-kit`·`objc2-screen-capture-kit`·`objc2-application-services`가
+전부 있다), winit이 이미 옮겼고 tauri 계열과 wgpu가 이전 중이며, 위 표의 나머지는 전부 더
+작거나 더 오래됐다. 약점은 **단일 메인테이너**라는 것 하나다.
+
+**Windows 쪽은 걱정할 축이 아니다.** swift-winrt가 비공식이고 같은 조직의 `swift-winui`·
+`swift-windowsappsdk`가 2025-10에 archive됐지만, **우리 경로에 WinRT가 없다** — W0는 툴체인
+내장 `WinSDK`(Win32)로 통과했고 5절이 캡처를 BitBlt, focus를 `GetGUIThreadInfo`로 잡아 둔
+것이 결과적으로 WinRT 의존을 피했다. 남는 신호는 Swift-on-Windows 툴체인 자체의 추진력이고,
+그건 막힌 것이 아니라 지켜볼 것이다. D는 그 신호에 걸린 베팅을 아예 없앤다.
+
+### 이 절이 바꾸는 것과 바꾸지 않는 것
+
+**바꾸지 않는 것: 지금 할 일은 여전히 W2다.** D로 가더라도 `PetAsset`을 `CGImage`에서
+떼어내는 일은 그대로 필요하고(오히려 Rust `image` 크레이트가 B3를 없앤다), W1이 만든
+`PlatformServices` 경계가 D의 경계와 같은 자리라는 것이 이 절의 발견이다.
+
+**바꾸는 것: C의 미측정 절반이 줄었고, D라는 선택지가 실측 위에 올라왔다.** 결정은 W2가
+끝난 뒤에 한다 — 그때 남는 질문은 셋이다. (1) `AXUIElement` 캐럿과 ScreenCaptureKit을
+objc2로 실제로 뜰 수 있는가 (2) 두 언어 빌드를 `scripts/build-app.sh`와 서명 흐름에 얹는
+비용 (3) `RoamlingEngine` 1,700줄을 옮길 때 W0m.2에서 본 tie-breaking 함정을 테스트가
+전부 잡아 주는가.
