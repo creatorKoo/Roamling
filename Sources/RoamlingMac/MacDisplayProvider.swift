@@ -5,8 +5,23 @@ import AppKit
 import RoamlingCore
 
 @MainActor
-public final class MacDisplayProvider: DisplayProviding {
+public final class MacDisplayProvider: DisplayProviding, DisplayChangeObserving {
     public init() {}
+
+    public func observeDisplayChanges(
+        _ handler: @escaping @MainActor () -> Void
+    ) -> DisplayChangeSubscription {
+        let token = NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil,
+            queue: .main
+        ) { _ in
+            MainActor.assumeIsolated { handler() }
+        }
+        return DisplayChangeSubscription {
+            NotificationCenter.default.removeObserver(token)
+        }
+    }
 
     public func currentDisplaySet() -> DisplaySnapshotSet {
         let screens = NSScreen.screens

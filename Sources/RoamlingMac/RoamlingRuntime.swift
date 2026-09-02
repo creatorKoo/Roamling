@@ -7,7 +7,7 @@ import RoamlingPet
 import RoamlingSources
 
 @MainActor
-public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
+public final class RoamlingRuntime: PetOverlayViewDelegate {
     private enum DefaultsKey {
         static let roaming = "roamling.roaming"
         static let avoidPointer = "roamling.avoidPointer"
@@ -96,7 +96,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
 
     private var tickTimer: Timer?
     private var activityTasks: [Task<Void, Never>] = []
-    private var screenObserver: NSObjectProtocol?
+    private var screenObserver: DisplayChangeSubscription?
     private var lastTickAt: TimeInterval?
     private var nextWanderAt: TimeInterval
     private var catchArmedUntil: TimeInterval = 0
@@ -156,7 +156,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
     private var activityArrivalReaction: CompanionReaction?
     private var running = false
 
-    public override init() {
+    public init() {
         let defaults = UserDefaults.standard
         defaults.register(defaults: [
             DefaultsKey.roaming: true,
@@ -236,19 +236,6 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         areInteractionsEnabled = defaults.bool(forKey: DefaultsKey.interactions)
         nextWanderAt = ProcessInfo.processInfo.systemUptime + 2.2
 
-        super.init()
-
-        // Use the actual owned provider after initialization; the temporary one
-        // above only produced immutable startup snapshots.
-        let ownedSet = self.displayProvider.currentDisplaySet()
-        if !ownedSet.displays.isEmpty {
-            displays = ownedSet.displays
-            coordinateSpace = ownedSet.coordinateSpace
-            world = DesktopWorldSnapshot(displays: ownedSet.displays)
-            overlay.coordinateSpace = ownedSet.coordinateSpace
-            let clamped = world.clamp(movement.position, objectSize: overlay.objectSize)
-            movement.teleport(to: clamped)
-        }
         pointerProvider = MacPointerProvider { [weak self] in
             self?.coordinateSpace ?? displaySet.coordinateSpace
         }
@@ -268,12 +255,8 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         renderCurrentFrame()
         overlay.setVisible(true)
 
-        screenObserver = NotificationCenter.default.addObserver(
-            forName: NSApplication.didChangeScreenParametersNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated { self?.handleDisplayChange() }
+        screenObserver = displayProvider.observeDisplayChanges { [weak self] in
+            self?.handleDisplayChange()
         }
         startActivitySources()
         scheduleNextTick(after: 0.02)
@@ -291,10 +274,8 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         activityTasks.removeAll()
         claudeCodeSource.stop()
         codexSource.stop()
-        if let screenObserver {
-            NotificationCenter.default.removeObserver(screenObserver)
-            self.screenObserver = nil
-        }
+        screenObserver?.cancel()
+        screenObserver = nil
         clickReactionUntil = 0
         isClickReactionPending = false
         overlay.setInteractionEnabled(false)
@@ -498,9 +479,10 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         if running { scheduleNextTick(after: 1 / 30) }
     }
 
-    @objc private func tickTimerFired() {
+    private func tickTimerFired() {
         guard running else { return }
         autoreleasepool { tick() }
+        scheduleNextTick(after: preferredTickInterval)
     }
 
     private func tick() {
@@ -624,8 +606,6 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         animationPlayer.update(deltaTime: deltaTime * locomotionAnimationRate)
         overlay.setPosition(movement.position)
         renderCurrentFrame()
-
-        scheduleNextTick(after: preferredTickInterval)
     }
 
     /// Whether leaving the user's work outranks the cursor on this tick, either
@@ -764,13 +744,11 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
 
     private func scheduleNextTick(after interval: TimeInterval) {
         tickTimer?.invalidate()
-        let timer = Timer(
-            timeInterval: max(0.01, interval),
-            target: self,
-            selector: #selector(tickTimerFired),
-            userInfo: nil,
-            repeats: false
-        )
+        // `.common` so the pet keeps moving through a menu tracking loop or a
+        // window resize, which would otherwise starve the default mode.
+        let timer = Timer(timeInterval: max(0.01, interval), repeats: false) { [weak self] _ in
+            MainActor.assumeIsolated { self?.tickTimerFired() }
+        }
         tickTimer = timer
         RunLoop.main.add(timer, forMode: .common)
     }

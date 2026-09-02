@@ -23,6 +23,34 @@ public protocol DisplayProviding: AnyObject {
     func currentDisplaySet() -> DisplaySnapshotSet
 }
 
+/// Tells the caller that the displays have changed shape. Kept apart from
+/// `DisplayProviding` because a platform can answer "what is on screen now"
+/// without being able to say "and tell me when that changes" -- a fake in a
+/// test implements the first and not the second.
+@MainActor
+public protocol DisplayChangeObserving: AnyObject {
+    func observeDisplayChanges(
+        _ handler: @escaping @MainActor () -> Void
+    ) -> DisplayChangeSubscription
+}
+
+/// Ends an observation. Cancelling twice does nothing the second time, and
+/// nothing happens on deinit: the owner says when the observation stops,
+/// because the runtime observes only while it is running and outlives that.
+@MainActor
+public final class DisplayChangeSubscription {
+    private var cancelHandler: (() -> Void)?
+
+    public init(cancel: @escaping () -> Void) {
+        cancelHandler = cancel
+    }
+
+    public func cancel() {
+        cancelHandler?()
+        cancelHandler = nil
+    }
+}
+
 @MainActor
 public protocol WindowProviding: AnyObject {
     func currentWindows() -> [WindowSnapshot]
