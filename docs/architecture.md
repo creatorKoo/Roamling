@@ -67,19 +67,32 @@ module만 추출할 수 있다. 선행 Rust/C ABI는 만들지 않는다.
 - product-specific payload는 이 module 밖으로 나가지 않으며 prompt, transcript, tool input/output
   key를 decode model에 선언하지 않는다.
 
+### RoamlingEngine
+
+- `RoamlingRuntime`: main-actor orchestration and the only owner of input gating
+- `PlatformServices`: 런타임이 기계에 닿는 유일한 통로. provider 9개와 좌표계 소스를
+  한 값으로 받는다
+- `PetOverlayProviding` / `PetOverlayInputHandling`: 런타임이 실제로 부리는 오버레이와,
+  오버레이가 world point로 바꿔 돌려주는 입력
+- `BasicSafeZoneProvider`: visible-frame corner/Dock candidates (순수 산술)
+
+**window system을 import하지 않는다.** macOS SDK에 AppKit이 있어 컴파일러가 이 규칙을
+지켜주지 못하므로 `scripts/test.sh`가 grep으로 막는다. 근거와 게이트는 `docs/windows.md` W1.
+
 ### RoamlingMac
 
-- `MacDisplayProvider`: `NSScreen` -> display snapshots and coordinate transform
+- `MacPlatform.makeServices()`: 아래 provider들을 조립해 `PlatformServices`를 만드는
+  유일한 지점. Windows 포트의 대응물은 같은 서명의 함수 하나다
+- `MacDisplayProvider`: `NSScreen` -> display snapshots and coordinate transform,
+  그리고 `NSApplication.didChangeScreenParametersNotification` 구독
 - `MacPointerProvider`: `NSEvent` global point sampling
 - `MacUserIdleProvider`: elapsed time since any local input, without an event tap
-- `MacBasicSafeZoneProvider`: visible-frame corner/Dock candidates
 - `MacWindowProvider`: title/content 없이 frontmost app의 coarse window bounds만 제공
-- `PetOverlayPanel`: transparent, non-activating, all-Spaces sprite window
-- `RoamlingRuntime`: main-actor orchestration and the only owner of input gating
+- `MacFocusProvider`: Accessibility-backed 캐럿·포커스 창 (MVP 3)
+- `MacCaptureProvider`: ScreenCaptureKit downsampled luminance (MVP 4)
+- `PetOverlayPanel` / `MacOverlayProvider`: transparent, non-activating, all-Spaces
+  sprite window. `NSPoint`를 `WorldPoint`로 바꿔 런타임에 넘기는 것도 여기다
 - menu-bar controls and lifecycle
-
-MVP 3/4에서 `MacFocusProvider`, Accessibility-backed `MacWindowProvider` detail,
-`MacCaptureProvider`를 이 module에 추가한다.
 
 ## Domain events, not agent events
 
@@ -422,7 +435,9 @@ preference, current-display stability, pointer distance, travel distance를 쓴�
 region을 만들고 Dock이 차지한 left/right/bottom inset을 감지하면 인접 후보에 작은 bonus를
 준다. 최종 center는 pet size를 반영해 visible frame 안으로 clamp한다.
 
-`MacBasicSafeZoneProvider`는 macOS snapshot을 이 pure planner에 전달하는 얇은 adapter다.
+`BasicSafeZoneProvider`(`RoamlingEngine`)는 snapshot을 이 pure planner에 전달하는 얇은
+adapter다. 계산에 OS가 들어가지 않으므로 macOS 전용이 아니고, W1에서 `RoamlingMac` 밖으로
+옮겼다.
 MVP 3에서 Accessibility가 생기면 focused window/element, control/caret bounds를 obstacle로
 추가하되 현재 fallback path를 유지한다.
 
@@ -533,7 +548,24 @@ Petdex loader는 사용자 package와 fixtures로 계속 검증한다.
 실측·결정·게이트 순서는 `docs/windows.md`에 있다. 아래 표는 그 문서의 5절에서 몇 군데가
 더 싼 경로로 갱신됐다 — capture는 BitBlt, focus는 `GetGUIThreadInfo`를 먼저 시도한다.
 
-Windows 구현은 아래 domain protocol을 채운다.
+**W1(2026-09-02)이 그 채울 자리를 실제로 만들어 뒀다.** `RoamlingRuntime`은 이제
+`RoamlingEngine`에 있고 `PlatformServices` 하나만 받는다. Windows 쪽 작업은
+`MacPlatform.makeServices()`에 대응하는 함수 하나를 쓰고 아래 protocol을 채우는 것이다.
+
+```text
+DisplayProviding        currentDisplaySet()
+DisplayChangeObserving  observeDisplayChanges(_:)
+WindowProviding         currentWindows(), currentActivityLocationHint()
+PointerProviding        currentPointer(at:)
+UserIdleProviding       idleDuration(at:)
+FocusProviding          isAuthorized, requestAuthorization(), currentFocus()
+SafeZoneProviding       safeZones(in:)          — BasicSafeZoneProvider가 이미 만족
+CaptureProviding        isAuthorized, requestAuthorization(), captureLuminanceField(for:)
+PetOverlayProviding     setPosition/setVisible/setInteractionEnabled/setScale/
+                        setHitRegionScale/setFrameImage/containsPet + inputHandler
+```
+
+플랫폼별 구현이 채울 자리는 아래와 같다.
 
 ```text
 DisplayProvider    NSScreen             -> EnumDisplayMonitors

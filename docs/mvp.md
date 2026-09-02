@@ -401,7 +401,8 @@ B1이 같은 문제를 크게 가리킨다.
 
 **MVP 사다리는 4에서 멈춘다.** 다음 게이트는 이 문서가 아니라 `docs/windows.md`의 W1이다 —
 `RoamlingRuntime`을 AppKit 모듈 밖(`RoamlingEngine`)으로 빼는 동작 변화 0의 리팩터. 정의와
-in/out of scope, acceptance는 그쪽 4절에 있다.
+in/out of scope, acceptance는 그쪽 4절에 있다. **구현은 2026-09-02에 끝났고 사용자의 실사용
+확인만 남았다.**
 
 MVP 5로 적어 두었던 "펫 저작 UI"는 이름만 있던 항목이라 여기서 정의하지 않는다. 필요해지는
 시점에 — 사용자가 실제로 펫을 만들려 할 때 — 그때의 요구로 쓴다. game/media source와

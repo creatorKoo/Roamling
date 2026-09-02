@@ -36,7 +36,11 @@ monitor 왼쪽/위에 있는 디스플레이에 음수 좌표를 준다.
 
 ## 2. 블로커는 세 개다
 
-### B1. 앱의 두뇌가 macOS 모듈에 있다
+### B1. 앱의 두뇌가 macOS 모듈에 있다 — **W1에서 해소 (2026-09-02)**
+
+아래는 W1 착수 전의 진단이다. 지금 `RoamlingRuntime`은 `RoamlingEngine`에 있고
+`PlatformServices` 하나만 받는다.
+
 
 `Sources/RoamlingMac/RoamlingRuntime.swift`는 1,718줄이고 AppKit **타입**이 나오는 곳은 넷뿐이다:
 
@@ -223,7 +227,22 @@ Swift 하나만 해서 실패하면 **Swift 탓인지 Windows 탓인지 구분�
 **엄격히 오버레이 창만 만든다.** 로직을 Rust로 옮겨 "느낌을 보는" 순간 그것이 C의
 시작이고, C는 W0에서 고르는 선택지가 아니다.
 
-### W1 — Runtime 추출 (macOS, 동작 변화 0) ← **현재 게이트**, 착수 2026-09-02
+### W1 — Runtime 추출 (macOS, 동작 변화 0) ← **구현 완료 2026-09-02, exit 대기**
+
+구현은 끝났고 테스트 126개가 통과한다. **exit는 사용자가 서명 빌드를 실사용해서 달라진
+점이 없다고 확인하는 것**이므로 그 전에는 W2로 넘어가지 않는다. 실제로 생긴 것:
+
+- `Sources/RoamlingEngine/` — `RoamlingRuntime`, `PlatformServices`,
+  `PetOverlayProviding`/`PetOverlayInputHandling`, `BasicSafeZoneProvider`
+- `Sources/RoamlingMac/MacPlatform.swift` — `makeServices()` 한 함수. Windows 쪽 대응물이
+  이것 하나가 된다
+- `CoordinateSpaceSource`(Core) — provider가 읽고 런타임만 쓰는 공유 좌표계.
+  `handleDisplayChange`가 오버레이에 좌표계를 손으로 밀어 넣던 줄이 사라졌다
+- `scripts/test.sh`의 import 게이트
+- `Tests/RoamlingLogicTests/RuntimeLogicTests.swift` — 가짜 provider로 런타임을 만들고
+  클럭을 손으로 감아 rest 경로 전체를 통과시키는 테스트 2개. 둘 다 mutation으로 확인했다
+
+아래는 착수 시점에 정한 게이트 정의다.
 
 `RoamlingRuntime`을 AppKit 없이 컴파일되는 새 모듈 **`RoamlingEngine`**으로 옮긴다.
 클래스 이름은 그대로 둔다 — 모듈과 타입이 같은 이름이면 Swift에서 서로를 가린다.
@@ -436,7 +455,7 @@ MVP 4가 2026-09-02에 닫히면서 그 충돌이 없어졌다 — `RoamlingRunt
 MVP 4 exit rule 충족  ✅ 2026-09-02
         |
         v
-   (macOS 머신) W1 <- 현재 -> W2
+   (macOS 머신) W1 (구현 완료 2026-09-02, 실사용 확인 대기) -> W2
         |
         v
    W3 -> W4 -> W5 -> W6 -> W7
