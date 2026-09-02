@@ -25,19 +25,19 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
 
     public var isRoamingEnabled: Bool {
         didSet {
-            UserDefaults.standard.set(isRoamingEnabled, forKey: DefaultsKey.roaming)
+            defaults.set(isRoamingEnabled, forKey: DefaultsKey.roaming)
             if !isRoamingEnabled {
                 movement.cancelRoute(stop: false)
                 nextWanderAt = .infinity
             } else if oldValue != isRoamingEnabled {
-                nextWanderAt = ProcessInfo.processInfo.systemUptime + 0.8
+                nextWanderAt = now() + 0.8
             }
         }
     }
 
     public var isPointerAvoidanceEnabled: Bool {
         didSet {
-            UserDefaults.standard.set(isPointerAvoidanceEnabled, forKey: DefaultsKey.avoidPointer)
+            defaults.set(isPointerAvoidanceEnabled, forKey: DefaultsKey.avoidPointer)
             if !isPointerAvoidanceEnabled, isEvadeTransitioning {
                 isEvadeTransitioning = false
                 movement.cancelRoute(stop: false)
@@ -47,7 +47,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
 
     public var areInteractionsEnabled: Bool {
         didSet {
-            UserDefaults.standard.set(areInteractionsEnabled, forKey: DefaultsKey.interactions)
+            defaults.set(areInteractionsEnabled, forKey: DefaultsKey.interactions)
             if !areInteractionsEnabled {
                 catchArmedUntil = 0
                 overlay.setInteractionEnabled(false)
@@ -64,6 +64,11 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     public var petDisplayName: String { asset.manifest.displayName }
     public var petCoverage: AnimationResolver.Coverage { asset.resolver.coverage }
     public var scale: Double { overlay.scale }
+
+    /// What the pet is doing and where it is standing. Read-only, and read by
+    /// tests -- the app watches the pet through the overlay instead.
+    public var behaviorState: BehaviorState { behavior.state }
+    public var position: WorldPoint { movement.position }
     public var claudeCodeIntegrationStatus: ClaudeCodeIntegrationStatus {
         claudeCodeInstaller.status()
     }
@@ -72,6 +77,8 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     public var codexReceiverState: CodexReceiverState { codexSource.state }
 
     private let services: PlatformServices
+    private let defaults: UserDefaults
+    private let now: @Sendable () -> TimeInterval
 
     private var displayProvider: any DisplayProviding { services.display }
     private var displayChanges: any DisplayChangeObserving { services.displayChanges }
@@ -164,8 +171,25 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     private var activityArrivalReaction: CompanionReaction?
     private var running = false
 
-    public init(services: PlatformServices) {
-        let defaults = UserDefaults.standard
+    /// - Parameters:
+    ///   - defaults: Where the user's settings live. A test passes a throwaway
+    ///     suite so it neither reads the running app's preferences nor writes
+    ///     to them.
+    ///   - catalog: Pass `PetCatalog(roots: [])` to keep a test off whatever
+    ///     pets happen to be installed on the machine.
+    ///   - clock: The monotonic clock everything schedules against. A test
+    ///     steps it by hand and calls `tick()`, so a minute of pet behaviour
+    ///     costs no wall time and never flakes on a slow machine.
+    public init(
+        services: PlatformServices,
+        defaults: UserDefaults = .standard,
+        catalog: PetCatalog = PetCatalog(),
+        clock: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+    ) {
+        self.defaults = defaults
+        now = clock
+        diagnosticsPath = ProcessInfo.processInfo.environment["ROAMLING_REST_LOG"]
+            ?? defaults.string(forKey: "roamling.diagnosticsLog")
         defaults.register(defaults: [
             DefaultsKey.roaming: true,
             DefaultsKey.avoidPointer: true,
@@ -177,7 +201,6 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         let claudeCodeHookToken = Self.loadOrCreateClaudeCodeHookToken(defaults: defaults)
         let codexHookToken = Self.loadOrCreateCodexHookToken(defaults: defaults)
 
-        let catalog = PetCatalog()
         let descriptors = catalog.discover()
         let selectedPath = defaults.string(forKey: DefaultsKey.petPackagePath)
         let selectedBuiltInPet = defaults.string(forKey: DefaultsKey.builtInPet)
@@ -210,13 +233,13 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         displays = displaySet.displays
         world = initialWorld
         tuning = runtimeTuning
-        claudeCodeSource = ClaudeCodeSource(token: claudeCodeHookToken)
+        claudeCodeSource = ClaudeCodeSource(token: claudeCodeHookToken, clock: clock)
         claudeCodeInstaller = ClaudeCodeHookInstaller(
             settingsURL: FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent(".claude/settings.json"),
             token: claudeCodeHookToken
         )
-        codexSource = CodexSource(token: codexHookToken)
+        codexSource = CodexSource(token: codexHookToken, clock: clock)
         codexInstaller = CodexHookInstaller(
             hooksURL: FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent(".codex/hooks.json"),
@@ -230,13 +253,13 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
                 deceleration: 115
             )
         )
-        behavior = BehaviorController(enteredAt: ProcessInfo.processInfo.systemUptime)
+        behavior = BehaviorController(enteredAt: now())
         pointerModel = PointerInteractionModel(configuration: runtimeTuning.pointerConfiguration)
         animationPlayer = PetAnimationPlayer(asset: initialAsset)
         isRoamingEnabled = defaults.bool(forKey: DefaultsKey.roaming)
         isPointerAvoidanceEnabled = defaults.bool(forKey: DefaultsKey.avoidPointer)
         areInteractionsEnabled = defaults.bool(forKey: DefaultsKey.interactions)
-        nextWanderAt = ProcessInfo.processInfo.systemUptime + 2.2
+        nextWanderAt = now() + 2.2
     }
 
     public func start() {
@@ -285,7 +308,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             let newAsset = try loader.load(packageAt: packageURL)
             install(asset: newAsset)
             selectedBuiltInPet = nil
-            UserDefaults.standard.set(packageURL.standardizedFileURL.path, forKey: DefaultsKey.petPackagePath)
+            defaults.set(packageURL.standardizedFileURL.path, forKey: DefaultsKey.petPackagePath)
             return .success(())
         } catch {
             return .failure(error)
@@ -295,13 +318,13 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     public func useBuiltInPet(_ kind: BuiltInPetKind) {
         install(asset: MascotPetFactory.make(kind))
         selectedBuiltInPet = kind
-        UserDefaults.standard.set(kind.rawValue, forKey: DefaultsKey.builtInPet)
-        UserDefaults.standard.removeObject(forKey: DefaultsKey.petPackagePath)
+        defaults.set(kind.rawValue, forKey: DefaultsKey.builtInPet)
+        defaults.removeObject(forKey: DefaultsKey.petPackagePath)
     }
 
     public func setScale(_ newScale: Double) {
         overlay.setScale(newScale)
-        UserDefaults.standard.set(overlay.scale, forKey: DefaultsKey.scale)
+        defaults.set(overlay.scale, forKey: DefaultsKey.scale)
         let clamped = world.clamp(movement.position, objectSize: overlay.objectSize)
         movement.teleport(to: clamped, stop: false)
         overlay.setPosition(clamped)
@@ -320,7 +343,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         overlay.setHitRegionScale(normalized.hitRegionScale)
         if pauseChanged, !movement.hasRoute,
            behavior.state != .caught, behavior.state != .dragged {
-            nextWanderAt = ProcessInfo.processInfo.systemUptime
+            nextWanderAt = now()
                 + normalized.wanderDelay(randomUnit: 0.5)
         }
         persistRuntimeTuning()
@@ -391,7 +414,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         handleActivityEvent(CompanionEvent(
             sourceID: sourceID,
             sourceType: .agent,
-            timestamp: ProcessInfo.processInfo.systemUptime,
+            timestamp: now(),
             kind: .activityStarted,
             intensity: 0.55,
             context: .working,
@@ -402,7 +425,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             self.handleActivityEvent(CompanionEvent(
                 sourceID: sourceID,
                 sourceType: .agent,
-                timestamp: ProcessInfo.processInfo.systemUptime,
+                timestamp: now(),
                 kind: .achievement,
                 intensity: 0.55,
                 context: .working
@@ -411,7 +434,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     }
 
     public func petOverlayPointerDown(at pointer: WorldPoint) {
-        let now = ProcessInfo.processInfo.systemUptime
+        let now = self.now()
         guard areInteractionsEnabled, now <= catchArmedUntil else {
             overlay.setInteractionEnabled(false)
             return
@@ -429,7 +452,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
 
     public func petOverlayPointerDragged(to pointer: WorldPoint, distance: Double) {
         guard behavior.state == .caught || behavior.state == .dragged else { return }
-        let now = ProcessInfo.processInfo.systemUptime
+        let now = self.now()
         if distance > 4 {
             isDragging = true
             behavior.handle(.dragMoved, at: now)
@@ -445,7 +468,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             overlay.setInteractionEnabled(false)
             return
         }
-        let now = ProcessInfo.processInfo.systemUptime
+        let now = self.now()
         if wasDragged || isDragging {
             movement.teleport(to: pointer + dragOffset)
             finishDrop(at: now)
@@ -474,8 +497,11 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         scheduleNextTick(after: preferredTickInterval)
     }
 
-    private func tick() {
-        let now = ProcessInfo.processInfo.systemUptime
+    /// Advances the pet by one step and returns, without arming the next one.
+    /// The app never calls this directly -- its timer does -- but it is what
+    /// lets a test drive the whole loop against a clock it controls.
+    public func tick() {
+        let now = self.now()
         let deltaTime = min(max(now - (lastTickAt ?? now), 0), 0.1)
         lastTickAt = now
         behavior.handle(.tick, at: now)
@@ -659,17 +685,15 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     /// long to hold in the buffer.
     ///
     ///     defaults write dev.roamling.app roamling.diagnosticsLog /tmp/pet.log
-    private static let diagnosticsPath: String? =
-        ProcessInfo.processInfo.environment["ROAMLING_REST_LOG"]
-            ?? UserDefaults.standard.string(forKey: "roamling.diagnosticsLog")
+    private let diagnosticsPath: String?
 
     public var diagnosticsText: String {
-        diagnostics.text(now: ProcessInfo.processInfo.systemUptime)
+        diagnostics.text(now: now())
     }
 
     private func record(_ category: String, _ message: String, at timestamp: TimeInterval) {
         guard diagnostics.record(category, message, at: timestamp) else { return }
-        guard let path = Self.diagnosticsPath,
+        guard let path = diagnosticsPath,
               let entry = diagnostics.entries.last,
               let data = String(
                 format: "%.1f %@ %@\n", entry.timestamp, entry.category, entry.message
@@ -701,7 +725,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     }
 
     private var preferredTickInterval: TimeInterval {
-        if ProcessInfo.processInfo.systemUptime <= catchArmedUntil { return 1 / 60 }
+        if now() <= catchArmedUntil { return 1 / 60 }
         return switch behavior.state {
         case .wander, .evadePointer, .findSleepSpot, .travelToInterest:
             1 / 60
@@ -772,7 +796,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     }
 
     private func handleActivityEvent(_ event: CompanionEvent) {
-        let now = ProcessInfo.processInfo.systemUptime
+        let now = self.now()
         let shouldLocate = event.kind == .activityStarted
             || event.kind == .highIntensity
             || event.kind == .attentionRequired
@@ -1484,7 +1508,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             )
             movement.setRoute(transition.waypoints)
             _ = movement.update(deltaTime: deltaTime)
-            nextWanderAt = ProcessInfo.processInfo.systemUptime + 1.5
+            nextWanderAt = now() + 1.5
             return
         }
 
@@ -1511,7 +1535,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         }
         movement.configuration.maximumSpeed = max(tuning.walkingSpeed, desiredVelocity.length)
         movement.setVelocity(velocity)
-        nextWanderAt = ProcessInfo.processInfo.systemUptime + 1.0
+        nextWanderAt = now() + 1.0
     }
 
     private func updateEvadeTransition(at timestamp: TimeInterval, deltaTime: TimeInterval) {
@@ -1539,7 +1563,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         let capability = PetCapabilityMapping.capability(
             for: behavior.state,
             velocityDX: movement.velocity.dx,
-            isCaughtTransitionActive: ProcessInfo.processInfo.systemUptime < caughtAnimationUntil
+            isCaughtTransitionActive: now() < caughtAnimationUntil
         )
         animationPlayer.setCapability(capability)
         animationPlayer.setLookDirection(degrees: pointerDegrees)
@@ -1589,7 +1613,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         movement.cancelRoute(stop: true)
         movement.teleport(to: clamped)
         overlay.setPosition(clamped)
-        nextWanderAt = ProcessInfo.processInfo.systemUptime + 1
+        nextWanderAt = now() + 1
         persistPosition()
     }
 
@@ -1604,7 +1628,6 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     }
 
     private func persistPosition() {
-        let defaults = UserDefaults.standard
         defaults.set(movement.position.x, forKey: DefaultsKey.positionX)
         defaults.set(movement.position.y, forKey: DefaultsKey.positionY)
         defaults.set(true, forKey: DefaultsKey.hasPosition)
@@ -1612,7 +1635,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
 
     private func persistRuntimeTuning() {
         guard let data = try? JSONEncoder().encode(tuning) else { return }
-        UserDefaults.standard.set(data, forKey: DefaultsKey.runtimeTuning)
+        defaults.set(data, forKey: DefaultsKey.runtimeTuning)
     }
 
     private static func loadRuntimeTuning(defaults: UserDefaults) -> RuntimeTuning {
