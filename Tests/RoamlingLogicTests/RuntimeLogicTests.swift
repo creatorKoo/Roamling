@@ -124,7 +124,7 @@ func runtimeLogicTests() -> [LogicTest] {
 
 /// A defaults suite of its own, so a test neither reads the settings of the
 /// app running on this machine nor leaves anything behind on disk.
-private struct TestDefaults {
+struct TestDefaults {
     let defaults: UserDefaults
     let name: String
 
@@ -133,7 +133,7 @@ private struct TestDefaults {
     }
 }
 
-private func makeTestDefaults() throws -> TestDefaults {
+func makeTestDefaults() throws -> TestDefaults {
     let name = "dev.roamling.tests.\(UUID().uuidString)"
     let defaults = try require(
         UserDefaults(suiteName: name),
@@ -148,7 +148,7 @@ private func makeTestDefaults() throws -> TestDefaults {
 /// value the test sets, so a run is the same on any machine and costs no
 /// wall-clock time.
 @MainActor
-private final class FakePlatform {
+final class FakePlatform {
     let displayProvider: FakeDisplayProvider
     let safeZone = BasicSafeZoneProvider()
     let userIdle = FakeUserIdleProvider()
@@ -188,7 +188,7 @@ private final class FakePlatform {
 }
 
 @MainActor
-private final class FakeDisplayProvider: DisplayProviding, DisplayChangeObserving {
+final class FakeDisplayProvider: DisplayProviding, DisplayChangeObserving {
     var displaySet: DisplaySnapshotSet
     private(set) var isObserving = false
 
@@ -207,7 +207,7 @@ private final class FakeDisplayProvider: DisplayProviding, DisplayChangeObservin
 }
 
 @MainActor
-private final class FakePointerProvider: PointerProviding {
+final class FakePointerProvider: PointerProviding {
     var position: WorldPoint = .zero
 
     func currentPointer(at timestamp: TimeInterval) -> PointerSnapshot {
@@ -216,14 +216,14 @@ private final class FakePointerProvider: PointerProviding {
 }
 
 @MainActor
-private final class FakeUserIdleProvider: UserIdleProviding {
+final class FakeUserIdleProvider: UserIdleProviding {
     var duration: TimeInterval = 0
 
     func idleDuration(at timestamp: TimeInterval) -> TimeInterval { duration }
 }
 
 @MainActor
-private final class FakeCaptureProvider: CaptureProviding {
+final class FakeCaptureProvider: CaptureProviding {
     var isAuthorized = false
     var field: LuminanceField?
 
@@ -234,7 +234,7 @@ private final class FakeCaptureProvider: CaptureProviding {
 }
 
 @MainActor
-private final class FakeWindowProvider: WindowProviding {
+final class FakeWindowProvider: WindowProviding {
     var windows: [WindowSnapshot] = []
     var hint: LocationHint?
 
@@ -243,7 +243,7 @@ private final class FakeWindowProvider: WindowProviding {
 }
 
 @MainActor
-private final class FakeFocusProvider: FocusProviding {
+final class FakeFocusProvider: FocusProviding {
     var isAuthorized = false
     var focus: FocusSnapshot?
 
@@ -254,7 +254,7 @@ private final class FakeFocusProvider: FocusProviding {
 }
 
 @MainActor
-private final class FakeOverlay: PetOverlayProviding {
+final class FakeOverlay: PetOverlayProviding {
     private(set) var scale: Double = 1
     private(set) var position: WorldPoint = .zero
     private(set) var isVisible = false
@@ -286,7 +286,7 @@ private final class FakeOverlay: PetOverlayProviding {
 
 /// The runtime's clock, wound by hand. `@unchecked Sendable` because the
 /// runtime takes a `@Sendable` closure; the lock is what makes that true.
-private final class TestClock: @unchecked Sendable {
+final class TestClock: @unchecked Sendable {
     private let lock = NSLock()
     private var seconds: TimeInterval
 
@@ -306,5 +306,36 @@ private final class TestClock: @unchecked Sendable {
         lock.lock()
         seconds += delta
         lock.unlock()
+    }
+}
+
+/// A runtime standing on fakes, with a throwaway defaults suite. Used by the
+/// shell tests too: the menu is a function of runtime state, so asking what it
+/// shows means having a runtime.
+@MainActor
+struct RuntimeHarness {
+    let runtime: RoamlingRuntime
+    private let defaults: TestDefaults
+
+    init() throws {
+        let display = DisplaySnapshot(
+            id: "1",
+            name: "test",
+            frame: WorldRect(x: 0, y: 0, width: 1440, height: 900),
+            visibleFrame: WorldRect(x: 0, y: 25, width: 1440, height: 850),
+            scale: 2
+        )
+        let platform = FakePlatform(display: display, worldTop: 900)
+        defaults = try makeTestDefaults()
+        runtime = RoamlingRuntime(
+            services: platform.services,
+            defaults: defaults.defaults,
+            catalog: PetCatalog(roots: []),
+            clock: { 0 }
+        )
+    }
+
+    func tearDown() {
+        defaults.discard()
     }
 }

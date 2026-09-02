@@ -3,6 +3,7 @@
 
 import AppKit
 import RoamlingCore
+import RoamlingShell
 import SwiftUI
 
 @MainActor

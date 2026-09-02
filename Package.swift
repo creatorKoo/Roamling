@@ -17,7 +17,8 @@ let package = Package(
         .library(name: "RoamlingCore", targets: ["RoamlingCore"]),
         .library(name: "RoamlingPet", targets: ["RoamlingPet"]),
         .library(name: "RoamlingSources", targets: ["RoamlingSources"]),
-        .library(name: "RoamlingEngine", targets: ["RoamlingEngine"])
+        .library(name: "RoamlingEngine", targets: ["RoamlingEngine"]),
+        .library(name: "RoamlingShell", targets: ["RoamlingShell"])
     ],
     targets: [
         .target(name: "RoamlingCore"),
@@ -36,11 +37,20 @@ let package = Package(
             name: "RoamlingEngine",
             dependencies: ["RoamlingCore", "RoamlingPet", "RoamlingSources"]
         ),
+        // The user-facing surface with no widgets in it: the menu tree, the
+        // words, and what the alerts say. Each platform renders this rather
+        // than restating it.
         .target(
-            name: "RoamlingMac",
+            name: "RoamlingShell",
             dependencies: ["RoamlingCore", "RoamlingPet", "RoamlingSources", "RoamlingEngine"],
             resources: [
                 .process("Resources")
+            ]
+        ),
+        .target(
+            name: "RoamlingMac",
+            dependencies: [
+                "RoamlingCore", "RoamlingPet", "RoamlingSources", "RoamlingEngine", "RoamlingShell"
             ],
             linkerSettings: [
                 .linkedFramework("AppKit"),
@@ -62,7 +72,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "RoamlingLogicTests",
-            dependencies: ["RoamlingCore", "RoamlingPet", "RoamlingSources", "RoamlingEngine"],
+            dependencies: ["RoamlingCore", "RoamlingPet", "RoamlingSources", "RoamlingEngine", "RoamlingShell"],
             path: "Tests/RoamlingLogicTests",
             linkerSettings: [
                 .linkedFramework("ImageIO"),
