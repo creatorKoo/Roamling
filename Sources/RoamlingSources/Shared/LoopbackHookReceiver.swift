@@ -4,13 +4,6 @@
 import Foundation
 import RoamlingCore
 
-public enum ActivityReceiverState: Equatable, Sendable {
-    case stopped
-    case starting
-    case ready
-    case failed(String)
-}
-
 final class LoopbackHookReceiver: @unchecked Sendable {
     typealias Normalizer = @Sendable (Data, TimeInterval) throws -> CompanionEvent?
 

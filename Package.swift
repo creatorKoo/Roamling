@@ -31,18 +31,19 @@ let package = Package(
                 .process("Resources")
             ]
         ),
-        // The app's orchestration. Foundation and the portable modules only --
-        // W2 took the last CGImage out of the frame it hands the overlay.
+        // The app's orchestration. Since the agent integrations are injected it
+        // no longer knows RoamlingSources exists, which is what lets the tick
+        // loop move somewhere the hook transport has not gone yet.
         .target(
             name: "RoamlingEngine",
-            dependencies: ["RoamlingCore", "RoamlingPet", "RoamlingSources"]
+            dependencies: ["RoamlingCore", "RoamlingPet"]
         ),
         // The user-facing surface with no widgets in it: the menu tree, the
         // words, and what the alerts say. Each platform renders this rather
         // than restating it.
         .target(
             name: "RoamlingShell",
-            dependencies: ["RoamlingCore", "RoamlingPet", "RoamlingSources", "RoamlingEngine"],
+            dependencies: ["RoamlingCore", "RoamlingPet", "RoamlingEngine"],
             resources: [
                 .process("Resources")
             ]

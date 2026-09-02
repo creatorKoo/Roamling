@@ -5,7 +5,6 @@ import Foundation
 import RoamlingCore
 import RoamlingEngine
 import RoamlingPet
-import RoamlingSources
 
 /// Everything the menu can ask for. A closed set, so a second platform renders
 /// the same choices instead of inventing its own.
@@ -17,12 +16,9 @@ public enum MenuAction: Equatable, Sendable {
     case togglePointerAvoidance
     case toggleInteractions
     case showTuning
-    case installClaudeCode
-    case removeClaudeCode
-    case testClaudeCodeReaction
-    case installCodex
-    case removeCodex
-    case testCodexReaction
+    case installAgent(id: String)
+    case removeAgent(id: String)
+    case testAgentReaction(id: String)
     case enableAccessibility
     case enableVisualPlacement
     case openPetFolder
@@ -86,8 +82,14 @@ public enum ShellMenu {
                 .check(.toggleInteractions, isOn: runtime.areInteractionsEnabled)
             ),
             MenuItem(localized("menu.tuning"), .command(.showTuning), shortcut: ","),
-            MenuItem("Claude Code", .submenu(claudeCodeItems(for: runtime))),
-            MenuItem("Codex", .submenu(codexItems(for: runtime))),
+        ]
+        // One submenu per agent, in the order the app handed them over. An app
+        // built with no agents simply has none, which is what a platform that
+        // cannot install hooks yet gets.
+        items += runtime.agentIntegrations.map { agent in
+            MenuItem(agent.displayName, .submenu(agentItems(for: agent)))
+        }
+        items += [
             MenuItem(localized("menu.accessibility"), .submenu(accessibilityItems(for: runtime))),
             MenuItem(localized("menu.visualPlacement"), .submenu(visualPlacementItems(for: runtime))),
             .separator,
@@ -163,62 +165,35 @@ public enum ShellMenu {
         }
     }
 
-    private static func hookStatusCaptions(
-        integration installed: Bool,
-        needsRepair: Bool,
-        receiver: String
-    ) -> [MenuItem] {
-        let integrationText = needsRepair
-            ? localized("status.hooks.needsRepair")
-            : installed ? localized("status.hooks.installed") : localized("status.hooks.notInstalled")
-        return [MenuItem(integrationText, .caption), MenuItem(receiver, .caption)]
-    }
-
-    /// Both agents alias the same `ActivityReceiverState`, so this reads both.
-    private static func receiverText(_ state: ActivityReceiverState) -> String {
-        switch state {
+    private static func agentItems(for agent: any AgentIntegration) -> [MenuItem] {
+        let status = agent.installationStatus
+        let integrationText = switch status {
+        case .installed: localized("status.hooks.installed")
+        case .needsRepair: localized("status.hooks.needsRepair")
+        case .notInstalled: localized("status.hooks.notInstalled")
+        }
+        let receiverText = switch agent.receiverState {
         case .ready: localized("status.receiver.ready")
         case .starting: localized("status.receiver.starting")
         case .stopped: localized("status.receiver.stopped")
         case .failed: localized("status.receiver.unavailable")
         }
-    }
-
-    private static func claudeCodeItems(for runtime: RoamlingRuntime) -> [MenuItem] {
-        let status = runtime.claudeCodeIntegrationStatus
-        var items = hookStatusCaptions(
-            integration: status == .installed,
-            needsRepair: status == .needsRepair,
-            receiver: receiverText(runtime.claudeCodeReceiverState)
-        )
-        items.append(.separator)
-        items.append(MenuItem(
-            status == .notInstalled ? localized("action.install") : localized("action.repair"),
-            .command(.installClaudeCode)
-        ))
+        var items = [
+            MenuItem(integrationText, .caption),
+            MenuItem(receiverText, .caption),
+            .separator,
+            MenuItem(
+                status == .notInstalled ? localized("action.install") : localized("action.repair"),
+                .command(.installAgent(id: agent.id))
+            )
+        ]
         if status != .notInstalled {
-            items.append(MenuItem(localized("action.remove"), .command(.removeClaudeCode)))
+            items.append(MenuItem(localized("action.remove"), .command(.removeAgent(id: agent.id))))
         }
-        items.append(MenuItem(localized("action.testReaction"), .command(.testClaudeCodeReaction)))
-        return items
-    }
-
-    private static func codexItems(for runtime: RoamlingRuntime) -> [MenuItem] {
-        let status = runtime.codexIntegrationStatus
-        var items = hookStatusCaptions(
-            integration: status == .installed,
-            needsRepair: status == .needsRepair,
-            receiver: receiverText(runtime.codexReceiverState)
-        )
-        items.append(.separator)
         items.append(MenuItem(
-            status == .notInstalled ? localized("action.install") : localized("action.repair"),
-            .command(.installCodex)
+            localized("action.testReaction"),
+            .command(.testAgentReaction(id: agent.id))
         ))
-        if status != .notInstalled {
-            items.append(MenuItem(localized("action.remove"), .command(.removeCodex)))
-        }
-        items.append(MenuItem(localized("action.testReaction"), .command(.testCodexReaction)))
         return items
     }
 

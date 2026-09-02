@@ -42,30 +42,22 @@ public enum ShellPrompt {
     /// What to ask before running this, or nil to run it straight away.
     public static func confirmation(for action: MenuAction) -> AlertModel? {
         switch action {
-        case .installClaudeCode:
-            AlertModel(
-                title: localized("alert.claude.install.title"),
-                body: localized("alert.claude.install.body"),
-                buttons: [localized("button.install"), localized("button.cancel")]
-            )
-        case .removeClaudeCode:
-            AlertModel(
-                title: localized("alert.claude.remove.title"),
-                body: localized("alert.claude.remove.body"),
-                buttons: [localized("button.remove"), localized("button.cancel")]
-            )
-        case .installCodex:
-            AlertModel(
-                title: localized("alert.codex.install.title"),
-                body: localized("alert.codex.install.body"),
-                buttons: [localized("button.install"), localized("button.cancel")]
-            )
-        case .removeCodex:
-            AlertModel(
-                title: localized("alert.codex.remove.title"),
-                body: localized("alert.codex.remove.body"),
-                buttons: [localized("button.remove"), localized("button.cancel")]
-            )
+        case let .installAgent(id):
+            AgentCopy.forAgent(id).map {
+                AlertModel(
+                    title: localized($0.installTitle),
+                    body: localized($0.installBody),
+                    buttons: [localized("button.install"), localized("button.cancel")]
+                )
+            }
+        case let .removeAgent(id):
+            AgentCopy.forAgent(id).map {
+                AlertModel(
+                    title: localized($0.removeTitle),
+                    body: localized($0.removeBody),
+                    buttons: [localized("button.remove"), localized("button.cancel")]
+                )
+            }
         case .enableAccessibility:
             AlertModel(
                 title: localized("accessibility.alert.title"),
@@ -80,6 +72,49 @@ public enum ShellPrompt {
             )
         default:
             nil
+        }
+    }
+
+    /// Which strings belong to which agent, written out rather than built from
+    /// the id: a constructed key that is missing shows up as the key itself on
+    /// screen, and nothing greps for a name that was never typed.
+    struct AgentCopy {
+        let installTitle: String
+        let installBody: String
+        let removeTitle: String
+        let removeBody: String
+        let installed: String
+        let removed: String
+        let installedDetail: String
+        let removedDetail: String
+
+        static func forAgent(_ id: String) -> AgentCopy? {
+            switch id {
+            case "claude-code":
+                AgentCopy(
+                    installTitle: "alert.claude.install.title",
+                    installBody: "alert.claude.install.body",
+                    removeTitle: "alert.claude.remove.title",
+                    removeBody: "alert.claude.remove.body",
+                    installed: "result.claude.installed",
+                    removed: "result.claude.removed",
+                    installedDetail: "result.detail.claude",
+                    removedDetail: "result.detail.claude"
+                )
+            case "codex":
+                AgentCopy(
+                    installTitle: "alert.codex.install.title",
+                    installBody: "alert.codex.install.body",
+                    removeTitle: "alert.codex.remove.title",
+                    removeBody: "alert.codex.remove.body",
+                    installed: "result.codex.installed",
+                    removed: "result.codex.removed",
+                    installedDetail: "result.detail.codex.installed",
+                    removedDetail: "result.detail.codex.removed"
+                )
+            default:
+                nil
+            }
         }
     }
 
@@ -151,35 +186,24 @@ public enum ShellController {
             return .rebuildMenu
         case .showTuning:
             return .openTuningPanel
-        case .installClaudeCode:
+        case let .installAgent(id):
+            guard let agent = runtime.agentIntegration(id: id),
+                  let copy = ShellPrompt.AgentCopy.forAgent(id) else { return .none }
             return .presentThenRebuild(ShellPrompt.integrationResult(
-                runtime.installClaudeCodeIntegration(),
-                success: localized("result.claude.installed"),
-                detail: localized("result.detail.claude")
+                agent.install(),
+                success: localized(copy.installed),
+                detail: localized(copy.installedDetail)
             ))
-        case .removeClaudeCode:
+        case let .removeAgent(id):
+            guard let agent = runtime.agentIntegration(id: id),
+                  let copy = ShellPrompt.AgentCopy.forAgent(id) else { return .none }
             return .presentThenRebuild(ShellPrompt.integrationResult(
-                runtime.removeClaudeCodeIntegration(),
-                success: localized("result.claude.removed"),
-                detail: localized("result.detail.claude")
+                agent.remove(),
+                success: localized(copy.removed),
+                detail: localized(copy.removedDetail)
             ))
-        case .testClaudeCodeReaction:
-            runtime.testClaudeCodeReaction()
-            return .none
-        case .installCodex:
-            return .presentThenRebuild(ShellPrompt.integrationResult(
-                runtime.installCodexIntegration(),
-                success: localized("result.codex.installed"),
-                detail: localized("result.detail.codex.installed")
-            ))
-        case .removeCodex:
-            return .presentThenRebuild(ShellPrompt.integrationResult(
-                runtime.removeCodexIntegration(),
-                success: localized("result.codex.removed"),
-                detail: localized("result.detail.codex.removed")
-            ))
-        case .testCodexReaction:
-            runtime.testCodexReaction()
+        case let .testAgentReaction(id):
+            runtime.testAgentReaction(id: id)
             return .none
         case .enableAccessibility:
             runtime.requestAccessibilityAuthorization()

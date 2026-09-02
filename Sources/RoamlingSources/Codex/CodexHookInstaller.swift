@@ -2,12 +2,11 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 import Foundation
+import RoamlingCore
 
-public enum CodexIntegrationStatus: String, Sendable {
-    case notInstalled
-    case needsRepair
-    case installed
-}
+/// Kept as a spelling of the shared enum so callers outside this module do
+/// not have to change; the meaning is `AgentIntegrationStatus`.
+public typealias CodexIntegrationStatus = AgentIntegrationStatus
 
 public struct CodexHookInstaller: Sendable {
     public static let defaultPort: UInt16 = 47_832

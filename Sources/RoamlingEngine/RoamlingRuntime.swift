@@ -4,7 +4,6 @@
 import Foundation
 import RoamlingCore
 import RoamlingPet
-import RoamlingSources
 
 @MainActor
 public final class RoamlingRuntime: PetOverlayInputHandling {
@@ -19,8 +18,6 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         static let positionX = "roamling.position.x"
         static let positionY = "roamling.position.y"
         static let hasPosition = "roamling.position.exists"
-        static let claudeCodeHookToken = "roamling.claudeCodeHookToken"
-        static let codexHookToken = "roamling.codexHookToken"
     }
 
     public var isRoamingEnabled: Bool {
@@ -69,12 +66,12 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     /// tests -- the app watches the pet through the overlay instead.
     public var behaviorState: BehaviorState { behavior.state }
     public var position: WorldPoint { movement.position }
-    public var claudeCodeIntegrationStatus: ClaudeCodeIntegrationStatus {
-        claudeCodeInstaller.status()
+    /// In the order they were handed over, which is the order they are shown.
+    public var agentIntegrations: [any AgentIntegration] { agents }
+
+    public func agentIntegration(id: String) -> (any AgentIntegration)? {
+        agents.first { $0.id == id }
     }
-    public var claudeCodeReceiverState: ClaudeCodeReceiverState { claudeCodeSource.state }
-    public var codexIntegrationStatus: CodexIntegrationStatus { codexInstaller.status() }
-    public var codexReceiverState: CodexReceiverState { codexSource.state }
 
     private let services: PlatformServices
     private let defaults: UserDefaults
@@ -92,10 +89,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
 
     private let catalog: PetCatalog
     private let loader: PetLoader
-    private let claudeCodeSource: ClaudeCodeSource
-    private let claudeCodeInstaller: ClaudeCodeHookInstaller
-    private let codexSource: CodexSource
-    private let codexInstaller: CodexHookInstaller
+    private let agents: [any AgentIntegration]
 
     private var displays: [DisplaySnapshot]
     /// Stored in the services so the providers see every move of the origin.
@@ -182,6 +176,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     ///     costs no wall time and never flakes on a slow machine.
     public init(
         services: PlatformServices,
+        agents: [any AgentIntegration] = [],
         defaults: UserDefaults = .standard,
         catalog: PetCatalog = PetCatalog(),
         clock: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
@@ -198,8 +193,6 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             DefaultsKey.builtInPet: BuiltInPetKind.fatMochi.rawValue
         ])
         let runtimeTuning = Self.loadRuntimeTuning(defaults: defaults)
-        let claudeCodeHookToken = Self.loadOrCreateClaudeCodeHookToken(defaults: defaults)
-        let codexHookToken = Self.loadOrCreateCodexHookToken(defaults: defaults)
 
         let descriptors = catalog.discover()
         let selectedPath = defaults.string(forKey: DefaultsKey.petPackagePath)
@@ -227,6 +220,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         )
 
         self.services = services
+        self.agents = agents
         self.catalog = catalog
         loader = PetLoader(images: services.images)
         installedPets = descriptors
@@ -235,18 +229,6 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         displays = displaySet.displays
         world = initialWorld
         tuning = runtimeTuning
-        claudeCodeSource = ClaudeCodeSource(token: claudeCodeHookToken, clock: clock)
-        claudeCodeInstaller = ClaudeCodeHookInstaller(
-            settingsURL: FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".claude/settings.json"),
-            token: claudeCodeHookToken
-        )
-        codexSource = CodexSource(token: codexHookToken, clock: clock)
-        codexInstaller = CodexHookInstaller(
-            hooksURL: FileManager.default.homeDirectoryForCurrentUser
-                .appendingPathComponent(".codex/hooks.json"),
-            token: codexHookToken
-        )
         movement = MovementController(
             position: initialPosition,
             configuration: MovementConfiguration(
@@ -289,8 +271,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         luminanceTask = nil
         cachedLuminance = nil
         activityTasks.removeAll()
-        claudeCodeSource.stop()
-        codexSource.stop()
+        agents.forEach { $0.stopReceiving() }
         screenObserver?.cancel()
         screenObserver = nil
         clickReactionUntil = 0
@@ -355,61 +336,15 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         applyTuning(.standard)
     }
 
-    @discardableResult
-    public func installClaudeCodeIntegration() -> Result<Void, Error> {
-        do {
-            try claudeCodeInstaller.install()
-            return .success(())
-        } catch {
-            return .failure(error)
-        }
+    /// Brings every agent that was installed before this build up to the
+    /// current handler shape, without asking again. An agent that was never
+    /// opted into keeps an untouched config.
+    public func repairAgentIntegrationsIfNeeded() {
+        for agent in agents { _ = agent.repairIfNeeded() }
     }
 
-    /// Upgrades an existing install to the current handler shape without asking
-    /// again. Returns nil when there is nothing to repair, so a machine that
-    /// never opted in keeps an untouched `settings.json`.
-    @discardableResult
-    public func repairClaudeCodeIntegrationIfNeeded() -> Result<Void, Error>? {
-        guard claudeCodeInstaller.status() == .needsRepair else { return nil }
-        return installClaudeCodeIntegration()
-    }
-
-    @discardableResult
-    public func removeClaudeCodeIntegration() -> Result<Void, Error> {
-        do {
-            try claudeCodeInstaller.remove()
-            return .success(())
-        } catch {
-            return .failure(error)
-        }
-    }
-
-    @discardableResult
-    public func installCodexIntegration() -> Result<Void, Error> {
-        do {
-            try codexInstaller.install()
-            return .success(())
-        } catch {
-            return .failure(error)
-        }
-    }
-
-    @discardableResult
-    public func removeCodexIntegration() -> Result<Void, Error> {
-        do {
-            try codexInstaller.remove()
-            return .success(())
-        } catch {
-            return .failure(error)
-        }
-    }
-
-    public func testClaudeCodeReaction() {
-        testAgentReaction(sourceID: "claude-code:test")
-    }
-
-    public func testCodexReaction() {
-        testAgentReaction(sourceID: "codex:test")
+    public func testAgentReaction(id: String) {
+        testAgentReaction(sourceID: "\(id):test")
     }
 
     private func testAgentReaction(sourceID: String) {
@@ -769,14 +704,12 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     }
 
     private func startActivitySources() {
-        startActivitySource(
-            start: claudeCodeSource.start,
-            stream: claudeCodeSource.makeEventStream()
-        )
-        startActivitySource(
-            start: codexSource.start,
-            stream: codexSource.makeEventStream()
-        )
+        for agent in agents {
+            startActivitySource(
+                start: agent.startReceiving,
+                stream: agent.makeEventStream()
+            )
+        }
     }
 
     private func startActivitySource(
@@ -1646,25 +1579,6 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             return .standard
         }
         return decoded.normalized
-    }
-
-    private static func loadOrCreateClaudeCodeHookToken(defaults: UserDefaults) -> String {
-        loadOrCreateHookToken(key: DefaultsKey.claudeCodeHookToken, defaults: defaults)
-    }
-
-    private static func loadOrCreateCodexHookToken(defaults: UserDefaults) -> String {
-        loadOrCreateHookToken(key: DefaultsKey.codexHookToken, defaults: defaults)
-    }
-
-    private static func loadOrCreateHookToken(key: String, defaults: UserDefaults) -> String {
-        if let existing = defaults.string(forKey: key),
-           existing.count >= 24 {
-            return existing
-        }
-        let token = UUID().uuidString.replacingOccurrences(of: "-", with: "")
-            + UUID().uuidString.replacingOccurrences(of: "-", with: "")
-        defaults.set(token, forKey: key)
-        return token
     }
 
     private static func initialPosition(

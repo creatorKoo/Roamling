@@ -102,7 +102,8 @@ func shellLogicTests() -> [LogicTest] {
         LogicTest(name: "destructive actions ask first and harmless ones do not") {
             try MainActor.assumeIsolated {
                 let asks: [MenuAction] = [
-                    .installClaudeCode, .removeClaudeCode, .installCodex, .removeCodex,
+                    .installAgent(id: "claude-code"), .removeAgent(id: "claude-code"),
+                    .installAgent(id: "codex"), .removeAgent(id: "codex"),
                     .enableAccessibility, .enableVisualPlacement
                 ]
                 for action in asks {
@@ -116,7 +117,8 @@ func shellLogicTests() -> [LogicTest] {
                 let doesNotAsk: [MenuAction] = [
                     .toggleRoaming, .togglePointerAvoidance, .toggleInteractions,
                     .showTuning, .reloadPets, .copyDiagnostics, .openPetFolder,
-                    .testClaudeCodeReaction, .testCodexReaction, .showAbout, .quit,
+                    .testAgentReaction(id: "claude-code"), .testAgentReaction(id: "codex"),
+                    .showAbout, .quit,
                     .setScale(1.0)
                 ]
                 for action in doesNotAsk {

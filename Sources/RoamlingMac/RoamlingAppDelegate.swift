@@ -19,10 +19,13 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        let runtime = RoamlingRuntime(services: MacPlatform.makeServices())
+        let runtime = RoamlingRuntime(
+            services: MacPlatform.makeServices(),
+            agents: MacPlatform.makeAgentIntegrations()
+        )
         self.runtime = runtime
         runtime.start()
-        runtime.repairClaudeCodeIntegrationIfNeeded()
+        runtime.repairAgentIntegrationsIfNeeded()
         setupMenuBar()
 
         // Starts the complete AppKit lifecycle for automated packaging checks,
