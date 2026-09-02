@@ -342,6 +342,50 @@ shipped `mochi-v3` 패키지(96) · placeholder(88). 크롭에 1픽셀 오프셋
 `NWListener` → 이식 가능한 loopback HTTP listener. curl 경로 OS 분기. `PetCatalog` 검색 경로에
 `%APPDATA%\Roamling\Pets` 추가.
 
+### W3b — 셸 표면을 데이터로 (macOS, 동작 변화 0)
+
+**W4가 두 번째 셸을 만드는 순간 갈라질 것들을 먼저 모은다.** W1이 런타임에 한 것과 같은
+일을 UI 표면에 한다 — 구조는 포터블 모듈에 데이터로 두고, 각 플랫폼은 렌더만 한다.
+2026-09-02에 `RoamlingMac` 13개 파일을 전수 검토해 넷을 찾았다.
+
+**1. 메뉴 트리** — `RoamlingAppDelegate.swift` 608줄, `NSMenuItem` 34개, 서브메뉴 6개
+(펫 · 크기 · Claude · Codex · 손쉬운 사용 · 시각 배치). macOS는 메뉴바 `NSStatusItem`,
+Windows는 시계 옆 트레이(`Shell_NotifyIcon`)라 **렌더러는 당연히 다르지만 트리는 같아야
+한다.** 지금 구조로 가면 항목 하나 추가할 때마다 양쪽을 고쳐야 하고, 한쪽만 고치면 조용히
+어긋난다. 메뉴가 호출하는 런타임 public API 32개는 이미 공유되므로 남은 것은 트리뿐이다.
+
+**2. 튜닝 패널의 범위 — 이미 어긋나 있다.** `RuntimeTuningWindowController`의 슬라이더 11개가
+범위와 스텝을 직접 들고 있는데, 같은 범위가 `RuntimeTuning.init`의 clamp에도 있다. 한 진실이
+두 벌이고 **`catchArmDistance`가 실제로 갈라졌다**:
+
+```text
+Core : catchArmDistance.clamped(to: 40...self.pointerAwarenessDistance)   -> 최대 360
+UI   : range: 40...140                                                     -> 최대 140
+```
+
+pointer awareness를 360까지 올려도 catch arm은 140을 못 넘는다. **이건 Windows 문제가 아니라
+지금 있는 결함이고**, 셋째 사본이 생기기 전에 닫는 것이 맞다. 범위·스텝·단위는 Core가
+정본이어야 한다.
+
+**3. 사용자에게 보이는 문자열 91개** — `Sources/RoamlingMac/Resources/{en,ko}.lproj`에 있다.
+9절이 Windows에서 `.lproj`가 무수정으로 읽힌다고 확인했지만 **그 번들은 AppKit 모듈 것**이라
+Windows 셸이 못 읽는다. `LocalizedText.swift`는 이미 Foundation 20줄이므로 옮길 것은
+리소스 위치뿐이다.
+
+**4. 알림 8개** — `NSAlert` 8곳. *무엇을 말할지*는 정책이고 *어떻게 띄울지*가 플랫폼이다.
+설치 결과·권한 안내 문구가 셸에 박혀 있으면 3번과 같은 이유로 갈라진다.
+
+**올바르게 플랫폼에 남는 것** (옮기지 않는다): provider 7종, 오버레이 패널,
+`MacPlaceholderArt`, `MacPetImageSource`, `MacPlatform.makeServices()`, 그리고 앱 수명주기
+(`NSApp.setActivationPolicy(.accessory)`, terminate).
+
+**Exit**: W1·W2와 같다 — 메뉴·튜닝 패널·알림이 실사용에서 전과 같고, `catchArmDistance`만
+Core의 범위대로 넓어진다(이건 의도된 수정이므로 따로 확인받는다).
+
+**언어 결정과의 관계**: D로 가면 이 데이터 트리가 Rust에 살고 양 플랫폼이 렌더만 한다.
+A로 가면 Swift 포터블 모듈에 산다. **어느 쪽이든 필요한 일이라 결정을 기다리지 않는다** —
+W1·W2와 같은 성질이다.
+
 ### W4 — Windows 최소 루프
 
 tray + layered window + Display/Pointer/Idle provider.
@@ -501,7 +545,7 @@ MVP 4 exit rule 충족  ✅ 2026-09-02
    (macOS 머신) W1 ✅ 2026-09-02 -> W2 ✅ 2026-09-02 -> W2b
         |
         v
-   W3 -> W4 -> W5 -> W6 -> W7
+   W3 -> W3b -> W4 -> W5 -> W6 -> W7
         ^
         +-- W2b(디코더)는 여기까지 미룬다. 언어 결정과 같은 결정이다.
              ^                ^
