@@ -8,3 +8,6 @@ output/
 *.p12
 scripts/signing.env
 __pycache__/
+
+# Cargo build products for the Rust core.
+rust/target/

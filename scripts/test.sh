@@ -43,3 +43,14 @@ if grep -rnE --include='*.swift' \
 fi
 
 swift run "${SWIFT_ARGS[@]}" RoamlingLogicTests
+
+# The Rust core is being ported one unit at a time, and each unit is gated by a
+# fixture the Swift original generated. Running both here keeps that one command.
+if command -v cargo >/dev/null 2>&1; then
+  cargo test --quiet --manifest-path "$REPOSITORY_DIR/rust/Cargo.toml"
+elif [[ -n "${CI:-}" ]]; then
+  print -u2 "cargo is required: the Rust core's differential tests cannot run"
+  exit 1
+else
+  print -u2 "warning: cargo not found, skipping the Rust core's differential tests"
+fi
