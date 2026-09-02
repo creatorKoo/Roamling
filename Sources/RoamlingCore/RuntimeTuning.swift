@@ -3,6 +3,22 @@
 
 import Foundation
 
+/// Names one tunable value, so a panel can be built from the model rather
+/// than from a second list that drifts away from it.
+public enum RuntimeTuningKey: String, CaseIterable, Codable, Sendable {
+    case walkingSpeed
+    case wanderPause
+    case crossDisplayWanderChance
+    case idleBeforeRest
+    case pointerAwarenessDistance
+    case evadeSpeedScale
+    case catchArmDistance
+    case catchApproachSpeed
+    case catchWindow
+    case hitRegionScale
+    case gaitCadence
+}
+
 /// The intentionally small set of live-tunable values used to validate
 /// MVP 0/0.5 feel. Later milestone settings should not be added here until
 /// their behavior is implemented.
@@ -32,19 +48,27 @@ public struct RuntimeTuning: Codable, Equatable, Sendable {
         evadeSpeedScale: Double = 1.4,
         idleBeforeRest: Double = RestConfiguration.standard.idleBeforeRest
     ) {
-        self.walkingSpeed = walkingSpeed.clamped(to: 20...320)
-        self.wanderPause = wanderPause.clamped(to: 2...40)
-        self.crossDisplayWanderChance = crossDisplayWanderChance.clamped(to: 0...1)
-        self.pointerAwarenessDistance = pointerAwarenessDistance.clamped(to: 140...360)
-        self.catchArmDistance = catchArmDistance.clamped(
-            to: 40...self.pointerAwarenessDistance
-        )
-        self.catchApproachSpeed = catchApproachSpeed.clamped(to: 150...900)
-        self.catchWindow = catchWindow.clamped(to: 0.15...1.2)
-        self.hitRegionScale = hitRegionScale.clamped(to: 0.75...1.3)
-        self.gaitCadence = gaitCadence.clamped(to: 0.5...3.2)
-        self.evadeSpeedScale = evadeSpeedScale.clamped(to: 0.8...3)
-        self.idleBeforeRest = idleBeforeRest.clamped(to: 15...600)
+        // Every bound comes from `bounds(_:pointerAwareness:)` so the panel can
+        // ask for the same numbers instead of restating them.
+        func bound(_ key: RuntimeTuningKey, _ awareness: Double = 0) -> ClosedRange<Double> {
+            RuntimeTuning.bounds(key, pointerAwareness: awareness)
+        }
+        self.walkingSpeed = walkingSpeed.clamped(to: bound(.walkingSpeed))
+        self.wanderPause = wanderPause.clamped(to: bound(.wanderPause))
+        self.crossDisplayWanderChance = crossDisplayWanderChance
+            .clamped(to: bound(.crossDisplayWanderChance))
+        self.pointerAwarenessDistance = pointerAwarenessDistance
+            .clamped(to: bound(.pointerAwarenessDistance))
+        // Clamped after pointer awareness, because its ceiling is that value:
+        // arming a catch further away than the pet can notice is meaningless.
+        self.catchArmDistance = catchArmDistance
+            .clamped(to: bound(.catchArmDistance, self.pointerAwarenessDistance))
+        self.catchApproachSpeed = catchApproachSpeed.clamped(to: bound(.catchApproachSpeed))
+        self.catchWindow = catchWindow.clamped(to: bound(.catchWindow))
+        self.hitRegionScale = hitRegionScale.clamped(to: bound(.hitRegionScale))
+        self.gaitCadence = gaitCadence.clamped(to: bound(.gaitCadence))
+        self.evadeSpeedScale = evadeSpeedScale.clamped(to: bound(.evadeSpeedScale))
+        self.idleBeforeRest = idleBeforeRest.clamped(to: bound(.idleBeforeRest))
     }
 
     /// Decoding tolerates a saved blob written before a field existed.
@@ -80,6 +104,67 @@ public struct RuntimeTuning: Codable, Equatable, Sendable {
     }
 
     public static let standard = RuntimeTuning()
+
+    private static func bounds(
+        _ key: RuntimeTuningKey,
+        pointerAwareness: Double
+    ) -> ClosedRange<Double> {
+        switch key {
+        case .walkingSpeed: 20...320
+        case .wanderPause: 2...40
+        case .crossDisplayWanderChance: 0...1
+        case .idleBeforeRest: 15...600
+        case .pointerAwarenessDistance: 140...360
+        case .evadeSpeedScale: 0.8...3
+        case .catchArmDistance: 40...pointerAwareness
+        case .catchApproachSpeed: 150...900
+        case .catchWindow: 0.15...1.2
+        case .hitRegionScale: 0.75...1.3
+        case .gaitCadence: 0.5...3.2
+        }
+    }
+
+    /// What `init` will clamp this value to, given the rest of this tuning.
+    ///
+    /// An instance method because one bound moves: `catchArmDistance` cannot
+    /// exceed `pointerAwarenessDistance`. A fixed table has to guess a ceiling,
+    /// and the panel guessed 140 while the model allowed up to 360.
+    public func limits(for key: RuntimeTuningKey) -> ClosedRange<Double> {
+        Self.bounds(key, pointerAwareness: pointerAwarenessDistance)
+    }
+
+    public subscript(key: RuntimeTuningKey) -> Double {
+        get {
+            switch key {
+            case .walkingSpeed: walkingSpeed
+            case .wanderPause: wanderPause
+            case .crossDisplayWanderChance: crossDisplayWanderChance
+            case .idleBeforeRest: idleBeforeRest
+            case .pointerAwarenessDistance: pointerAwarenessDistance
+            case .evadeSpeedScale: evadeSpeedScale
+            case .catchArmDistance: catchArmDistance
+            case .catchApproachSpeed: catchApproachSpeed
+            case .catchWindow: catchWindow
+            case .hitRegionScale: hitRegionScale
+            case .gaitCadence: gaitCadence
+            }
+        }
+        set {
+            switch key {
+            case .walkingSpeed: walkingSpeed = newValue
+            case .wanderPause: wanderPause = newValue
+            case .crossDisplayWanderChance: crossDisplayWanderChance = newValue
+            case .idleBeforeRest: idleBeforeRest = newValue
+            case .pointerAwarenessDistance: pointerAwarenessDistance = newValue
+            case .evadeSpeedScale: evadeSpeedScale = newValue
+            case .catchArmDistance: catchArmDistance = newValue
+            case .catchApproachSpeed: catchApproachSpeed = newValue
+            case .catchWindow: catchWindow = newValue
+            case .hitRegionScale: hitRegionScale = newValue
+            case .gaitCadence: gaitCadence = newValue
+            }
+        }
+    }
 
     /// Re-applies all safety bounds after UI mutation or Codable decoding.
     public var normalized: RuntimeTuning {

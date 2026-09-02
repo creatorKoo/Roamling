@@ -99,6 +99,45 @@ func coreLogicTests() -> [LogicTest] {
             // A session that will never speak again has to stop owning the pet.
             try expect(ActivityLifetime.hasFallenSilent(lastEventAt: heard, now: heard + 600))
         },
+        LogicTest(name: "the tuning panel cannot offer a value the model refuses") {
+            // The panel used to restate these bounds, and one of them drifted:
+            // it capped catchArmDistance at 140 while the model allowed up to
+            // whatever pointer awareness was, which reaches 360.
+            var tuning = RuntimeTuning.standard
+            for key in RuntimeTuningKey.allCases {
+                let limits = tuning.limits(for: key)
+                try expect(limits.lowerBound < limits.upperBound, "\(key) has an empty range")
+
+                var atCeiling = tuning
+                atCeiling[key] = limits.upperBound
+                try expect(
+                    atCeiling.normalized[key] == limits.upperBound,
+                    "\(key): the model clamped its own upper bound away"
+                )
+
+                var atFloor = tuning
+                atFloor[key] = limits.lowerBound
+                try expect(
+                    atFloor.normalized[key] == limits.lowerBound,
+                    "\(key): the model clamped its own lower bound away"
+                )
+
+                var beyond = tuning
+                beyond[key] = limits.upperBound + 1000
+                try expect(
+                    beyond.normalized[key] <= limits.upperBound,
+                    "\(key): the model accepted a value past the offered range"
+                )
+            }
+
+            // And the moving one actually moves.
+            tuning.pointerAwarenessDistance = 360
+            tuning = tuning.normalized
+            try expect(tuning.limits(for: .catchArmDistance).upperBound == 360)
+            tuning.pointerAwarenessDistance = 140
+            tuning = tuning.normalized
+            try expect(tuning.limits(for: .catchArmDistance).upperBound == 140)
+        },
         LogicTest(name: "a sleeping pet is woken only for what the user would want to see") {
             // An agent emits an event per tool call. If each of them woke the
             // pet it could doze for one beat and never longer.

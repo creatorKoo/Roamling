@@ -61,13 +61,13 @@ private final class RuntimeTuningViewModel: ObservableObject {
         self.onChange = onChange
     }
 
-    func binding(_ keyPath: WritableKeyPath<RuntimeTuning, Double>) -> Binding<Double> {
+    func binding(_ key: RuntimeTuningKey) -> Binding<Double> {
         Binding(
-            get: { self.tuning[keyPath: keyPath] },
+            get: { self.tuning[key] },
             set: { [weak self] value in
                 guard let self else { return }
                 var updated = self.tuning
-                updated[keyPath: keyPath] = value
+                updated[key] = value
                 self.replace(with: updated, notify: true)
             }
         )
@@ -104,29 +104,29 @@ private struct RuntimeTuningView: View {
                 .font(.headline)
             TuningSliderRow(
                 title: localized("tuning.walkSpeed"),
-                value: model.binding(\.walkingSpeed),
-                range: 20...320,
+                value: model.binding(.walkingSpeed),
+                range: model.tuning.limits(for: .walkingSpeed),
                 step: 1,
                 style: .pointsPerSecond
             )
             TuningSliderRow(
                 title: localized("tuning.wanderPause"),
-                value: model.binding(\.wanderPause),
-                range: 2...40,
+                value: model.binding(.wanderPause),
+                range: model.tuning.limits(for: .wanderPause),
                 step: 1,
                 style: .seconds
             )
             TuningSliderRow(
                 title: localized("tuning.crossDisplay"),
-                value: model.binding(\.crossDisplayWanderChance),
-                range: 0...1,
+                value: model.binding(.crossDisplayWanderChance),
+                range: model.tuning.limits(for: .crossDisplayWanderChance),
                 step: 0.01,
                 style: .percent
             )
             TuningSliderRow(
                 title: localized("tuning.idleBeforeRest"),
-                value: model.binding(\.idleBeforeRest),
-                range: 15...600,
+                value: model.binding(.idleBeforeRest),
+                range: model.tuning.limits(for: .idleBeforeRest),
                 step: 5,
                 style: .seconds
             )
@@ -136,43 +136,43 @@ private struct RuntimeTuningView: View {
                 .font(.headline)
             TuningSliderRow(
                 title: localized("tuning.noticeDistance"),
-                value: model.binding(\.pointerAwarenessDistance),
-                range: 140...360,
+                value: model.binding(.pointerAwarenessDistance),
+                range: model.tuning.limits(for: .pointerAwarenessDistance),
                 step: 5,
                 style: .points
             )
             TuningSliderRow(
                 title: localized("tuning.evadeSpeed"),
-                value: model.binding(\.evadeSpeedScale),
-                range: 0.8...3,
+                value: model.binding(.evadeSpeedScale),
+                range: model.tuning.limits(for: .evadeSpeedScale),
                 step: 0.05,
                 style: .multiplier
             )
             TuningSliderRow(
                 title: localized("tuning.catchArm"),
-                value: model.binding(\.catchArmDistance),
-                range: 40...140,
+                value: model.binding(.catchArmDistance),
+                range: model.tuning.limits(for: .catchArmDistance),
                 step: 2,
                 style: .points
             )
             TuningSliderRow(
                 title: localized("tuning.catchSpeed"),
-                value: model.binding(\.catchApproachSpeed),
-                range: 150...900,
+                value: model.binding(.catchApproachSpeed),
+                range: model.tuning.limits(for: .catchApproachSpeed),
                 step: 10,
                 style: .pointsPerSecond
             )
             TuningSliderRow(
                 title: localized("tuning.catchWindow"),
-                value: model.binding(\.catchWindow),
-                range: 0.15...1.2,
+                value: model.binding(.catchWindow),
+                range: model.tuning.limits(for: .catchWindow),
                 step: 0.05,
                 style: .secondsDecimal
             )
             TuningSliderRow(
                 title: localized("tuning.hitRegion"),
-                value: model.binding(\.hitRegionScale),
-                range: 0.75...1.3,
+                value: model.binding(.hitRegionScale),
+                range: model.tuning.limits(for: .hitRegionScale),
                 step: 0.01,
                 style: .multiplier
             )
@@ -183,8 +183,8 @@ private struct RuntimeTuningView: View {
                 .font(.headline)
             TuningSliderRow(
                 title: localized("tuning.gaitCadence"),
-                value: model.binding(\.gaitCadence),
-                range: 0.5...3.2,
+                value: model.binding(.gaitCadence),
+                range: model.tuning.limits(for: .gaitCadence),
                 step: 0.05,
                 style: .multiplier
             )
