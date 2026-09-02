@@ -227,10 +227,10 @@ Swift 하나만 해서 실패하면 **Swift 탓인지 Windows 탓인지 구분�
 **엄격히 오버레이 창만 만든다.** 로직을 Rust로 옮겨 "느낌을 보는" 순간 그것이 C의
 시작이고, C는 W0에서 고르는 선택지가 아니다.
 
-### W1 — Runtime 추출 (macOS, 동작 변화 0) ← **구현 완료 2026-09-02, exit 대기**
+### W1 — Runtime 추출 (macOS, 동작 변화 0) ✅ 완료 2026-09-02
 
-구현은 끝났고 테스트 126개가 통과한다. **exit는 사용자가 서명 빌드를 실사용해서 달라진
-점이 없다고 확인하는 것**이므로 그 전에는 W2로 넘어가지 않는다. 실제로 생긴 것:
+구현이 끝난 같은 날 사용자가 서명 빌드를 실사용해서 달라진 점이 없다고 확인했고, 그것으로
+exit가 닫혔다. 테스트 126개가 통과한다. 실제로 생긴 것:
 
 - `Sources/RoamlingEngine/` — `RoamlingRuntime`, `PlatformServices`,
   `PetOverlayProviding`/`PetOverlayInputHandling`, `BasicSafeZoneProvider`
@@ -281,7 +281,7 @@ Swift 하나만 해서 실패하면 **Swift 탓인지 Windows 탓인지 구분�
 **Exit** — 서명 빌드를 실사용해서 **달라진 점을 사용자가 못 느낀다**: 배회 · 포인터 회피 ·
 잡기 · 드래그 · agent 착석 · 취침 · 디스플레이 연결 변경 · 권한 프롬프트 · scale 변경.
 
-### W2 — 이미지 파이프라인 탈-CoreGraphics (macOS)
+### W2 — 이미지 파이프라인 탈-CoreGraphics (macOS) ← **현재 게이트**
 
 `PetAsset.atlas`를 RGBA8 버퍼 + 크기를 든 값 타입으로 바꾸고, 아틀라스 합성과 프레임 크롭을
 순수 Swift 블리터로 내린다. 디코더는 **libwebp + PNG 디코더를 SwiftPM C 타겟으로 번들**한다
@@ -447,7 +447,7 @@ W0가 둘을 없애고 하나를 새로 만들었다.
 툴체인·번들·layered window는 Windows에서만 확인된다.
 
 MVP 4가 2026-09-02에 닫히면서 그 충돌이 없어졌다 — `RoamlingRuntime`과 capture를 동시에
-건드리는 게이트가 더는 없다. W1이 현재 게이트다.
+건드리는 게이트가 더는 없다. W1은 2026-09-02에 닫혔고 **W2가 현재 게이트다.**
 
 ```text
 (Windows 머신) W0 스파이크  ✅ 2026-09-01 완료 -> 분기 A
@@ -455,7 +455,7 @@ MVP 4가 2026-09-02에 닫히면서 그 충돌이 없어졌다 — `RoamlingRunt
 MVP 4 exit rule 충족  ✅ 2026-09-02
         |
         v
-   (macOS 머신) W1 (구현 완료 2026-09-02, 실사용 확인 대기) -> W2
+   (macOS 머신) W1 ✅ 2026-09-02 -> W2 <- 현재
         |
         v
    W3 -> W4 -> W5 -> W6 -> W7
