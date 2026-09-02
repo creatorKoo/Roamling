@@ -21,26 +21,20 @@ let package = Package(
     ],
     targets: [
         .target(name: "RoamlingCore"),
+        // Foundation only since W2: decoding is the platform's job and every
+        // other step is arithmetic on bytes.
         .target(
             name: "RoamlingPet",
             dependencies: ["RoamlingCore"],
             resources: [
                 .process("Resources")
-            ],
-            linkerSettings: [
-                .linkedFramework("AppKit"),
-                .linkedFramework("ImageIO")
             ]
         ),
-        // The app's orchestration, with no window system under it. The only
-        // framework it links is CoreGraphics, for the CGImage that RoamlingPet
-        // still hands out; W2 takes that away and leaves this pure Swift.
+        // The app's orchestration. Foundation and the portable modules only --
+        // W2 took the last CGImage out of the frame it hands the overlay.
         .target(
             name: "RoamlingEngine",
-            dependencies: ["RoamlingCore", "RoamlingPet", "RoamlingSources"],
-            linkerSettings: [
-                .linkedFramework("CoreGraphics")
-            ]
+            dependencies: ["RoamlingCore", "RoamlingPet", "RoamlingSources"]
         ),
         .target(
             name: "RoamlingMac",

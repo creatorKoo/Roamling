@@ -181,6 +181,7 @@ private final class FakePlatform {
             window: window,
             focus: focus,
             overlay: overlay,
+            images: testImages,
             coordinateSpace: coordinateSpace
         )
     }
@@ -271,7 +272,7 @@ private final class FakeOverlay: PetOverlayProviding {
     func setInteractionEnabled(_ enabled: Bool) { isInteractionEnabled = enabled }
     func setScale(_ scale: Double) { self.scale = scale.clamped(to: 0.6...1.8) }
     func setHitRegionScale(_ scale: Double) { hitRegionScale = scale }
-    func setFrameImage(_ image: CGImage?) { renderedFrames += 1 }
+    func setFrameImage(_ frame: PetFrame?) { renderedFrames += 1 }
 
     func containsPet(atWorldPoint worldPoint: WorldPoint) -> Bool {
         WorldRect(

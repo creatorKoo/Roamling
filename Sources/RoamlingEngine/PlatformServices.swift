@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2026 GooBeom Jeoung
 // SPDX-License-Identifier: GPL-3.0-only
 
-import CoreGraphics
 import Foundation
 import RoamlingCore
+import RoamlingPet
 
 /// What the runtime wants to hear about a pointer touching the pet.
 ///
@@ -37,7 +37,7 @@ public protocol PetOverlayProviding: OverlayProviding {
 
     func setScale(_ scale: Double)
     func setHitRegionScale(_ scale: Double)
-    func setFrameImage(_ image: CGImage?)
+    func setFrameImage(_ frame: PetFrame?)
 
     /// Whether a world point lands on the pet rather than the transparent
     /// padding around it. Used to decide whether a click belongs to the pet
@@ -62,6 +62,10 @@ public struct PlatformServices {
     public let focus: any FocusProviding
     public let overlay: any PetOverlayProviding
 
+    /// Decoding and the fallback drawing -- the only part of the pet pipeline
+    /// that is genuinely a platform capability.
+    public let images: any PetImageSourcing
+
     /// Shared with the providers above, which read it to convert platform
     /// coordinates. The runtime is the only writer.
     public let coordinateSpace: CoordinateSpaceSource
@@ -76,6 +80,7 @@ public struct PlatformServices {
         window: any WindowProviding,
         focus: any FocusProviding,
         overlay: any PetOverlayProviding,
+        images: any PetImageSourcing,
         coordinateSpace: CoordinateSpaceSource
     ) {
         self.display = display
@@ -87,6 +92,7 @@ public struct PlatformServices {
         self.window = window
         self.focus = focus
         self.overlay = overlay
+        self.images = images
         self.coordinateSpace = coordinateSpace
     }
 }

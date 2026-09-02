@@ -4,6 +4,7 @@
 import AppKit
 import RoamlingCore
 import RoamlingEngine
+import RoamlingPet
 
 /// AppKit screen points, before anyone has decided what they mean. Stays
 /// inside this file: `MacOverlayProvider` converts and forwards world points
@@ -144,6 +145,14 @@ public final class MacOverlayProvider: PetOverlayProviding, PetOverlayViewDelega
 
     private let readCoordinateSpace: () -> DesktopCoordinateSpace
     private var coordinateSpace: DesktopCoordinateSpace { readCoordinateSpace() }
+    private struct FrameKey: Hashable {
+        let sheet: ObjectIdentifier
+        let x: Int
+        let y: Int
+    }
+
+    private var sheetImages: [ObjectIdentifier: CGImage] = [:]
+    private var frameImages: [FrameKey: CGImage] = [:]
     private var worldPosition: WorldPoint = .zero
     private var interactionEnabled = false
 
@@ -190,8 +199,41 @@ public final class MacOverlayProvider: PetOverlayProviding, PetOverlayViewDelega
         WorldSize(width: Self.baseSize.width * scale, height: Self.baseSize.height * scale)
     }
 
-    public func setFrameImage(_ image: CGImage?) {
-        view.setImage(image)
+    /// One CGImage per sheet, then a crop per cell -- crops share the sheet's
+    /// backing store, so a whole pet costs one copy of its bytes.
+    ///
+    /// The crops are cached because the view skips a redraw only when handed
+    /// the identical image, and `cropping(to:)` returns a fresh one each call.
+    public func setFrameImage(_ frame: PetFrame?) {
+        guard let frame else {
+            view.setImage(nil)
+            return
+        }
+        let sheetKey = ObjectIdentifier(frame.sheet)
+        let key = FrameKey(sheet: sheetKey, x: frame.x, y: frame.y)
+        if let cached = frameImages[key] {
+            view.setImage(cached)
+            return
+        }
+        let sheet: CGImage
+        if let cached = sheetImages[sheetKey] {
+            sheet = cached
+        } else {
+            guard let converted = MacPetImageSource.cgImage(of: frame.sheet) else { return }
+            // Bounded rather than cleared on pet reload: the overlay is never
+            // told the pet changed, and a pet is two sheets.
+            if sheetImages.count > 8 {
+                sheetImages.removeAll(keepingCapacity: true)
+                frameImages.removeAll(keepingCapacity: true)
+            }
+            sheetImages[sheetKey] = converted
+            sheet = converted
+        }
+        guard let cropped = sheet.cropping(to: CGRect(
+            x: frame.x, y: frame.y, width: frame.width, height: frame.height
+        )) else { return }
+        frameImages[key] = cropped
+        view.setImage(cropped)
     }
 
     public func setPosition(_ position: WorldPoint) {

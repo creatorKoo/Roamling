@@ -1,9 +1,7 @@
 // SPDX-FileCopyrightText: 2026 GooBeom Jeoung
 // SPDX-License-Identifier: GPL-3.0-only
 
-import CoreGraphics
 import Foundation
-import ImageIO
 
 public enum BuiltInPetKind: String, CaseIterable, Codable, Sendable {
     case mochi
@@ -44,30 +42,40 @@ public enum MascotPetFactory {
         case caught
     }
 
+    private struct PoseCrop {
+        let x: Int
+        let y: Int
+        let width: Int
+        let height: Int
+    }
+
     private struct FrameRecipe {
         let pose: Pose
         let mirrored: Bool
-        let yOffset: CGFloat
-        let scale: CGFloat
+        let yOffset: Double
+        let scale: Double
     }
 
-    public static func make(_ kind: BuiltInPetKind = .fatMochi) -> PetAsset {
+    public static func make(
+        _ kind: BuiltInPetKind = .fatMochi,
+        images: any PetImageSourcing
+    ) -> PetAsset {
         switch kind {
         case .mochi:
-            if let atlas = loadSheet(named: "mochi-standard-atlas"),
+            if let atlas = loadSheet(named: "mochi-standard-atlas", images: images),
                atlas.width == cellWidth * columns,
                atlas.height == cellHeight * standardRows {
-                return makeStandardMochi(atlas: atlas)
+                return makeStandardMochi(atlas: atlas, images: images)
             }
         case .fatMochi:
-            if let atlas = loadSheet(named: "fat-mochi-runtime-atlas"),
+            if let atlas = loadSheet(named: "fat-mochi-runtime-atlas", images: images),
                atlas.width == cellWidth * columns,
                atlas.height == cellHeight * authoredRows {
                 return makeAuthoredFatMochi(atlas: atlas)
             }
         }
 
-        return makePoseDerivedPet(kind)
+        return makePoseDerivedPet(kind, images: images)
     }
 
     /// Mochi ships the standard 8x9 Codex/Petdex row set rather than the
@@ -85,7 +93,7 @@ public enum MascotPetFactory {
     /// `idle` overrides the standard 1.10s. Its six frames are one long hold
     /// and a blink, so the standard timing blinks the cat continuously; the
     /// package holds frame zero for 1.2s and spends 0.5s on the blink.
-    private static func makeStandardMochi(atlas: CGImage) -> PetAsset {
+    private static func makeStandardMochi(atlas: PetImage, images: any PetImageSourcing) -> PetAsset {
         let manifest = PetManifest(
             id: BuiltInPetKind.mochi.manifestID,
             displayName: BuiltInPetKind.mochi.displayName,
@@ -116,10 +124,10 @@ public enum MascotPetFactory {
             (jumpRow + 2, 0.10), (jumpRow, 0.18)
         ], loops: false)
 
-        var extensionAtlas: CGImage?
+        var extensionAtlas: PetImage?
         var extensionColumns = 0
         var extensionRows = 0
-        if let sheet = loadSheet(named: "mochi-extension-atlas"),
+        if let sheet = loadSheet(named: "mochi-extension-atlas", images: images),
            sheet.width == cellWidth * columns,
            sheet.height == cellHeight * extensionSheetRows {
             extensionAtlas = sheet
@@ -165,7 +173,7 @@ public enum MascotPetFactory {
         )
     }
 
-    private static func makeAuthoredMochi(atlas: CGImage) -> PetAsset {
+    private static func makeAuthoredMochi(atlas: PetImage) -> PetAsset {
         let manifest = PetManifest(
             id: BuiltInPetKind.mochi.manifestID,
             displayName: BuiltInPetKind.mochi.displayName,
@@ -255,7 +263,7 @@ public enum MascotPetFactory {
         )
     }
 
-    private static func makeAuthoredFatMochi(atlas: CGImage) -> PetAsset {
+    private static func makeAuthoredFatMochi(atlas: PetImage) -> PetAsset {
         let manifest = PetManifest(
             id: BuiltInPetKind.fatMochi.manifestID,
             displayName: BuiltInPetKind.fatMochi.displayName,
@@ -348,10 +356,10 @@ public enum MascotPetFactory {
         )
     }
 
-    private static func makePoseDerivedPet(_ kind: BuiltInPetKind) -> PetAsset {
-        guard let sheet = loadSheet(named: kind.resourceName),
+    private static func makePoseDerivedPet(_ kind: BuiltInPetKind, images: any PetImageSourcing) -> PetAsset {
+        guard let sheet = loadSheet(named: kind.resourceName, images: images),
               let atlas = makeAtlas(from: sheet, kind: kind) else {
-            return PlaceholderPetFactory.make()
+            return PlaceholderPetFactory.make(images: images)
         }
 
         let manifest = PetManifest(
@@ -452,7 +460,7 @@ public enum MascotPetFactory {
         )
     }
 
-    private static func loadSheet(named name: String) -> CGImage? {
+    private static func loadSheet(named name: String, images: any PetImageSourcing) -> PetImage? {
         // WebP keeps the nine-row Mochi atlas under a megabyte and half the
         // size of the equivalent PNG, and ImageIO decodes both.
         let resourceURL = ["png", "webp"].lazy.compactMap { ext in
@@ -460,109 +468,90 @@ public enum MascotPetFactory {
                 ?? Bundle.module.url(forResource: name, withExtension: ext)
         }.first
         guard let resourceURL,
-              let source = CGImageSourceCreateWithURL(resourceURL as CFURL, nil) else { return nil }
-        return CGImageSourceCreateImageAtIndex(source, 0, nil)
+              let decoded = images.decode(contentsOf: resourceURL) else { return nil }
+        return decoded
     }
 
-    private static func makeAtlas(from sheet: CGImage, kind: BuiltInPetKind) -> CGImage? {
+    /// Reached only when the authored sheet for a built-in is missing or the
+    /// wrong shape, which is a broken build. Kept working, but unlike the
+    /// shipped sheets its pixels are not pinned -- it scales, and a hand-written
+    /// nearest-neighbour blit need not land on CoreGraphics' rounding.
+    private static func makeAtlas(from sheet: PetImage, kind: BuiltInPetKind) -> PetImage? {
         let crops = cropRects(for: kind)
         guard crops.count == 4,
               crops.allSatisfy({ rect in
-                  rect.minX >= 0 && rect.minY >= 0
-                      && rect.maxX <= CGFloat(sheet.width)
-                      && rect.maxY <= CGFloat(sheet.height)
+                  rect.x >= 0 && rect.y >= 0
+                      && rect.x + rect.width <= sheet.width
+                      && rect.y + rect.height <= sheet.height
               }) else { return nil }
 
-        let poses = crops.compactMap { sheet.cropping(to: $0) }
+        let poses = crops.compactMap {
+            sheet.cropped(x: $0.x, y: $0.y, width: $0.width, height: $0.height)
+        }
         guard poses.count == crops.count else { return nil }
 
-        let width = cellWidth * columns
-        let height = cellHeight * poseDerivedRows
-        guard let context = CGContext(
-            data: nil,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return nil }
-
-        context.clear(CGRect(x: 0, y: 0, width: width, height: height))
-        context.interpolationQuality = .none
-        context.setShouldAntialias(false)
-
-        let recipes = frameRecipes
-        for (index, recipe) in recipes.enumerated() {
-            let row = index / columns
-            let column = index % columns
-            let cell = CGRect(
-                x: column * cellWidth,
-                y: height - (row + 1) * cellHeight,
-                width: cellWidth,
-                height: cellHeight
-            )
+        var canvas = PetImageCanvas(
+            width: cellWidth * columns,
+            height: cellHeight * poseDerivedRows
+        )
+        for (index, recipe) in frameRecipes.enumerated() {
             draw(
                 poses[recipe.pose.rawValue],
-                in: cell,
+                inCellRow: index / columns,
+                column: index % columns,
                 mirrored: recipe.mirrored,
                 yOffset: recipe.yOffset,
                 scale: recipe.scale,
-                context: context
+                canvas: &canvas
             )
         }
-        return context.makeImage()
+        return canvas.image()
     }
 
+    /// `yOffset` still lifts the pose off the cell's floor; the canvas counts
+    /// rows from the top, so the 5pt footing is measured from the bottom edge.
     private static func draw(
-        _ image: CGImage,
-        in cell: CGRect,
+        _ image: PetImage,
+        inCellRow row: Int,
+        column: Int,
         mirrored: Bool,
-        yOffset: CGFloat,
-        scale: CGFloat,
-        context: CGContext
+        yOffset: Double,
+        scale: Double,
+        canvas: inout PetImageCanvas
     ) {
-        let maximumWidth = cell.width - 10
-        let maximumHeight = cell.height - 10
         let fit = min(
-            maximumWidth / CGFloat(image.width),
-            maximumHeight / CGFloat(image.height)
+            Double(cellWidth - 10) / Double(image.width),
+            Double(cellHeight - 10) / Double(image.height)
         ) * scale
-        let size = CGSize(
-            width: CGFloat(image.width) * fit,
-            height: CGFloat(image.height) * fit
+        let width = Int((Double(image.width) * fit).rounded())
+        let height = Int((Double(image.height) * fit).rounded())
+        let cellX = column * cellWidth
+        let cellBottom = (row + 1) * cellHeight
+        canvas.blit(
+            image,
+            toX: cellX + (cellWidth - width) / 2,
+            toY: cellBottom - Int((5 + yOffset).rounded()) - height,
+            width: width,
+            height: height,
+            mirrored: mirrored
         )
-        let destination = CGRect(
-            x: cell.midX - size.width / 2,
-            y: cell.minY + 5 + yOffset,
-            width: size.width,
-            height: size.height
-        )
-
-        context.saveGState()
-        if mirrored {
-            context.translateBy(x: destination.midX * 2, y: 0)
-            context.scaleBy(x: -1, y: 1)
-        }
-        context.draw(image, in: destination)
-        context.restoreGState()
     }
 
-    private static func cropRects(for kind: BuiltInPetKind) -> [CGRect] {
+    private static func cropRects(for kind: BuiltInPetKind) -> [PoseCrop] {
         switch kind {
         case .mochi:
             [
-                CGRect(x: 42, y: 332, width: 310, height: 354),
-                CGRect(x: 408, y: 344, width: 354, height: 344),
-                CGRect(x: 768, y: 448, width: 356, height: 242),
-                CGRect(x: 1192, y: 330, width: 306, height: 360)
+                PoseCrop(x: 42, y: 332, width: 310, height: 354),
+                PoseCrop(x: 408, y: 344, width: 354, height: 344),
+                PoseCrop(x: 768, y: 448, width: 356, height: 242),
+                PoseCrop(x: 1192, y: 330, width: 306, height: 360)
             ]
         case .fatMochi:
             [
-                CGRect(x: 32, y: 334, width: 384, height: 380),
-                CGRect(x: 432, y: 348, width: 346, height: 368),
-                CGRect(x: 808, y: 438, width: 330, height: 280),
-                CGRect(x: 1168, y: 378, width: 338, height: 342)
+                PoseCrop(x: 32, y: 334, width: 384, height: 380),
+                PoseCrop(x: 432, y: 348, width: 346, height: 368),
+                PoseCrop(x: 808, y: 438, width: 330, height: 280),
+                PoseCrop(x: 1168, y: 378, width: 338, height: 342)
             ]
         }
     }

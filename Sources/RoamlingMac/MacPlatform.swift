@@ -28,6 +28,7 @@ public enum MacPlatform {
             window: MacWindowProvider(coordinateSpace: read),
             focus: MacFocusProvider(coordinateSpace: read),
             overlay: MacOverlayProvider(coordinateSpace: read),
+            images: MacPetImageSource(),
             coordinateSpace: coordinateSpace
         )
     }

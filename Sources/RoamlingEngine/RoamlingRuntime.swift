@@ -91,7 +91,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     private var overlay: any PetOverlayProviding { services.overlay }
 
     private let catalog: PetCatalog
-    private let loader = PetLoader()
+    private let loader: PetLoader
     private let claudeCodeSource: ClaudeCodeSource
     private let claudeCodeInstaller: ClaudeCodeHookInstaller
     private let codexSource: CodexSource
@@ -209,7 +209,8 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             descriptors: descriptors,
             selectedPath: selectedPath,
             builtInPet: selectedBuiltInPet,
-            loader: PetLoader()
+            images: services.images,
+            loader: PetLoader(images: services.images)
         )
 
         let displaySet = services.display.currentDisplaySet()
@@ -227,6 +228,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
 
         self.services = services
         self.catalog = catalog
+        loader = PetLoader(images: services.images)
         installedPets = descriptors
         asset = initialAsset
         self.selectedBuiltInPet = initialAsset.packageURL == nil ? selectedBuiltInPet : nil
@@ -316,7 +318,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     }
 
     public func useBuiltInPet(_ kind: BuiltInPetKind) {
-        install(asset: MascotPetFactory.make(kind))
+        install(asset: MascotPetFactory.make(kind, images: services.images))
         selectedBuiltInPet = kind
         defaults.set(kind.rawValue, forKey: DefaultsKey.builtInPet)
         defaults.removeObject(forKey: DefaultsKey.petPackagePath)
@@ -1689,6 +1691,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         descriptors: [PetDescriptor],
         selectedPath: String?,
         builtInPet: BuiltInPetKind,
+        images: any PetImageSourcing,
         loader: PetLoader
     ) -> PetAsset {
         if let selectedPath,
@@ -1698,6 +1701,6 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
            let loaded = try? loader.load(packageAt: selected.packageURL) {
             return loaded
         }
-        return MascotPetFactory.make(builtInPet)
+        return MascotPetFactory.make(builtInPet, images: images)
     }
 }

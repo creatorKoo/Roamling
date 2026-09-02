@@ -61,7 +61,7 @@ func petLogicTests() -> [LogicTest] {
         },
         LogicTest(name: "every behavior resolves to a built-in track") {
             for kind in [BuiltInPetKind.fatMochi, .mochi] {
-                let resolver = MascotPetFactory.make(kind).resolver
+                let resolver = MascotPetFactory.make(kind, images: testImages).resolver
                 for state in BehaviorState.allCases {
                     let capability = PetCapabilityMapping.capability(
                         for: state,
@@ -116,8 +116,58 @@ func petLogicTests() -> [LogicTest] {
             try expect(resolver.resolve(.sleep)?.name == "deep-nap")
             try expect(resolver.resolve(.caught)?.name == "idle")
         },
+        LogicTest(name: "every shipped frame is the same bytes W2 inherited") {
+            // The refactor gate: cropping and composing moved off CoreGraphics,
+            // so the only proof that nothing shifted is the pixels themselves.
+            let source = TestPetImageSource()
+            var assets: [String: PetAsset] = [
+                "built-in mochi": MascotPetFactory.make(.mochi, images: source),
+                "built-in fat-mochi": MascotPetFactory.make(.fatMochi, images: source)
+            ]
+            let package = FileManager.default.homeDirectoryForCurrentUser
+                .appendingPathComponent(".codex/pets/mochi-v3")
+            if FileManager.default.fileExists(atPath: package.path),
+               let loaded = try? PetLoader(images: source).load(packageAt: package) {
+                assets["package mochi-v3"] = loaded
+            }
+
+            var checked = 0
+            for expected in PreW2FrameHashes.assets {
+                // The placeholder is skipped: its sheet is antialiased vector
+                // art drawn by the platform, which the harness has no way to
+                // produce and no portable blitter could reproduce anyway.
+                guard let asset = assets[expected.name] else { continue }
+                try expect(
+                    fnv1a(asset.atlas.pixels) == expected.atlas,
+                    "\(expected.name): atlas bytes changed"
+                )
+                if let extensionHash = expected.extensionAtlas {
+                    let sheet = try require(asset.extensionAtlas)
+                    try expect(
+                        fnv1a(sheet.pixels) == extensionHash,
+                        "\(expected.name): extension sheet bytes changed"
+                    )
+                }
+                try expect(
+                    asset.addressableFrameCount == expected.frames.count,
+                    "\(expected.name): frame count moved"
+                )
+                for (index, hash) in expected.frames.enumerated() {
+                    let frame = try require(
+                        asset.frameImage(at: index),
+                        "\(expected.name): frame \(index) is unreadable"
+                    )
+                    try expect(
+                        fnv1a(frame.pixels) == hash,
+                        "\(expected.name): frame \(index) bytes changed"
+                    )
+                    checked += 1
+                }
+            }
+            try expect(checked >= 152, "expected the two built-ins at least, checked \(checked)")
+        },
         LogicTest(name: "placeholder implements v2 look directions") {
-            let pet = PlaceholderPetFactory.make()
+            let pet = PlaceholderPetFactory.make(images: testImages)
             try expect(pet.columns == 8)
             try expect(pet.rows == 11)
             try expect(pet.lookFrameIndex(degrees: 0) == 72)
@@ -133,9 +183,9 @@ func petLogicTests() -> [LogicTest] {
             try expect(pet.resolver.resolve(.sit)?.name == "idle")
         },
         LogicTest(name: "built-in mascots load with semantic tracks") {
-            try expect(MascotPetFactory.make().manifest.displayName == "FatMochi")
+            try expect(MascotPetFactory.make(images: testImages).manifest.displayName == "FatMochi")
             for kind in BuiltInPetKind.allCases {
-                let pet = MascotPetFactory.make(kind)
+                let pet = MascotPetFactory.make(kind, images: testImages)
                 // FatMochi keeps the seven-row internal layout; Mochi ships the
                 // standard 8x9 Codex/Petdex rows.
                 let expectedRows = kind == .mochi ? 9 : 7
@@ -156,7 +206,7 @@ func petLogicTests() -> [LogicTest] {
             }
         },
         LogicTest(name: "FatMochi uses authored limb animation cycles") {
-            let pet = MascotPetFactory.make(.fatMochi)
+            let pet = MascotPetFactory.make(.fatMochi, images: testImages)
             let idle = try require(pet.tracks["idle"])
             let right = try require(pet.tracks["running-right"])
             let left = try require(pet.tracks["running-left"])
@@ -238,11 +288,11 @@ func petLogicTests() -> [LogicTest] {
             let walkStartSignature = try require(imageSignature(walkStart))
             try expect(walkStartSignature == idleSignature)
 
-            let idleFace = try require(idleFrame.cropping(to: CGRect(x: 24, y: 100, width: 104, height: 30)))
+            let idleFace = try require(idleFrame.cropped(x: 24, y: 100, width: 104, height: 30))
             let idleFaceSignature = try require(imageSignature(idleFace))
             for index in 16...23 {
                 let walkFrame = try require(pet.frameImage(at: index))
-                let walkFace = try require(walkFrame.cropping(to: CGRect(x: 24, y: 100, width: 104, height: 30)))
+                let walkFace = try require(walkFrame.cropped(x: 24, y: 100, width: 104, height: 30))
                 let walkFaceSignature = try require(imageSignature(walkFace))
                 try expect(walkFaceSignature == idleFaceSignature)
                 let neckWidth = try require(centeredOpaqueRunWidth(walkFrame, y: 90))
@@ -259,7 +309,7 @@ func petLogicTests() -> [LogicTest] {
             }
         },
         LogicTest(name: "FatMochi caught intro hands off to a looping drag") {
-            var player = PetAnimationPlayer(asset: MascotPetFactory.make(.fatMochi))
+            var player = PetAnimationPlayer(asset: MascotPetFactory.make(.fatMochi, images: testImages))
             player.setCapability(.caught)
             try expect(player.currentFrameIndex == 32)
             player.update(deltaTime: 0.05)
@@ -275,7 +325,7 @@ func petLogicTests() -> [LogicTest] {
             try expect(player.currentFrameIndex == 36)
         },
         LogicTest(name: "Mochi uses the standard nine-row animation set") {
-            let pet = MascotPetFactory.make(.mochi)
+            let pet = MascotPetFactory.make(.mochi, images: testImages)
             try expect(pet.rows == 9)
             try expect(pet.columns == 8)
             try expect(pet.frameCount == 72)
@@ -420,7 +470,7 @@ func petLogicTests() -> [LogicTest] {
             // any longer loops or gets cut. The built-ins are the one place we
             // author both sides, and they have to agree.
             for kind in BuiltInPetKind.allCases {
-                let pet = MascotPetFactory.make(kind)
+                let pet = MascotPetFactory.make(kind, images: testImages)
                 for (capability, budget) in [
                     (PetCapability.celebrate, BehaviorTiming.celebrate),
                     (.spark, BehaviorTiming.spark),
@@ -460,7 +510,7 @@ func petLogicTests() -> [LogicTest] {
                 ]
             )
             try fixture.write(manifest: manifest)
-            let pet = try PetLoader().load(packageAt: fixture.url)
+            let pet = try PetLoader(images: testImages).load(packageAt: fixture.url)
             try expect(pet.tracks["typing"]?.frames.count == 3)
             try expect(pet.tracks["broken"] == nil)
             try expect(pet.warnings.contains(where: { $0.contains("broken") }))
@@ -476,7 +526,7 @@ func petLogicTests() -> [LogicTest] {
             )
             try fixture.write(manifest: manifest)
             do {
-                _ = try PetLoader().load(packageAt: fixture.url)
+                _ = try PetLoader(images: testImages).load(packageAt: fixture.url)
                 throw LogicTestFailure(message: "Expected unsafe path error", file: #filePath, line: #line)
             } catch let error as PetLoadError {
                 try expect(error == .unsafeSpritesheetPath("../outside.png"))
@@ -493,7 +543,7 @@ func petLogicTests() -> [LogicTest] {
             )
             try fixture.write(manifest: manifest)
             do {
-                _ = try PetLoader().load(packageAt: fixture.url)
+                _ = try PetLoader(images: testImages).load(packageAt: fixture.url)
                 throw LogicTestFailure(message: "Expected layout error", file: #filePath, line: #line)
             } catch let error as PetLoadError {
                 guard case let .invalidFrameLayout(message) = error else {
@@ -510,7 +560,7 @@ func petLogicTests() -> [LogicTest] {
                 spritesheetPath: "spritesheet.png"
             )
             try JSONEncoder().encode(validV2).write(to: fixture.url.appendingPathComponent("pet.json"))
-            let loaded = try PetLoader().load(packageAt: fixture.url)
+            let loaded = try PetLoader(images: testImages).load(packageAt: fixture.url)
             try expect(loaded.rows == 11)
             try expect(loaded.supportsDirectionalLook)
         },
@@ -524,7 +574,7 @@ func petLogicTests() -> [LogicTest] {
                 spritesheetPath: "spritesheet.png"
             )
             try fixture.write(manifest: manifest)
-            let loaded = try PetLoader().load(packageAt: fixture.url)
+            let loaded = try PetLoader(images: testImages).load(packageAt: fixture.url)
             try expect(loaded.rows == 9)
             try expect(!loaded.supportsDirectionalLook)
             try expect(loaded.resolver.resolve(.moveLeft)?.name == "running-left")
@@ -540,7 +590,7 @@ func petLogicTests() -> [LogicTest] {
                 frame: PetFrameManifest(width: 1, height: 1, columns: 8, rows: 9)
             )
             try fixture.write(manifest: manifest)
-            let pet = try PetLoader().load(packageAt: fixture.url)
+            let pet = try PetLoader(images: testImages).load(packageAt: fixture.url)
             let image = try require(pet.frameImage(at: 0))
             let rgba = try require(sampleRGBA(image))
             try expect(rgba.0 > 200, "Expected red top row, got \(rgba)")
@@ -572,7 +622,7 @@ func petLogicTests() -> [LogicTest] {
                     "landing": .init(frames: [34, 35, 36], fps: 8, loop: false)
                 ]
             ))
-            let pet = try PetLoader().load(packageAt: fixture.url)
+            let pet = try PetLoader(images: testImages).load(packageAt: fixture.url)
             try expect(pet.warnings.isEmpty, "\(pet.warnings)")
             try expect(pet.frameCount == 72)
             try expect(pet.addressableFrameCount == 80)
@@ -618,7 +668,7 @@ func petLogicTests() -> [LogicTest] {
                     "sitting": .init(frames: [78, 79, 80, 81], fps: 1.667, loop: false)
                 ]
             ))
-            let pet = try PetLoader().load(packageAt: fixture.url)
+            let pet = try PetLoader(images: testImages).load(packageAt: fixture.url)
             try expect(pet.warnings.isEmpty, "\(pet.warnings)")
             try expect(pet.frameCount == 72)
             try expect(pet.addressableFrameCount == 88)
@@ -627,7 +677,7 @@ func petLogicTests() -> [LogicTest] {
             for offset in 0..<16 {
                 let frame = pet.frameImage(at: 72 + offset)
                 try expect(frame != nil, "extension cell \(offset) is unreadable")
-                let reached = frame.flatMap(cellIndex(of:))
+                let reached = frame.flatMap { cellIndex(of: $0) }
                 try expect(
                     reached == offset,
                     "index \(72 + offset) reached cell \(reached ?? -1), wanted \(offset)"
@@ -653,7 +703,7 @@ func petLogicTests() -> [LogicTest] {
                 frame: .init(columns: 8, rows: 1),
                 animations: ["gaze": .init(frames: [72, 73], fps: 1, loop: true)]
             ))
-            let pet = try PetLoader().load(packageAt: fixture.url)
+            let pet = try PetLoader(images: testImages).load(packageAt: fixture.url)
             try expect(pet.warnings.count == 1, "\(pet.warnings)")
             try expect(pet.extensionAtlas == nil)
             // A pet whose extension sheet is wrong still renders its nine rows.
@@ -673,7 +723,7 @@ func petLogicTests() -> [LogicTest] {
                 schemaVersion: 99,
                 behaviors: ["sleep": "sleeping"]
             ))
-            let pet = try PetLoader().load(packageAt: fixture.url)
+            let pet = try PetLoader(images: testImages).load(packageAt: fixture.url)
             try expect(pet.warnings.count == 1, "\(pet.warnings)")
             // A pet from the future still renders with what this build knows.
             // Sleep chains through `sit`, which now settles on `idle`.
@@ -766,36 +816,14 @@ func petLogicTests() -> [LogicTest] {
     ]
 }
 
-private func sampleRGBA(_ image: CGImage) -> (UInt8, UInt8, UInt8, UInt8)? {
-    var bytes = [UInt8](repeating: 0, count: 4)
-    guard let context = CGContext(
-        data: &bytes,
-        width: 1,
-        height: 1,
-        bitsPerComponent: 8,
-        bytesPerRow: 4,
-        space: CGColorSpaceCreateDeviceRGB(),
-        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-    ) else { return nil }
-    context.draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+private func sampleRGBA(_ image: some PetPixels) -> (UInt8, UInt8, UInt8, UInt8)? {
+    let bytes = image.pixels
     return (bytes[0], bytes[1], bytes[2], bytes[3])
 }
 
-private func imageSignature(_ image: CGImage) -> UInt64? {
+private func imageSignature(_ image: some PetPixels) -> UInt64? {
     let bytesPerRow = image.width * 4
-    var bytes = [UInt8](repeating: 0, count: bytesPerRow * image.height)
-    guard let context = CGContext(
-        data: &bytes,
-        width: image.width,
-        height: image.height,
-        bitsPerComponent: 8,
-        bytesPerRow: bytesPerRow,
-        space: CGColorSpaceCreateDeviceRGB(),
-        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-    ) else { return nil }
-    context.interpolationQuality = .none
-    context.setShouldAntialias(false)
-    context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+    let bytes = image.pixels
 
     return bytes.reduce(UInt64(1_469_598_103_934_665_603)) { partial, byte in
         (partial ^ UInt64(byte)) &* 1_099_511_628_211
@@ -803,20 +831,10 @@ private func imageSignature(_ image: CGImage) -> UInt64? {
 }
 
 private func alphaMetrics(
-    _ image: CGImage
+    _ image: some PetPixels
 ) -> (width: Int, height: Int, boundsCenterX: Double)? {
     let bytesPerRow = image.width * 4
-    var bytes = [UInt8](repeating: 0, count: bytesPerRow * image.height)
-    guard let context = CGContext(
-        data: &bytes,
-        width: image.width,
-        height: image.height,
-        bitsPerComponent: 8,
-        bytesPerRow: bytesPerRow,
-        space: CGColorSpaceCreateDeviceRGB(),
-        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-    ) else { return nil }
-    context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+    let bytes = image.pixels
 
     var minimumX = image.width
     var maximumX = -1
@@ -840,20 +858,10 @@ private func alphaMetrics(
     )
 }
 
-private func centeredOpaqueRunWidth(_ image: CGImage, y: Int) -> Int? {
+private func centeredOpaqueRunWidth(_ image: some PetPixels, y: Int) -> Int? {
+    guard y >= 0, y < image.height else { return nil }
     let bytesPerRow = image.width * 4
-    var bytes = [UInt8](repeating: 0, count: bytesPerRow * image.height)
-    guard y >= 0, y < image.height,
-          let context = CGContext(
-              data: &bytes,
-              width: image.width,
-              height: image.height,
-              bitsPerComponent: 8,
-              bytesPerRow: bytesPerRow,
-              space: CGColorSpaceCreateDeviceRGB(),
-              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-          ) else { return nil }
-    context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+    let bytes = image.pixels
 
     let centerX = image.width / 2
     var runs: [ClosedRange<Int>] = []
@@ -873,19 +881,9 @@ private func centeredOpaqueRunWidth(_ image: CGImage, y: Int) -> Int? {
     return run.upperBound - run.lowerBound + 1
 }
 
-private func opaqueComponentCount(_ image: CGImage) -> Int? {
+private func opaqueComponentCount(_ image: some PetPixels) -> Int? {
     let bytesPerRow = image.width * 4
-    var bytes = [UInt8](repeating: 0, count: bytesPerRow * image.height)
-    guard let context = CGContext(
-        data: &bytes,
-        width: image.width,
-        height: image.height,
-        bitsPerComponent: 8,
-        bytesPerRow: bytesPerRow,
-        space: CGColorSpaceCreateDeviceRGB(),
-        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-    ) else { return nil }
-    context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+    let bytes = image.pixels
 
     let width = image.width
     let height = image.height
@@ -939,38 +937,15 @@ private func distance(from x: Int, to range: ClosedRange<Int>) -> Int {
 ///
 /// A wrong frame index does not crash: it returns a blank cell, and the pet
 /// plays nothing where it should play something.
-private func hasArt(_ image: CGImage) -> Bool {
-    let width = 24
-    let height = 26
-    var pixels = [UInt8](repeating: 0, count: width * height * 4)
-    guard let context = CGContext(
-        data: &pixels,
-        width: width,
-        height: height,
-        bitsPerComponent: 8,
-        bytesPerRow: width * 4,
-        space: CGColorSpaceCreateDeviceRGB(),
-        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-    ) else { return false }
-    context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
-    return stride(from: 3, to: pixels.count, by: 4).contains { pixels[$0] > 8 }
+private func hasArt(_ image: some PetPixels) -> Bool {
+    stride(from: 3, to: image.pixels.count, by: 4).contains { image.pixels[$0] > 8 }
 }
 
 /// The red channel of a 1x1 frame, which is how a numbered fixture says which
 /// cell it is.
-private func cellIndex(of image: CGImage) -> Int? {
-    var pixel: [UInt8] = [0, 0, 0, 0]
-    guard let context = CGContext(
-        data: &pixel,
-        width: 1,
-        height: 1,
-        bitsPerComponent: 8,
-        bytesPerRow: 4,
-        space: CGColorSpaceCreateDeviceRGB(),
-        bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-    ) else { return nil }
-    context.draw(image, in: CGRect(x: 0, y: 0, width: 1, height: 1))
-    return Int(pixel[0])
+private func cellIndex(of image: some PetPixels) -> Int? {
+    guard image.pixels.count >= 4 else { return nil }
+    return Int(image.pixels[0])
 }
 
 private final class FixturePackage {
@@ -1077,4 +1052,12 @@ private final class FixturePackage {
         case context
         case destination
     }
+}
+
+/// FNV-1a over raw bytes -- reproducible without a hash library, which is what
+/// the pre-W2 fixture was generated with.
+private func fnv1a(_ bytes: [UInt8]) -> String {
+    var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+    for byte in bytes { hash = (hash ^ UInt64(byte)) &* 0x0000_0100_0000_01B3 }
+    return String(format: "%016llx", hash)
 }

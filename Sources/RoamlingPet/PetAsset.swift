@@ -1,13 +1,12 @@
 // SPDX-FileCopyrightText: 2026 GooBeom Jeoung
 // SPDX-License-Identifier: GPL-3.0-only
 
-import CoreGraphics
 import Foundation
 
 public final class PetAsset {
     public let manifest: PetManifest
     public let packageURL: URL?
-    public let atlas: CGImage
+    public let atlas: PetImage
     public let frameWidth: Int
     public let frameHeight: Int
     public let columns: Int
@@ -23,23 +22,21 @@ public final class PetAsset {
     /// on this sheet are addressed by continuing the index past the end of the
     /// package's own grid, so a track's frame list needs no notion of which
     /// sheet it is reading from.
-    public let extensionAtlas: CGImage?
+    public let extensionAtlas: PetImage?
     public let extensionColumns: Int
     public let extensionRows: Int
-
-    private var frameCache: [Int: CGImage] = [:]
 
     public init(
         manifest: PetManifest,
         packageURL: URL?,
-        atlas: CGImage,
+        atlas: PetImage,
         frameWidth: Int,
         frameHeight: Int,
         columns: Int,
         rows: Int,
         tracks: [String: PetAnimationTrack],
         behaviorMappings: [String: String] = [:],
-        extensionAtlas: CGImage? = nil,
+        extensionAtlas: PetImage? = nil,
         extensionColumns: Int = 0,
         extensionRows: Int = 0,
         warnings: [String] = []
@@ -73,31 +70,27 @@ public final class PetAsset {
 
     public var supportsDirectionalLook: Bool { rows >= 11 && columns >= 8 }
 
-    public func frameImage(at index: Int) -> CGImage? {
+    /// Where a frame sits, not a copy of it. Cheap enough to compute on every
+    /// tick, so there is no cache to invalidate when the pet changes.
+    public func frameImage(at index: Int) -> PetFrame? {
         guard index >= 0, index < addressableFrameCount else { return nil }
-        if let cached = frameCache[index] { return cached }
-        let source: CGImage
+        let sheet: PetImage
         let offset: Int
         let stride: Int
         if index < frameCount {
-            source = atlas
+            sheet = atlas
             offset = index
             stride = columns
         } else {
             guard let extensionAtlas else { return nil }
-            source = extensionAtlas
+            sheet = extensionAtlas
             offset = index - frameCount
             stride = extensionColumns
         }
-        let rect = CGRect(
-            x: (offset % stride) * frameWidth,
-            y: (offset / stride) * frameHeight,
-            width: frameWidth,
-            height: frameHeight
-        )
-        guard let image = source.cropping(to: rect) else { return nil }
-        frameCache[index] = image
-        return image
+        let x = (offset % stride) * frameWidth
+        let y = (offset / stride) * frameHeight
+        guard x + frameWidth <= sheet.width, y + frameHeight <= sheet.height else { return nil }
+        return PetFrame(sheet: sheet, x: x, y: y, width: frameWidth, height: frameHeight)
     }
 
     public func lookFrameIndex(degrees: Double) -> Int? {

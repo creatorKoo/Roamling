@@ -1,15 +1,17 @@
 // SPDX-FileCopyrightText: 2026 GooBeom Jeoung
 // SPDX-License-Identifier: GPL-3.0-only
 
-import CoreGraphics
 import Foundation
-import ImageIO
 
 public struct PetLoader {
     public static let maximumEncodedBytes = 32 * 1_024 * 1_024
     public static let maximumFrames = 256
 
-    public init() {}
+    private let images: any PetImageSourcing
+
+    public init(images: any PetImageSourcing) {
+        self.images = images
+    }
 
     public func load(packageAt packageURL: URL) throws -> PetAsset {
         let package = packageURL.standardizedFileURL
@@ -39,8 +41,7 @@ public struct PetLoader {
             throw PetLoadError.spritesheetTooLarge(byteCount)
         }
 
-        guard let source = CGImageSourceCreateWithURL(spriteURL as CFURL, nil),
-              let atlas = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+        guard let atlas = images.decode(contentsOf: spriteURL) else {
             throw PetLoadError.unsupportedImage(spriteURL.path)
         }
 
@@ -57,7 +58,7 @@ public struct PetLoader {
         )
 
         var behaviorMappings: [String: String] = [:]
-        var extensionAtlas: CGImage?
+        var extensionAtlas: PetImage?
         var extensionColumns = 0
         var extensionRows = 0
         let extensionURL = package.appendingPathComponent("roamling.json")
@@ -117,7 +118,7 @@ public struct PetLoader {
         at url: URL,
         grid: PetExtensionGrid,
         layout: Layout
-    ) throws -> CGImage {
+    ) throws -> PetImage {
         guard FileManager.default.fileExists(atPath: url.path) else {
             throw PetLoadError.missingSpritesheet(url.path)
         }
@@ -125,8 +126,7 @@ public struct PetLoader {
            byteCount > Self.maximumEncodedBytes {
             throw PetLoadError.spritesheetTooLarge(byteCount)
         }
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let atlas = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+        guard let atlas = images.decode(contentsOf: url) else {
             throw PetLoadError.unsupportedImage(url.path)
         }
         let expected = (grid.columns * layout.frameWidth, grid.rows * layout.frameHeight)
@@ -197,7 +197,7 @@ public struct PetLoader {
         return candidate
     }
 
-    private func resolveLayout(manifest: PetManifest, atlas: CGImage) throws -> Layout {
+    private func resolveLayout(manifest: PetManifest, atlas: PetImage) throws -> Layout {
         let layout: Layout
         if let frame = manifest.frame {
             guard frame.width > 0, frame.height > 0, frame.columns > 0, frame.rows > 0 else {
