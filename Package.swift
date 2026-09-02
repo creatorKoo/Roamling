@@ -59,12 +59,12 @@ let package = Package(
                 .linkedFramework("SwiftUI")
             ]
         ),
+        // Foundation and BSD sockets since W3: the loopback receiver stopped
+        // needing Apple's Network framework, which was one of the two lines
+        // that would not compile on Windows.
         .target(
             name: "RoamlingSources",
-            dependencies: ["RoamlingCore"],
-            linkerSettings: [
-                .linkedFramework("Network")
-            ]
+            dependencies: ["RoamlingCore"]
         ),
         .executableTarget(
             name: "RoamlingApp",

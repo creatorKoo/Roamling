@@ -84,10 +84,12 @@ public struct ClaudeCodeHookInstaller: Sendable {
     /// swallowed so a closed companion can never surface a hook error, which a
     /// native `http` handler did on every session that outlived the app.
     public var command: String {
-        "/usr/bin/curl --silent --connect-timeout 0.15 --max-time 0.3 "
-            + "--request POST --header 'Content-Type: application/json' "
-            + "--header '\(Self.tokenHeader): \(token)' --data-binary @- "
-            + "'\(endpoint.absoluteString)' >/dev/null 2>&1 || true # \(Self.marker)"
+        HookCommand.forwardStandardInput(
+            to: endpoint,
+            tokenHeader: Self.tokenHeader,
+            token: token,
+            marker: Self.marker
+        )
     }
 
     private func currentHandler() -> [String: Any] {

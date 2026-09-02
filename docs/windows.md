@@ -30,9 +30,9 @@ monitor 왼쪽/위에 있는 디스플레이에 음수 좌표를 준다.
 ### 테스트는 거의 그대로 돈다
 
 `RoamlingLogicTests`가 XCTest가 아니라 dependency-free executable이라 Windows에서 그대로
-빌드된다. 예외는 둘이다 — `ImageIO`를 쓰는 `PetLogicTests.swift`(W2가 없앤다)와
-`RoamlingSources`에 의존하는 `SourceLogicTests.swift`(W3가 없앤다). 하네스가 한 실행
-파일이라 W0에서는 Core 테스트만 남긴 하네스를 돌렸다.
+빌드된다. W0 시점의 예외 둘 중 `SourceLogicTests.swift`는 W3가 풀었다. 남은 하나는
+`ImageIO`로 시트를 디코드하는 `PetLogicTests.swift`이고, **W2가 아니라 W2b가** 푼다 —
+디코딩이 플랫폼 서비스가 되면서 하네스도 자기 디코더를 갖게 됐기 때문이다.
 
 ## 2. 블로커는 세 개다
 
@@ -96,9 +96,9 @@ D로 가면 Rust `image` 크레이트가 WebP와 PNG를 함께 준다.
 
 ### 그 밖의 작은 것들
 
-- `LoopbackHookReceiver`의 `NWListener` — Apple `Network` 프레임워크
-- 두 hook installer의 하드코딩된 `/usr/bin/curl` (Windows 10 1803+ 는 System32에 `curl.exe`)
-- `PetCatalog`의 `Library/Application Support/Roamling/Pets` → `%APPDATA%\Roamling\Pets`
+- ~~`LoopbackHookReceiver`의 `NWListener`~~ — **W3에서 해소**
+- ~~두 hook installer의 하드코딩된 `/usr/bin/curl`~~ — **W3에서 해소**
+- ~~`PetCatalog`의 `Library/Application Support/Roamling/Pets`~~ — **W3에서 해소**
 - `scripts/test.sh`가 zsh, `scripts/build-app.sh`가 codesign 전제
 - ~~`Localizable.strings`를 `Bundle.module`로 읽는 경로~~ — **9절에서 해소됐다.
   Windows에서 그대로 동작하므로 할 일이 아니다.**
@@ -337,10 +337,31 @@ shipped `mochi-v3` 패키지(96) · placeholder(88). 크롭에 1픽셀 오프셋
 `PetImageSourcing` 이음새 뒤에 Rust 디코더를 꽂는 것이 그 확인 방법이고, 아틀라스가
 1.5 MB라 FFI 직렬화의 최악 경우를 그대로 때린다.
 
-### W3 — Sources 이식
+### W3 — Sources 이식 ✅ 완료 2026-09-02
 
-`NWListener` → 이식 가능한 loopback HTTP listener. curl 경로 OS 분기. `PetCatalog` 검색 경로에
-`%APPDATA%\Roamling\Pets` 추가.
+W0가 Windows 빌드를 멈춘 **두 줄 중 나머지 하나**(`import Network`)가 사라졌다. 다른 하나
+(`import CoreGraphics`)는 W2가 없앴다. **이제 포터블 다섯 모듈에 Apple 전용 import가 없다.**
+
+- `LoopbackSocket` — BSD 소켓으로 쓴 loopback 리스너. `#if canImport(Darwin|Glibc|WinSDK)`
+  세 갈래뿐이고 그 위의 HTTP 파싱·토큰 검사·크기 상한은 한 줄도 안 바뀌었다.
+  `127.0.0.1` 바인드는 기본값이 아니라 요구사항이다 — 이 소켓으로 토큰이 오간다.
+- `accept`는 블로킹이고, `stop()`은 **자기 자신에게 한 번 접속해서** 그것을 깨운다.
+  폴링하면 한 번 일어날 종료를 잡으려고 CPU를 영원히 깨우게 된다.
+- `HookCommand` — 두 installer가 쓰던 `/usr/bin/curl` 하드코딩을 한곳으로 모으고
+  경로·따옴표·출력 무음화를 OS별로 갈랐다. Windows는 10 build 1803부터 System32에
+  진짜 `curl.exe`가 있어 경로만 다르다.
+- `PetCatalog.userPetFolder` — Roamling 자기 폴더만 `%APPDATA%\Roamling\Pets`로 갈린다.
+  agent 폴더(`.codex/pets` · `.petdex/pets`)는 agent들이 홈에 두므로 그대로다.
+  메뉴의 "펫 폴더 열기"도 같은 값을 읽어서 아무도 안 읽는 디렉터리를 열 수 없다.
+
+**옮기면서 결함 하나를 만들고 잡았다.** 읽지 않은 요청 바이트가 남은 소켓을 닫으면 커널이
+RST를 보내 방금 쓴 응답을 버린다 — 크기 초과로 거절당한 hook이 400 대신 **아무 답도 못 받는**
+것처럼 보였다. `shutdown(WR)` 뒤 상한을 둔 drain으로 고쳤고, 거절 뒤에도 다음 hook을 계속
+받는지까지 테스트가 고정한다. `NWConnection.cancel()`이 공짜로 해주던 일이다.
+
+**검증**: 로직 테스트 134개, 그리고 서명 빌드의 실제 receiver 두 개에 curl —
+204 · 401 · 20회 연속 전부 204 · 2 MB 거절 후에도 계속 동작 · 두 포트 모두 `127.0.0.1`에만
+바인드.
 
 ### W3b — 셸 표면을 데이터로 (macOS, 동작 변화 0) ✅ 완료 2026-09-02
 
@@ -562,7 +583,7 @@ MVP 4 exit rule 충족  ✅ 2026-09-02
    (macOS 머신) W1 ✅ 2026-09-02 -> W2 ✅ 2026-09-02 -> W2b
         |
         v
-   W3 -> W3b ✅ -> W4 -> W5 -> W6 -> W7
+   W3 ✅ -> W3b ✅ -> W4 <- 다음 -> W5 -> W6 -> W7
         ^
         +-- W2b(디코더)는 여기까지 미룬다. 언어 결정과 같은 결정이다.
              ^                ^

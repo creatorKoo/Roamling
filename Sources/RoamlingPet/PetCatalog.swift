@@ -24,6 +24,22 @@ public struct PetCatalog {
         self.roots = roots
     }
 
+    /// The folder Roamling tells the user to drop packages into: the first
+    /// root it searches that belongs to Roamling rather than to an agent.
+    public static var userPetFolder: URL {
+        #if os(Windows)
+        if let appData = ProcessInfo.processInfo.environment["APPDATA"], !appData.isEmpty {
+            return URL(fileURLWithPath: appData, isDirectory: true)
+                .appendingPathComponent("Roamling/Pets", isDirectory: true)
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Roamling/Pets", isDirectory: true)
+        #else
+        return FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/Roamling/Pets", isDirectory: true)
+        #endif
+    }
+
     public static func defaultRoots(
         environment: [String: String] = ProcessInfo.processInfo.environment,
         home: URL = FileManager.default.homeDirectoryForCurrentUser
@@ -32,7 +48,21 @@ public struct PetCatalog {
         if let override = environment["ROAMLING_PET_PATH"], !override.isEmpty {
             roots.append(URL(fileURLWithPath: override, isDirectory: true))
         }
-        roots.append(home.appendingPathComponent("Library/Application Support/Roamling/Pets", isDirectory: true))
+        // Roamling's own folder is wherever the platform puts application
+        // data; the agents' folders are dotfiles under home on every platform,
+        // because that is where the agents themselves put them.
+        #if os(Windows)
+        if let appData = environment["APPDATA"], !appData.isEmpty {
+            roots.append(
+                URL(fileURLWithPath: appData, isDirectory: true)
+                    .appendingPathComponent("Roamling/Pets", isDirectory: true)
+            )
+        }
+        #else
+        roots.append(
+            home.appendingPathComponent("Library/Application Support/Roamling/Pets", isDirectory: true)
+        )
+        #endif
         roots.append(home.appendingPathComponent(".codex/pets", isDirectory: true))
         roots.append(home.appendingPathComponent(".petdex/pets", isDirectory: true))
         return roots

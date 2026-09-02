@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 import Foundation
-import Network
 import RoamlingCore
 
 public enum ActivityReceiverState: Equatable, Sendable {
@@ -27,15 +26,17 @@ final class LoopbackHookReceiver: @unchecked Sendable {
     private let token: String
     private let tokenHeader: String
     private let path: String
-    private let port: NWEndpoint.Port
+    private let port: UInt16
     private let clock: @Sendable () -> TimeInterval
     private let normalizer: Normalizer
-    private let queue: DispatchQueue
+
     private let lock = NSLock()
     private let stream: AsyncStream<CompanionEvent>
     private let continuation: AsyncStream<CompanionEvent>.Continuation
     private var receiverState = ActivityReceiverState.stopped
-    private var listener: NWListener?
+    private var listener: LoopbackSocket?
+
+    private let label: String
 
     init(
         label: String,
@@ -46,13 +47,13 @@ final class LoopbackHookReceiver: @unchecked Sendable {
         clock: @escaping @Sendable () -> TimeInterval,
         normalizer: @escaping Normalizer
     ) {
+        self.label = label
         self.token = token
         self.tokenHeader = tokenHeader.lowercased()
         self.path = path
-        self.port = NWEndpoint.Port(rawValue: port)!
+        self.port = port
         self.clock = clock
         self.normalizer = normalizer
-        queue = DispatchQueue(label: label, qos: .utility)
         let pair = AsyncStream<CompanionEvent>.makeStream()
         stream = pair.stream
         continuation = pair.continuation
@@ -67,93 +68,62 @@ final class LoopbackHookReceiver: @unchecked Sendable {
 
     func start() throws {
         guard lock.withLock({ self.listener == nil }) else { return }
-        let parameters = NWParameters.tcp
-        parameters.allowLocalEndpointReuse = true
-        parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: port)
-        let listener = try NWListener(using: parameters)
+        let socket = LoopbackSocket(port: port)
+        lock.withLock { receiverState = .starting }
+        do {
+            // Bind and listen happen here rather than in a callback, so a port
+            // already in use is an error the caller sees at start().
+            try socket.start(label: label) { [weak self] connection in
+                self?.serve(connection)
+            }
+        } catch {
+            lock.withLock { receiverState = .failed(String(describing: error)) }
+            throw error
+        }
         lock.withLock {
-            self.listener = listener
-            receiverState = .starting
+            self.listener = socket
+            receiverState = .ready
         }
-        listener.stateUpdateHandler = { [weak self] state in
-            self?.handleListenerState(state)
-        }
-        listener.newConnectionHandler = { [weak self] connection in
-            self?.accept(connection)
-        }
-        listener.start(queue: queue)
     }
 
     func stop() {
-        let listener = lock.withLock { () -> NWListener? in
+        let listener = lock.withLock { () -> LoopbackSocket? in
             let current = self.listener
             self.listener = nil
             receiverState = .stopped
             return current
         }
-        listener?.cancel()
+        listener?.stop()
     }
 
-    private func handleListenerState(_ state: NWListener.State) {
-        switch state {
-        case .ready:
-            lock.withLock { receiverState = .ready }
-        case let .failed(error):
-            lock.withLock {
-                receiverState = .failed(error.localizedDescription)
-                listener = nil
-            }
-        case .cancelled:
-            lock.withLock {
-                if listener == nil { receiverState = .stopped }
-            }
-        default:
-            break
-        }
-    }
-
-    private func accept(_ connection: NWConnection) {
-        connection.stateUpdateHandler = { [weak self, weak connection] state in
-            guard let self, let connection else { return }
-            switch state {
-            case .ready:
-                receive(on: connection, buffer: Data())
-            case .failed, .cancelled:
-                connection.cancel()
-            default:
-                break
-            }
-        }
-        connection.start(queue: queue)
-    }
-
-    private func receive(on connection: NWConnection, buffer: Data) {
-        connection.receive(
-            minimumIncompleteLength: 1,
-            maximumLength: 64 * 1_024
-        ) { [weak self] data, _, complete, error in
-            guard let self else {
-                connection.cancel()
-                return
-            }
-            var requestData = buffer
-            if let data { requestData.append(data) }
-            guard requestData.count <= Self.maximumRequestBytes else {
+    /// One request, read to completion and answered. Connections are served one
+    /// at a time, which is what the serial queue behind `NWListener` did.
+    private func serve(_ connection: LoopbackSocket.Handle) {
+        var request = Data()
+        while true {
+            guard request.count <= Self.maximumRequestBytes else {
                 respond(status: 413, phrase: "Payload Too Large", on: connection)
                 return
             }
-            switch parse(requestData) {
-            case let .complete(request):
-                handle(request, on: connection)
-            case .incomplete where error == nil && !complete:
-                receive(on: connection, buffer: requestData)
-            case .incomplete, .invalid:
+            switch parse(request) {
+            case let .complete(parsed):
+                handle(parsed, on: connection)
+                return
+            case .incomplete:
+                guard let chunk = LoopbackSocket.read(connection, upTo: 64 * 1_024) else {
+                    // The peer stopped talking mid-request.
+                    respond(status: 400, phrase: "Bad Request", on: connection)
+                    return
+                }
+                request.append(chunk)
+            case .invalid:
                 respond(status: 400, phrase: "Bad Request", on: connection)
+                return
             }
         }
     }
 
-    private func handle(_ request: HTTPRequest, on connection: NWConnection) {
+    private func handle(_ request: HTTPRequest, on connection: LoopbackSocket.Handle) {
         guard request.method == "POST", request.path == path else {
             respond(status: 404, phrase: "Not Found", on: connection)
             return
@@ -172,12 +142,11 @@ final class LoopbackHookReceiver: @unchecked Sendable {
         }
     }
 
-    private func respond(status: Int, phrase: String, on connection: NWConnection) {
+    private func respond(status: Int, phrase: String, on connection: LoopbackSocket.Handle) {
         let response = "HTTP/1.1 \(status) \(phrase)\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-        connection.send(
-            content: response.data(using: .utf8),
-            completion: .contentProcessed { _ in connection.cancel() }
-        )
+        if let data = response.data(using: .utf8) {
+            LoopbackSocket.write(connection, data)
+        }
     }
 
     private enum ParseResult {
@@ -224,13 +193,5 @@ final class LoopbackHookReceiver: @unchecked Sendable {
             headers: headers,
             body: body
         ))
-    }
-}
-
-private extension NSLock {
-    func withLock<T>(_ body: () throws -> T) rethrows -> T {
-        lock()
-        defer { unlock() }
-        return try body()
     }
 }

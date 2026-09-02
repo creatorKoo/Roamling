@@ -279,6 +279,45 @@ func sourceLogicTests() -> [LogicTest] {
             try expect(received.value?.sourceID == "codex:command-session")
             try expect(received.value?.kind == .achievement)
         },
+        LogicTest(name: "the receiver keeps serving after refusing an oversized body") {
+            // Two things at once. A hook that sends too much has to be told so
+            // -- closing on top of its unread bytes sends RST and the answer is
+            // lost -- and the next hook has to still be heard.
+            let token = UUID().uuidString
+            let source = ClaudeCodeSource(token: token, port: 47_921)
+            defer { source.stop() }
+            try source.start()
+            for _ in 0..<50 where source.state != .ready {
+                usleep(20_000)
+            }
+            try expect(source.state == .ready, "Receiver state: \(source.state)")
+
+            let endpoint = URL(string: "http://127.0.0.1:47921/v1/hooks/claude-code")!
+            func post(_ body: String) -> Int {
+                var request = URLRequest(url: endpoint)
+                request.httpMethod = "POST"
+                request.setValue(token, forHTTPHeaderField: "X-Roamling-Token")
+                request.httpBody = Data(body.utf8)
+                let semaphore = DispatchSemaphore(value: 0)
+                var status = -1
+                URLSession.shared.dataTask(with: request) { _, response, _ in
+                    status = (response as? HTTPURLResponse)?.statusCode ?? -1
+                    semaphore.signal()
+                }.resume()
+                _ = semaphore.wait(timeout: .now() + 5)
+                return status
+            }
+
+            let ordinary = #"{"hook_event_name":"PostToolUse","session_id":"s","tool_name":"Read"}"#
+            try expect(post(ordinary) == 204, "an ordinary hook was refused")
+
+            let oversized = #"{"hook_event_name":"PreToolUse","session_id":"s","tool_name":""#
+                + String(repeating: "x", count: 2_000_000) + #""}"#
+            let refused = post(oversized)
+            try expect(refused == 400 || refused == 413, "oversized body answered \(refused)")
+
+            try expect(post(ordinary) == 204, "the receiver stopped listening after refusing one")
+        },
         LogicTest(name: "Loopback receiver accepts a large tool payload") {
             let port = UInt16.random(in: 49_000...59_000)
             let token = "codex-large-payload-token"

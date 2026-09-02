@@ -85,10 +85,12 @@ public struct CodexHookInstaller: Sendable {
     /// stream only to Roamling's authenticated loopback receiver. Failure is
     /// swallowed so an unavailable companion can never interrupt agent work.
     public var command: String {
-        "/usr/bin/curl --silent --connect-timeout 0.15 --max-time 0.3 "
-            + "--request POST --header 'Content-Type: application/json' "
-            + "--header '\(Self.tokenHeader): \(token)' --data-binary @- "
-            + "'\(endpoint.absoluteString)' >/dev/null 2>&1 || true # \(Self.marker)"
+        HookCommand.forwardStandardInput(
+            to: endpoint,
+            tokenHeader: Self.tokenHeader,
+            token: token,
+            marker: Self.marker
+        )
     }
 
     private func readRoot() throws -> [String: Any] {

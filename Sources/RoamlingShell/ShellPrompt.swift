@@ -3,6 +3,7 @@
 
 import Foundation
 import RoamlingEngine
+import RoamlingPet
 
 /// What a dialog says. How it is put on screen is the platform's business;
 /// what it says is not, or the two shells would say different things.
@@ -200,10 +201,8 @@ public enum ShellController {
         }
     }
 
-    /// Where a user drops a pet package. Same relative shape everywhere; the
-    /// Windows port swaps this for `%APPDATA%` in W3.
-    public static var petFolder: URL {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Application Support/Roamling/Pets", isDirectory: true)
-    }
+    /// Where a user drops a pet package. The same folder `PetCatalog` searches
+    /// first, asked from the one place that knows it, so the menu cannot open a
+    /// directory nothing reads.
+    public static var petFolder: URL { PetCatalog.userPetFolder }
 }

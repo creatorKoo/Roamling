@@ -24,10 +24,10 @@ if [[ -n "${ROAMLING_SWIFT_SDK:-}" ]]; then
   SWIFT_ARGS+=(--sdk "$ROAMLING_SWIFT_SDK")
 fi
 
-# The portable modules must not reach for a window system or for Apple's image
-# frameworks. The compiler will not catch this on macOS -- the SDK ships them,
-# so an accidental import builds fine here and only fails on the machine that
-# has neither.
+# The portable modules must not reach for a window system, for Apple's image
+# frameworks, or for Network. The compiler will not catch this on macOS -- the
+# SDK ships them all, so an accidental import builds fine here and only fails on
+# the machine that has none of them. W0 found exactly two such lines.
 PORTABLE_DIRS=(
   Sources/RoamlingCore
   Sources/RoamlingPet
@@ -36,7 +36,7 @@ PORTABLE_DIRS=(
   Sources/RoamlingShell
 )
 if grep -rnE --include='*.swift' \
-  '^[[:space:]]*(@_exported[[:space:]]+)?import[[:space:]]+(AppKit|Cocoa|SwiftUI|ScreenCaptureKit|ApplicationServices|Quartz|CoreGraphics|ImageIO|CoreImage)\b' \
+  '^[[:space:]]*(@_exported[[:space:]]+)?import[[:space:]]+(AppKit|Cocoa|SwiftUI|ScreenCaptureKit|ApplicationServices|Quartz|CoreGraphics|ImageIO|CoreImage|Network)\b' \
   "${PORTABLE_DIRS[@]}"; then
   print -u2 "Platform image or window import found in a portable module (see docs/windows.md, W1/W2)"
   exit 1
