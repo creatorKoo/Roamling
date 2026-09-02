@@ -63,10 +63,11 @@ RoamlingApp/      entry point
 의존 방향은 항상 바깥 → Core다. Core에 AppKit이나 agent-specific 타입을 넣지 않는다.
 자세한 근거는 `docs/architecture.md`, MVP 0~4의 acceptance criteria와 실제로 실린 것은
 `docs/mvp.md`에 있다. **MVP 사다리는 4에서 멈췄고(2026-09-02 완료), W1 Runtime 추출도 같은 날
-닫혔다. W2(이미지 파이프라인 탈-CoreGraphics)도 2026-09-02에 구현이 끝났고 사용자의
-실사용 확인만 남았다.** exit rule이 있으므로 그 확인 전에 다음 게이트로 넘어가지 않는다.
-리팩터 게이트 중에는 **동작·타이밍·기본값을 고치지 않는다** — W2의 exit에는 렌더 프레임
-336개의 바이트 비교가 포함돼 있고, 그 픽스처는 `Tests/RoamlingLogicTests/PreW2FrameHashes.swift`다.
+닫혔다. W2(이미지 파이프라인 탈-CoreGraphics)도 2026-09-02에 닫혔다 — 남은 것은 디코더
+(W2b)이고 그건 언어 결정과 같은 자리에 있다.** exit rule이 있으므로 사용자의 실사용 확인
+전에 다음 게이트로 넘어가지 않는다. 리팩터 게이트 중에는 **동작·타이밍·기본값을 고치지
+않는다** — W2의 exit에는 렌더 프레임 336개의 바이트 비교가 포함됐고, 그 픽스처는
+`Tests/RoamlingLogicTests/PreW2FrameHashes.swift`다.
 
 **이 경계가 Windows port의 전제다.** `docs/windows.md`에 모듈별 실측 이식 비용, 언어
 선택 네 가지의 비교, 그리고 2026-09-01에 Windows에서 실행한 W0 스파이크 결과가 있다.

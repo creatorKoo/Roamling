@@ -397,13 +397,13 @@ intent로 고쳤다(`docs/placement.md` 3.2.2). 마지막으로 "routine event�
 두뇌가 macOS 모듈에 있어 검증이 닿지 않는 문제의 작은 사례이고, `docs/windows.md`의
 B1이 같은 문제를 크게 가리킨다.
 
-## Current gate — W2: 이미지 파이프라인 탈-CoreGraphics (`docs/windows.md`)
+## Current gate — 언어 결정 (`docs/windows.md` 3·11·12절)
 
 **MVP 사다리는 4에서 멈춘다.** 이후 게이트는 이 문서가 아니라 `docs/windows.md`의 W 사다리다.
 W1(`RoamlingRuntime`을 AppKit 모듈 밖 `RoamlingEngine`으로 빼는 동작 변화 0의 리팩터)은
-2026-09-02에 구현과 실사용 확인이 같은 날 끝나 닫혔다. 현재 게이트는 W2이고, 구현은 같은 날
-끝나 실사용 확인만 남았다 — 정의와 실제로 실린 것은 그쪽 4절에 있다. 디코더(B3)는 W2b로
-갈라 언어 결정과 같은 자리에 두었다.
+2026-09-02에 구현과 실사용 확인이 같은 날 끝나 닫혔다. W2(이미지 파이프라인 탈-CoreGraphics)도 같은 날 닫혔다 —
+정의와 실제로 실린 것은 그쪽 4절에 있다. 디코더(B3)는 W2b로 갈라 언어 결정과 같은 자리에
+두었으므로, 다음에 열리는 것은 그 결정이다.
 
 MVP 5로 적어 두었던 "펫 저작 UI"는 이름만 있던 항목이라 여기서 정의하지 않는다. 필요해지는
 시점에 — 사용자가 실제로 펫을 만들려 할 때 — 그때의 요구로 쓴다. game/media source와
