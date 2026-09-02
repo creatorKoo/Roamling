@@ -182,7 +182,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         )
 
         let displayProvider = MacDisplayProvider()
-        let displaySet = displayProvider.snapshotSet()
+        let displaySet = displayProvider.currentDisplaySet()
         let initialWorld = DesktopWorldSnapshot(displays: displaySet.displays)
         let objectScale = defaults.double(forKey: DefaultsKey.scale).clamped(to: 0.6...1.8)
         let objectSize = WorldSize(
@@ -240,7 +240,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
 
         // Use the actual owned provider after initialization; the temporary one
         // above only produced immutable startup snapshots.
-        let ownedSet = self.displayProvider.snapshotSet()
+        let ownedSet = self.displayProvider.currentDisplaySet()
         if !ownedSet.displays.isEmpty {
             displays = ownedSet.displays
             coordinateSpace = ownedSet.coordinateSpace
@@ -1346,7 +1346,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
         }
         record("rest", "tucking into a safe zone, spot unvetted", at: timestamp)
 
-        let zones = safeZoneProvider.currentSafeZones(in: world)
+        let zones = safeZoneProvider.safeZones(in: world)
         let restWorld = DesktopWorldSnapshot(
             displays: world.displays,
             windows: world.windows,
@@ -1611,7 +1611,7 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
 
     private func handleDisplayChange() {
         let oldAppKitPoint = coordinateSpace.pointToAppKit(movement.position)
-        let displaySet = displayProvider.snapshotSet()
+        let displaySet = displayProvider.currentDisplaySet()
         guard !displaySet.displays.isEmpty else { return }
         displays = displaySet.displays
         coordinateSpace = displaySet.coordinateSpace

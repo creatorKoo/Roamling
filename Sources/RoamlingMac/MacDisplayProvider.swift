@@ -4,20 +4,11 @@
 import AppKit
 import RoamlingCore
 
-public struct MacDisplaySnapshotSet: Sendable {
-    public let displays: [DisplaySnapshot]
-    public let coordinateSpace: DesktopCoordinateSpace
-}
-
 @MainActor
 public final class MacDisplayProvider: DisplayProviding {
     public init() {}
 
-    public func currentDisplays() -> [DisplaySnapshot] {
-        snapshotSet().displays
-    }
-
-    public func snapshotSet() -> MacDisplaySnapshotSet {
+    public func currentDisplaySet() -> DisplaySnapshotSet {
         let screens = NSScreen.screens
         let appKitFrames = screens.map { screen in
             WorldRect(
@@ -47,6 +38,6 @@ public final class MacDisplayProvider: DisplayProviding {
             )
         }
 
-        return MacDisplaySnapshotSet(displays: displays, coordinateSpace: coordinateSpace)
+        return DisplaySnapshotSet(displays: displays, coordinateSpace: coordinateSpace)
     }
 }

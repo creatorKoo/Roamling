@@ -10,11 +10,7 @@ import RoamlingCore
 public final class MacBasicSafeZoneProvider: SafeZoneProviding {
     public init() {}
 
-    public func currentSafeZones(in world: DesktopWorldSnapshot) -> [SafeZone] {
+    public func safeZones(in world: DesktopWorldSnapshot) -> [SafeZone] {
         BasicSafeZonePlanner.safeZones(in: world)
-    }
-
-    public func safeZones(in world: DesktopWorldSnapshot) async -> [SafeZone] {
-        currentSafeZones(in: world)
     }
 }
