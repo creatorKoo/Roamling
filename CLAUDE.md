@@ -54,14 +54,15 @@ RoamlingApp/      entry point
 ```
 
 의존 방향은 항상 바깥 → Core다. Core에 AppKit이나 agent-specific 타입을 넣지 않는다.
-자세한 근거는 `docs/architecture.md`, 현재 게이트와 acceptance criteria는
-`docs/mvp.md`(현재 **MVP 4: It Finds Empty Space**)에 있다. exit rule이 있으므로 사용자가
-실사용 확인을 하기 전에 다음 MVP로 넘어가지 않는다.
+자세한 근거는 `docs/architecture.md`, MVP 0~4의 acceptance criteria와 실제로 실린 것은
+`docs/mvp.md`에 있다. **MVP 사다리는 4에서 멈췄고(2026-09-02 완료) 현재 게이트는
+`docs/windows.md`의 W1 — Runtime 추출**이다. exit rule이 있으므로 사용자가 실사용 확인을
+하기 전에 다음 게이트로 넘어가지 않는다. W1의 exit는 "동작이 달라진 것을 사용자가 느끼지
+못한다"이므로, W1 중에는 **동작·타이밍·기본값을 고치지 않는다.**
 
 **이 경계가 Windows port의 전제다.** `docs/windows.md`에 모듈별 실측 이식 비용, 언어
 선택 네 가지의 비교, 그리고 2026-09-01에 Windows에서 실행한 W0 스파이크 결과가 있다.
-`RoamlingCore`는 실제 `Package.swift`로 Windows에서 무수정 빌드되고 Core 테스트 72개가
-통과한다. **포팅·언어 선택·Rust 재작성 논의를 시작하기 전에 그 문서를 읽는다** — 특히
+`RoamlingCore`는 실제 `Package.swift`로 Windows에서 무수정 빌드되고 Core 테스트가 통과한다. **포팅·언어 선택·Rust 재작성 논의를 시작하기 전에 그 문서를 읽는다** — 특히
 11절이 Rust 전환 판단에 필요한 실측치를 모아 둔 브리프다.
 
 ## 상태 어휘는 Petdex가 정본이다

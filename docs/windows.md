@@ -38,12 +38,31 @@ monitor 왼쪽/위에 있는 디스플레이에 음수 좌표를 준다.
 
 ### B1. 앱의 두뇌가 macOS 모듈에 있다
 
-`Sources/RoamlingMac/RoamlingRuntime.swift`는 1,732줄인데 **플랫폼 타입을 쓰는 줄은 7개**다:
+`Sources/RoamlingMac/RoamlingRuntime.swift`는 1,718줄이고 AppKit **타입**이 나오는 곳은 넷뿐이다:
 
 - `NSObject` 상속
-- `PetOverlayViewDelegate` 4개 메서드의 `NSPoint`
+- `PetOverlayViewDelegate` 3개 메서드의 `NSPoint`
 - `NSApplication.didChangeScreenParametersNotification` 관찰
 - `corePoint(fromAppKitScreenPoint:)`
+
+**그러나 진짜 이음새는 타입이 아니라 소유권이다.** 런타임은 `init`에서 Mac provider 8개를
+직접 생성하고(`MacDisplayProvider`, `MacBasicSafeZoneProvider`, `MacUserIdleProvider`,
+`MacCaptureProvider`, `MacPointerProvider`, `MacWindowProvider`, `MacFocusProvider`,
+`MacOverlayProvider`), 그중 6개를 **`PlatformServices.swift`의 프로토콜에 없는 멤버로**
+호출한다:
+
+| provider | 프로토콜 밖에서 쓰는 것 |
+|---|---|
+| Display | `snapshotSet()` — 프로토콜의 `currentDisplays()`는 한 번도 안 불린다 |
+| SafeZone | 동기 `currentSafeZones(in:)` — 프로토콜의 async 버전은 안 불린다 |
+| Window | `currentActivityLocationHint()` |
+| Focus / Capture | `isAuthorized`, `requestAuthorization()` |
+| Overlay | `scale`, `objectSize`, `setScale`, `setHitRegionScale`, `setFrameImage(CGImage?)`, `containsPet(atWorldPoint:)`, `view`, settable `coordinateSpace` |
+
+순수하게 프로토콜로만 쓰이는 건 `MacUserIdleProvider`와 `MacPointerProvider` 둘뿐이다.
+그래서 Windows adapter를 아무리 잘 써도 런타임이 그걸 못 받는다 — 자기 것을 직접 만들기
+때문이다. **프로토콜을 실제 호출 모양으로 고치고 provider를 주입받는 것**이 W1의 본체이고,
+`NSPoint` 치환은 그 뒤에 남는 잔업이다.
 
 나머지 전부가 플랫폼 비의존 오케스트레이션이다. 이대로 두면 Windows는 1,700줄을 복제하거나
 포크된다. **Windows를 하지 않더라도 고칠 값어치가 있는 항목**이고, 이 포트에서 가장 큰
@@ -135,9 +154,10 @@ WebP를 그냥 디코드해 B3가 사라진다.
 메모리 소폭, 그리고 1벌이라는 구조다.
 
 **판단 시점은 "A가 실패했을 때"가 아니라 "Swift 코드베이스가 제 역할을 다했을 때"다.**
-지금은 MVP 4 진행 중이고 5·6이 남았다 — 아직 발견 중인 동작 스펙을 재작성하면 움직이는
-과녁을 두 번 구현하고 게이트를 양쪽에서 다시 받게 된다. 사다리가 멈춘 뒤에 그 자체의
-근거로 결정한다.
+MVP 4는 2026-09-02에 닫혔고 사다리는 사실상 여기서 멈춘다 — MVP 5(저작 UI)는 이름만 있는
+항목이라 필요해질 때 정의하고, MVP 6은 존재하지 않는다. 그래도 재작성 결정은 지금 하지
+않는다: 아래 "리팩터가 먼저"대로 W1·W2가 어떤 언어로 가든 이식 명세가 되므로, 그 둘을
+끝낸 뒤 실제 경계를 보고 결정하는 편이 싸다.
 
 ### W0가 판정표다
 
@@ -203,10 +223,44 @@ Swift 하나만 해서 실패하면 **Swift 탓인지 Windows 탓인지 구분�
 **엄격히 오버레이 창만 만든다.** 로직을 Rust로 옮겨 "느낌을 보는" 순간 그것이 C의
 시작이고, C는 W0에서 고르는 선택지가 아니다.
 
-### W1 — Runtime 추출 (macOS, 동작 변화 0)
+### W1 — Runtime 추출 (macOS, 동작 변화 0) ← **현재 게이트**, 착수 2026-09-02
 
-`RoamlingRuntime`을 공용 모듈로 옮긴다. `NSPoint` → `WorldPoint`, 화면 변경 알림 →
-`PlatformServices.swift`의 새 `DisplayChangeObserving` 프로토콜. 회귀는 기존 테스트로 잡는다.
+`RoamlingRuntime`을 AppKit 없이 컴파일되는 새 모듈 **`RoamlingEngine`**으로 옮긴다.
+클래스 이름은 그대로 둔다 — 모듈과 타입이 같은 이름이면 Swift에서 서로를 가린다.
+
+**목표는 Windows 작업을 "`PlatformServices` 채우기"로 줄이는 것이다.** 부수적으로,
+로직 하네스가 가짜 provider로 런타임을 만들어 `tick()`을 돌릴 수 있게 된다 — 지금은
+앱을 실행하지 않고는 오케스트레이션 한 줄도 검증할 수 없다.
+
+**In scope**
+
+- B1의 표대로 `PlatformServices.swift`의 프로토콜을 **런타임이 실제로 호출하는 모양**으로
+  고친다. `MacDisplaySnapshotSet` → Core의 `DisplaySnapshotSet`, SafeZone은 async를 버리고
+  동기, Focus/Capture에 `isAuthorized`/`requestAuthorization()`.
+- 새 타겟 `RoamlingEngine`: 런타임, DI 구조체 `PlatformServices`,
+  `PetOverlayProviding`/`PetOverlayInputHandling`, `BasicSafeZoneProvider`
+  (이미 Foundation만 쓰므로 같이 옮긴다).
+- `NSObject`·`@objc` selector 타이머·`NSApplication` 알림·`NSPoint` delegate 제거.
+  타이머는 클로저 `Timer`, 화면 변경은 `DisplayChangeObserving`.
+- 하네스 seam: `clock`·`UserDefaults`·`PetCatalog` 주입, public `tick()`, 상태 읽기 프로퍼티.
+- `scripts/test.sh`에 AppKit import 게이트.
+
+**Out of scope** — 동작·타이밍·기본값·진단 문자열 변경 전부. `CGImage`는 W2까지,
+`Network`는 W3까지 그대로 둔다.
+
+**Acceptance**
+
+- `Sources/RoamlingEngine`에 `import AppKit|Cocoa|SwiftUI|ScreenCaptureKit|ApplicationServices`
+  가 없다. **컴파일러는 이걸 못 잡는다** — macOS SDK에 AppKit이 있어 링크 설정 없이도
+  빌드된다. `scripts/test.sh`가 grep으로 실패시킨다.
+- `RoamlingMac`에 남는 것: Mac provider들 + 오버레이 패널 + `MacPlatform.makeServices()` +
+  메뉴/튜닝 UI + app delegate + 로컬라이즈 문자열.
+- 기존 테스트 전부 + 런타임을 실제로 tick 시키는 테스트 최소 1개가 통과한다.
+- app delegate가 쓰는 public API는 그대로다 (`init`만 `init(services:)`).
+- identity 서명 빌드에서 Accessibility·Screen Recording 권한이 유지된다.
+
+**Exit** — 서명 빌드를 실사용해서 **달라진 점을 사용자가 못 느낀다**: 배회 · 포인터 회피 ·
+잡기 · 드래그 · agent 착석 · 취침 · 디스플레이 연결 변경 · 권한 프롬프트 · scale 변경.
 
 ### W2 — 이미지 파이프라인 탈-CoreGraphics (macOS)
 
@@ -295,7 +349,9 @@ Velopack의 강점은 릴리스 파이프라인이 하나라는 것이다. **둘
 
 - **macOS**: Sparkle의 EdDSA 서명은 공짜지만, 앱 자체가 Developer ID 서명 + notarize가
   안 되면 Gatekeeper가 막는다. `CLAUDE.md`가 이미 경고하듯 ad-hoc 서명은 빌드마다 다른 앱으로
-  보여 Accessibility 권한까지 잃는다.
+  보여 Accessibility 권한까지 잃는다. **Developer ID 인증서와 notary 서비스는 Apple Developer
+  Program 유료 가입(연 $99)이 있어야 나온다** — 현재 로컬 서명은 무료 개발용 identity다.
+  이 게이트는 지출 결정을 포함하므로 착수 전에 사용자에게 확인한다.
 - **Windows**: 서명이 없으면 **업데이트할 때마다** SmartScreen 경고를 보게 된다.
 
 **서명 없이 자동 업데이트를 먼저 붙이면 업데이트가 없느니만 못하다.** 사용자가 매번 경고를
@@ -324,6 +380,10 @@ GPL-3.0이므로 배포하는 각 버전에 대응하는 소스를 계속 제공
   주기로 뜨는 용도(현재 예산 capture 1회 62ms)에는 BitBlt가 충분하다. 그리고 "펫이 자기
   자리를 바빠 보이게 만들면 안 된다"는 `MacCaptureProvider`의 `excludingApplications` 로직이
   Windows에서는 **`SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` 한 줄**로 끝난다.
+  다만 **BitBlt는 하드웨어 오버레이(MPO)로 그려지는 영상과 DRM 보호 창을 검게 읽는다.**
+  우리는 어두운 곳을 "비어 있다"로 점수화하므로 펫이 재생 중인 영상 위에 앉을 수 있다 —
+  MVP 4가 막으려던 바로 그 실패다. W5 착수 시 유튜브 전체화면과 넷플릭스로 먼저 확인하고,
+  검게 나오면 그 창은 캡처가 아니라 window rect로 판정한다.
 - **Focus**: UI Automation COM 전에 `GetGUIThreadInfo`를 시도한다. COM 없이 캐럿 rect가
   나오는 앱이 많아 MVP 3 수준을 싸게 얻는다. COM interop이 이 포트에서 가장 아플 구간이므로
   피할 수 있으면 피한다.
@@ -367,16 +427,16 @@ W0가 둘을 없애고 하나를 새로 만들었다.
 한다.** 반대로 **W0 스파이크는 Windows 머신의 작업이었고 2026-09-01에 끝났다** —
 툴체인·번들·layered window는 Windows에서만 확인된다.
 
-MVP 4가 현재 게이트이고 `RoamlingRuntime`과 capture를 지금 건드리는 중이다. W1을 게이트
-중간에 넣으면 충돌한다.
+MVP 4가 2026-09-02에 닫히면서 그 충돌이 없어졌다 — `RoamlingRuntime`과 capture를 동시에
+건드리는 게이트가 더는 없다. W1이 현재 게이트다.
 
 ```text
 (Windows 머신) W0 스파이크  ✅ 2026-09-01 완료 -> 분기 A
         |
-MVP 4 exit rule 충족
+MVP 4 exit rule 충족  ✅ 2026-09-02
         |
         v
-   (macOS 머신) W1 -> W2
+   (macOS 머신) W1 <- 현재 -> W2
         |
         v
    W3 -> W4 -> W5 -> W6 -> W7
@@ -610,16 +670,22 @@ Spaces/fullscreen 의미론, ScreenCaptureKit, Accessibility 권한 — **그중
 **C를 진지하게 고려한다면 대칭적인 스파이크가 먼저다** — W0.4와 같은 오버레이 프로브를
 macOS에서 `objc2`로 만들어 보는 것. 그게 없으면 C는 측정되지 않은 절반 위에 서 있다.
 
-### 맥 에이전트와 정할 것 넷
+### 맥 에이전트와 정할 것 넷 — 답 (2026-09-02)
 
-1. **21 MB → 0.15 MB가 11,481줄 재작성 값어치가 있는가.** 사용자 체감으로는 설치 관리자
-   하나를 받는 것이라 차이가 드러나지 않는다.
-2. **MVP 사다리가 언제 멈추는가.** 지금은 4가 열려 있고 5·6이 남았다. 움직이는 과녁을
-   재작성하면 발견 중인 동작 스펙을 두 번 구현하고 게이트를 양쪽에서 다시 받는다.
-   **사다리가 멈춘 뒤라면 C는 합리적이다. 지금은 아니다** — 이것이 3절 결론이 여전히 서는 이유.
-3. **W5의 UIA가 COM을 요구하는가.** `GetGUIThreadInfo`로 피해지면 Rust 이점이 하나 줄어든다.
-   W5 착수 전에 싸게 답할 수 있는 질문이다.
-4. **macOS 쪽 `objc2` 스파이크를 먼저 돌릴 것인가.** 위 문단대로 C의 미측정 절반이다.
+1. **21 MB → 0.15 MB가 11,481줄 재작성 값어치가 있는가.** → **아니오.** 사용자는 설치 관리자
+   하나를 받을 뿐이고 디스크 21 MB는 오늘날 체감되지 않는다. 이 항목 단독으로는 재작성 근거가
+   되지 않는다.
+2. **MVP 사다리가 언제 멈추는가.** → **사실상 지금 멈췄다.** MVP 4가 2026-09-02에 닫혔고,
+   MVP 5(저작 UI)는 이름만 있는 항목이며 MVP 6은 없다. 그런데도 **지금 C로 가지 않는다** —
+   멈춤이 재작성의 필요조건이었지 충분조건은 아니다. W1·W2를 먼저 해서 실제 경계를 드러낸
+   뒤에 결정하는 편이 싸고, 그 둘은 어느 쪽으로 가도 버려지지 않는다.
+3. **W5의 UIA가 COM을 요구하는가.** → **아직 미측정. W5 전에 재는 것으로 확정.**
+   `GetGUIThreadInfo` 탐침을 VS Code · Windows Terminal · Chrome에서 돌려 캐럿 rect가
+   나오는지 본다. **Electron 계열이 위험군**이다 — 네이티브 캐럿을 노출하지 않으면 거기서만
+   UIA가 필요해진다. 탐침은 W0.4와 같은 크기의 버리는 코드다.
+4. **macOS 쪽 `objc2` 스파이크를 먼저 돌릴 것인가.** → **지금은 아니오.** 2번의 답이
+   "일단 W1·W2"인 이상 C의 미측정 절반을 지금 재도 결정에 쓰이지 않는다. C를 실제로
+   저울에 올리는 시점(W2 종료 후)에 같이 연다.
 
 ### 이 브리프의 권고
 
