@@ -49,9 +49,15 @@ Localizable.strings`에 있고 `localized(_:)` / `localizedFormat(_:_:)`로 읽�
 RoamlingCore/     OS 비의존. geometry, world, behavior, attention, reaction
 RoamlingPet/      Petdex manifest, atlas runtime, built-in mascot, fallback
 RoamlingSources/  ClaudeCode / Codex activity adapter + loopback transport
-RoamlingMac/      AppKit display, pointer, overlay, app runtime
+RoamlingEngine/   RoamlingRuntime — tick loop, placement, activity orchestration
+RoamlingMac/      AppKit display, pointer, overlay, menu, app delegate
 RoamlingApp/      entry point
 ```
+
+**Core·Pet·Sources·Engine 넷은 window system을 import하지 않는다.** macOS SDK에 AppKit이
+있어서 컴파일러는 이걸 못 잡는다 — `scripts/test.sh`가 grep으로 막고, 걸리면 non-zero로
+끝난다. 런타임이 플랫폼에 닿는 통로는 `PlatformServices` 하나이고, macOS 쪽 조립은
+`MacPlatform.makeServices()` 한 함수에 모여 있다.
 
 의존 방향은 항상 바깥 → Core다. Core에 AppKit이나 agent-specific 타입을 넣지 않는다.
 자세한 근거는 `docs/architecture.md`, MVP 0~4의 acceptance criteria와 실제로 실린 것은
