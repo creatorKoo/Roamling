@@ -72,7 +72,10 @@ monitor 왼쪽/위에 있는 디스플레이에 음수 좌표를 준다.
 포크된다. **Windows를 하지 않더라도 고칠 값어치가 있는 항목**이고, 이 포트에서 가장 큰
 단일 작업이다.
 
-### B2. `RoamlingPet`의 공개 API가 `CGImage`다
+### B2. `RoamlingPet`의 공개 API가 `CGImage`다 — **W2에서 해소 (2026-09-02)**
+
+아래는 W2 착수 전의 진단이다. 지금 `PetAsset.atlas`는 `PetImage`(RGBA8 premultiplied,
+위 행부터)이고 `RoamlingPet`은 Foundation만 import한다.
 
 `PetAsset.atlas`가 `CGImage`이고(`Sources/RoamlingPet/PetAsset.swift`), 아틀라스 합성과
 프레임 크롭이 `CGContext`/`CGImageSource` 위에 있다. 모듈 경계상 공용이어야 하는 계층이
@@ -83,6 +86,13 @@ macOS 전용이다.
 내장 Mochi 아틀라스가 `.webp`이고, 더 중요하게 **Petdex/Codex 펫 패키지의
 `spritesheet.webp`는 항상 webp다.** 내장 에셋만 PNG로 바꿔도 `~/.codex/pets` 로딩이 안 된다.
 macOS에서는 ImageIO가 공짜로 해주던 일이라 결정이 필요한 줄 몰랐던 항목이다.
+
+**Windows가 대신 해주지 않는다는 것을 2026-09-02에 확인했다.** WIC는 PNG·JPEG·GIF·BMP·TIFF를
+내장하지만 **WebP는 Microsoft Store의 "WebP Image Extensions"를 깔아야** 붙는다. 사용자
+머신에 그게 있다고 가정할 수 없으므로 **진짜 디코더를 직접 실어야 한다.** W2가 디코딩을
+`PetImageSourcing` 뒤로 밀어 둔 것은 이 문제를 없앤 것이 아니라 **결정을 언어 결정과 같은
+자리로 옮긴 것**이다 — A로 가면 libwebp를 SwiftPM C 타겟으로 벤더링하고(약 4만 줄),
+D로 가면 Rust `image` 크레이트가 WebP와 PNG를 함께 준다.
 
 ### 그 밖의 작은 것들
 
@@ -281,18 +291,51 @@ exit가 닫혔다. 테스트 126개가 통과한다. 실제로 생긴 것:
 **Exit** — 서명 빌드를 실사용해서 **달라진 점을 사용자가 못 느낀다**: 배회 · 포인터 회피 ·
 잡기 · 드래그 · agent 착석 · 취침 · 디스플레이 연결 변경 · 권한 프롬프트 · scale 변경.
 
-### W2 — 이미지 파이프라인 탈-CoreGraphics (macOS) ← **현재 게이트**
+### W2 — 이미지 파이프라인 탈-CoreGraphics (macOS) ← **구현 완료 2026-09-02, exit 대기**
 
-`PetAsset.atlas`를 RGBA8 버퍼 + 크기를 든 값 타입으로 바꾸고, 아틀라스 합성과 프레임 크롭을
-순수 Swift 블리터로 내린다. 디코더는 **libwebp + PNG 디코더를 SwiftPM C 타겟으로 번들**한다
-(BSD/zlib 라이선스는 GPL-3.0-only와 호환).
+**원래 계획은 디코더까지 한 게이트에 묶는 것이었는데 둘로 갈랐다.** 문서의 B2(공개 API
+탈-`CGImage`)와 B3(WebP 디코더)는 성격이 다르다 — B2는 어느 언어로 가도 이식 명세가 되고,
+B3는 4만 줄짜리 C를 저장소에 들이는 결정이라 **언어 결정과 같은 결정**이다. 그래서 W2는
+B2까지, 디코더는 W2b로 미뤘다.
 
-양 플랫폼이 같은 디코더와 같은 블리터를 쓰면 픽셀이 동일해지고, `scripts/pet_qa.py`가 지키는
-baseline·중심·detached component 불변식을 로직 하네스 안에서 양쪽 다 검증할 수 있게 된다.
+실제로 생긴 것:
 
-**착수 전에 픽셀아트 보간을 고정할 것** — `PetOverlayPanel`의 `NSImageInterpolation` 설정을
-블리터가 그대로 재현해야 한다. W2 전후로 렌더된 프레임을 바이트 비교하는 게이트를 건다.
-아트 불변식이 엄격한 프로젝트라 픽셀 차이가 곧 결함이다.
+- `PetImage` — RGBA8 premultiplied, 위 행부터, 행 패딩 없음. `CGContext`가 이미 만들던
+  레이아웃이라 경계를 건너는 바이트가 예전에 화면에 닿던 바이트와 같다
+- `PetFrame` — 시트 위의 사각형. 프레임을 복사하지 않는다(아래 참조)
+- `PetImageCanvas` — 합성용 블리터. nearest-neighbour + 수평 미러
+- `PetImageSourcing` — 디코딩과 placeholder 드로잉. macOS 구현은 `MacPetImageSource`
+- `RoamlingPet`은 Foundation만 import하고 `RoamlingEngine`은 프레임워크를 하나도 링크하지
+  않는다. `scripts/test.sh`의 import 게이트가 이미지 프레임워크까지 막는다
+- `PreW2FrameHashes` — 바뀌기 전 파이프라인에서 뜬 336개 프레임 해시
+
+**두 가지는 고쳐 쓰지 않고 지켰다.**
+
+1. 오버레이는 이미 보여주는 프레임을 다시 받으면 재그리지 않고, 그 판단을 **항등성**으로
+   한다. 프레임을 복사본으로 만들면 매 tick이 새 프레임으로 보여 60Hz로 재그린다. 그래서
+   프레임은 사각형으로 남기고, Mac 쪽이 시트당 `CGImage` 하나를 캐시해 셀마다 crop한다 —
+   `CGImage.cropping`이 공짜로 주던 것과 같은 구조다. 셀을 복사하면 펫당 16 MB가 붙는다.
+2. `PlaceholderPetFactory`의 시트는 안티에일리어싱된 베지어 아트라 어떤 이식 가능한
+   블리터도 재현하지 못한다. **매니페스트와 트랙은 데이터라 남기고 드로잉만**
+   `RoamlingMac`으로 한 줄도 바꾸지 않고 옮겼다.
+
+**게이트: 336프레임 전부 바이트 동일.** 내장 mochi(96) · 내장 fat-mochi(56) ·
+shipped `mochi-v3` 패키지(96) · placeholder(88). 크롭에 1픽셀 오프셋을 넣으면 테스트가
+즉시 실패하는 것을 mutation으로 확인했다. 실행 중인 앱의 RSS는 75.8 MB → 80.9 MB(+5.1 MB).
+
+**Exit**: 서명 빌드 실사용에서 펫이 전과 같아 보인다.
+
+### W2b — 이식 가능한 디코더 (B3)
+
+**Windows가 실제로 빌드될 때, 또는 언어 결정 뒤에 연다.** 지금은 `PetImageSourcing`의
+구현이 macOS 하나뿐이고 테스트 하네스도 자기 ImageIO 디코더를 쓴다 — 1절이 말한
+"`PetLogicTests`의 ImageIO 의존"은 W2가 아니라 여기서 없어진다.
+
+경로는 언어 결정을 따른다. **A**면 libwebp 디코더 서브셋 + PNG/zlib(miniz)을 SwiftPM C
+타겟으로 벤더링한다(BSD/zlib 라이선스는 GPL-3.0-only와 호환, 약 4만 줄). **D**면 Rust
+`image` 크레이트가 WebP·PNG를 함께 주므로 벤더링이 사라진다 — 12절이 만든
+`PetImageSourcing` 이음새 뒤에 Rust 디코더를 꽂는 것이 그 확인 방법이고, 아틀라스가
+1.5 MB라 FFI 직렬화의 최악 경우를 그대로 때린다.
 
 ### W3 — Sources 이식
 
@@ -455,10 +498,12 @@ MVP 4가 2026-09-02에 닫히면서 그 충돌이 없어졌다 — `RoamlingRunt
 MVP 4 exit rule 충족  ✅ 2026-09-02
         |
         v
-   (macOS 머신) W1 ✅ 2026-09-02 -> W2 <- 현재
+   (macOS 머신) W1 ✅ 2026-09-02 -> W2 (구현 완료, 실사용 확인 대기) -> W2b
         |
         v
    W3 -> W4 -> W5 -> W6 -> W7
+        ^
+        +-- W2b(디코더)는 여기까지 미룬다. 언어 결정과 같은 결정이다.
              ^                ^
              |                +-- 자동 업데이트. 양 플랫폼 공통이고 macOS도 함께 받는다.
              |                    서명이 선행 조건이다 (W6).
