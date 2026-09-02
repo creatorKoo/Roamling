@@ -71,6 +71,9 @@ import하지 않는다.** macOS SDK에 다 있어서 컴파일러는 이걸 못 
 않는다** — W2의 exit에는 렌더 프레임 336개의 바이트 비교가 포함됐고, 그 픽스처는
 `Tests/RoamlingLogicTests/PreW2FrameHashes.swift`다.
 
+**언어 결정은 2026-09-02에 D(Rust core + Swift macOS 셸)로 닫혔다.** 근거·포팅 순서·되돌아올
+조건은 `docs/windows.md` 3절 "결정: D"에 있다. 아직 Rust 코드는 없고 W4부터 시작한다.
+
 **이 경계가 Windows port의 전제다.** `docs/windows.md`에 모듈별 실측 이식 비용, 언어
 선택 네 가지의 비교, 그리고 2026-09-01에 Windows에서 실행한 W0 스파이크 결과가 있다.
 `RoamlingCore`는 실제 `Package.swift`로 Windows에서 무수정 빌드되고 Core 테스트가 통과한다. **포팅·언어 선택·Rust 재작성 논의를 시작하기 전에 그 문서를 읽는다** — 특히

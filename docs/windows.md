@@ -128,7 +128,10 @@ Core에 플랫폼 import가 들어가지 않았다. 지금 선택지를 논할 �
 | **B. C# 전체** | **2벌** | 아니오 | 낮음 | ~13,000줄 | **로직 영구 중복** |
 | **C. Rust 전면 재작성** | 1벌 | 아니오 | 중간 | ~16,000줄 | macOS까지 재검증 |
 
-**Chosen: A.** 이유는 "Swift가 Windows에서 좋아서"가 아니다 — **포팅 대상의 88%가 UI가
+**~~Chosen: A.~~ 2026-09-02에 D로 바뀌었다. 아래 "결정: D" 절을 읽는다.** 아래는 A를
+고른 당시의 근거이고, 무엇이 틀렸는지가 다음 결정의 정보이므로 지운다.
+
+이유는 "Swift가 Windows에서 좋아서"가 아니다 — **포팅 대상의 88%가 UI가
 아니기 때문이다.** 1절 표대로 진짜 macOS 전용 코드는 1,540줄뿐이고 나머지 11,481줄
 (로직 7,932 + 테스트 3,549)은 이미 쓰여 있고 이미 게이트를 통과했다. 포트의 어려운 부분은
 작지만 하필 Swift가 제일 약한 영역이고, 큰 부분은 Swift가 제일 강한 영역이다.
@@ -137,6 +140,83 @@ Core에 플랫폼 import가 들어가지 않았다. 지금 선택지를 논할 �
 pause 12초, catch radius 74pt, notice 170pt — 은 유닛테스트가 아니라 사용자가 3-display
 앞에 앉아 닫은 값이다. 재구현하면 그 판정을 전부 다시 받아야 하고, "귀엽다"는 회귀
 테스트로 잡히지 않는다.
+
+### 결정: D — Rust core + Swift macOS 셸 (2026-09-02)
+
+**사용자가 Windows 지원을 확정했고, 그것이 A를 무너뜨린다.** A는 Swift-on-Windows에 건
+베팅인데 그 대가가 셋이다 — 17파일 56 MB 배포(10절), libwebp 약 4만 줄 벤더링(W2b),
+그리고 툴체인 추진력(Browser Company 인수 이후, 12절). D는 셋을 동시에 없앤다.
+
+12절과 W0m.3이 D의 세 축을 이미 닫았다: 포팅 정확성(402 world, 불일치 0), FFI 비용
+(tick당 0.03%, 아틀라스 크로싱 15.3 ms를 실행당 두 번), 두 언어 빌드·서명(번들 안의 서명된
+실행 파일이 rpath로 Rust dylib을 로드해 실제로 동작).
+
+**C로 끝까지 가지 않는 이유.** D에 도달한 뒤 macOS 셸까지 Rust로 옮기면 더 얻는 것은
+**"macOS 빌드의 언어가 하나"뿐**이다. 단일 파일은 못 얻는다 — macOS는 언어와 무관하게
+`.app` 번들이어야 한다(`LSUIElement`, TCC가 권한을 붙이는 `CFBundleIdentifier`,
+`NSScreenCaptureUsageDescription`, 서명·notarize가 전부 번들 전제). Windows 단일 exe와
+WebP는 D가 이미 준다. 대가는 `NSPanel` 오버레이·Spaces·fullscreen·TCC·ScreenCaptureKit·
+`AXUIElement` 캐럿을 objc2로 다시 만들고 **전부 재검증**하는 것이고, 12절 W0m.1이 그중
+캐럿과 실제 캡처 프레임은 재지 않았다.
+
+**그래서 C는 계획하지 않되 닫지도 않는다.** 다시 여는 조건은 둘 중 하나다 — Swift 툴체인이
+macOS에서 실제로 문제를 일으키기 시작하거나, `RoamlingMac`이 충분히 얇아져 재작성 비용이
+재검증 비용을 밑돌 때(W3b가 608→189줄로 줄인 방향이 계속될 경우).
+
+### 조각내서 갈아탄다 — 빅뱅으로 옮기지 않는다
+
+**항상 실제로 쓰이는 로직은 1벌이고, 어느 시점에 멈춰도 앱이 돈다.** 한 단위를 Rust로
+옮기고 → macOS가 Rust판을 부르기 시작하고 → **Swift 원본을 대조군으로 남겨** 같은 입력에
+같은 출력이 나오는지 확인하고 → 일치하면 Swift판을 지운다.
+
+대조가 필수인 이유는 W0m.2에 있다. `BasicSafeZonePlanner`는 **Swift `max(by:)`가 동점에서
+마지막 원소를 돌려준다**는 것까지 맞춰야 14,070개 질의에서 불일치 0이 나왔다. tie-breaking을
+그대로 옮기지 않으면 조용히 다른 모서리에 앉는다. **포팅이 기계적이라는 말이 안전하다는
+뜻은 아니다.**
+
+경계는 두 모양이다. 가끔 불리는 것은 **A. 계산만 넘긴다**(값 변환, 측정 3.9 µs). 매 tick
+불리는 것은 반드시 **B. 상태를 Rust가 들고 핸들로 부른다**(측정 4.7 µs) — A로 하면 60 Hz에
+변환 비용이 곱해진다.
+
+| 단위 | 내용 | 줄 | 모양 |
+|---|---|---:|---|
+| 1 | Geometry + CoordinateSpace | 175 | Rust 내부용 |
+| 2 | BasicSafeZone + DesktopWorld + DisplayTopology | 499 | A |
+| 3 | PlacementDirector + InterestPlacement + VisualEmptiness + CandidateScoring | 747 | A |
+| 4 | AttentionModel + ReactionPolicy + Activity | 289 | A |
+| 5 | Movement + Pointer + Behavior + Timing + Tuning | 603 | **B** |
+| 6 | `RoamlingEngine` | 1,453 | **B**, tick 1회 |
+
+`RoamlingCore`의 잎이 얇아서 이 순서가 성립한다 — `MovementController`는 `WorldPoint`와
+`WorldVector`만 알고 `DesktopWorld`를 모른다.
+
+### 양 플랫폼이 붙는 방식이 다르다
+
+```text
+macOS  :  Swift 셸  --FFI(uniffi)-->  Rust core
+Windows:  Rust 셸   --직접 호출-->     Rust core   (같은 crate)
+```
+
+**Windows에는 FFI가 없다.** Rust가 Rust를 부르므로 경계도 직렬화도 없고, 오늘 측정한
+4.7 µs/tick은 **macOS에만 붙는 비용**이다.
+
+그 대신 **Windows는 조각 단위로 시작할 수 없다.** Rust 셸이 부를 상대는 오케스트레이터인데
+그것이 아직 Swift면 부를 것이 없고, Rust는 Swift를 부르지 못한다. W4에 필요한 양은
+**Core 2,463 + Engine 1,453 + Pet 1,587 ≈ 5,500줄**이다(`RoamlingSources` 1,010줄은 MVP 0에
+필요 없으므로 나중에 — 그것을 가능하게 하려고 agent 주입 이음새를 먼저 넣었다).
+
+**조각내기가 사주는 것은 "Windows가 빨리"가 아니라 "안전하게, 그리고 언제든 멈출 수 있게"다.**
+대조 테스트가 계속 어긋나거나 두 언어 빌드가 예상보다 아프면 **W4를 Swift로 하면 되고**,
+그 경우에도 W1~W3b는 하나도 버려지지 않는다.
+
+### 착수 전에 정한 것
+
+- **테스트는 로직을 따라간다.** 지금 3,663줄이 Swift 하네스다. Core가 Rust로 가면
+  `cargo test`로 같이 가야 differential test를 쓰고 버릴 수 있다.
+- **FFI는 tick당 한 번, 스냅샷 in → 지시 out.** 프로퍼티마다 부르는 모양으로 새면 측정한
+  숫자가 무너진다. W1의 `PlatformServices`가 이미 그 모양이므로 지키기만 하면 된다.
+- **`RoamlingPet`은 로직과 함께 간다.** W2b의 디코더가 Rust `image`이므로 자연스럽다.
+- **빌드·서명**: `build-app.sh`에 cargo 단계, `install_name`을 `@rpath`로 교정(W0m.3에서 실측).
 
 ### A′는 A의 대안이 아니라 대피로다
 
