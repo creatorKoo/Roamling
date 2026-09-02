@@ -30,7 +30,9 @@ monitor 왼쪽/위에 있는 디스플레이에 음수 좌표를 준다.
 ### 테스트는 거의 그대로 돈다
 
 `RoamlingLogicTests`가 XCTest가 아니라 dependency-free executable이라 Windows에서 그대로
-빌드된다. 예외는 `ImageIO`를 쓰는 `PetLogicTests.swift` 하나이고, 이는 아래 W2가 없앤다.
+빌드된다. 예외는 둘이다 — `ImageIO`를 쓰는 `PetLogicTests.swift`(W2가 없앤다)와
+`RoamlingSources`에 의존하는 `SourceLogicTests.swift`(W3가 없앤다). 하네스가 한 실행
+파일이라 W0에서는 Core 테스트만 남긴 하네스를 돌렸다.
 
 ## 2. 블로커는 세 개다
 

@@ -27,6 +27,21 @@ public enum CompanionEventKind: String, Codable, Hashable, Sendable {
     case highIntensity
     case calm
     case idle
+
+    /// Whether this event is worth getting a sleeping pet up for.
+    ///
+    /// An agent emits an event per tool call. If each of them woke the pet it
+    /// could doze for one beat and never longer, so routine progress -- the
+    /// thing the pet is already sitting next to -- lets it sleep, and only a
+    /// result or a request for the user gets it up.
+    public var wakesRestingPet: Bool {
+        switch self {
+        case .attentionRequired, .achievement, .negative, .setback:
+            true
+        case .activityStarted, .inspecting, .highIntensity, .positive, .calm, .idle, .activityEnded:
+            false
+        }
+    }
 }
 
 public enum UserContext: String, Codable, Hashable, Sendable {

@@ -99,6 +99,20 @@ func coreLogicTests() -> [LogicTest] {
             // A session that will never speak again has to stop owning the pet.
             try expect(ActivityLifetime.hasFallenSilent(lastEventAt: heard, now: heard + 600))
         },
+        LogicTest(name: "a sleeping pet is woken only for what the user would want to see") {
+            // An agent emits an event per tool call. If each of them woke the
+            // pet it could doze for one beat and never longer.
+            for routine in [CompanionEventKind.activityStarted, .inspecting, .highIntensity, .positive, .calm] {
+                try expect(!routine.wakesRestingPet, "\(routine) is the work the pet is sitting next to")
+            }
+            // The end of a watch is handled by the watch ending, not by a wake.
+            try expect(!CompanionEventKind.activityEnded.wakesRestingPet)
+            try expect(!CompanionEventKind.idle.wakesRestingPet)
+            // A result, or a request for the user, is what a nap is worth losing for.
+            for outcome in [CompanionEventKind.attentionRequired, .achievement, .negative, .setback] {
+                try expect(outcome.wakesRestingPet, "\(outcome) is what the user wants shown")
+            }
+        },
         LogicTest(name: "a walking pet can still fall asleep") {
             // Rest is gated on how long the *user* has been idle, never on the
             // pet holding still, and the tick chain checks rest before roaming.

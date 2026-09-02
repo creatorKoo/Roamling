@@ -852,26 +852,12 @@ public final class RoamlingRuntime: NSObject, PetOverlayViewDelegate {
             return
         }
         if behavior.state.isResting {
-            // An agent emits an event per tool call. Waking for each of them
-            // would mean the pet can doze for one beat and never longer, so
-            // only events the user would want to be shown get it up.
-            guard Self.deservesWakingFromRest(selected) else { return }
+            guard selected.kind.wakesRestingPet else { return }
             cancelRestForActivity(at: now)
             pendingActivityEvent = selected
             return
         }
         dispatchActivityEvent(selected, at: now)
-    }
-
-    /// Routine progress is what the pet is already sitting next to. Only a
-    /// result or a request for the user is worth interrupting a nap for.
-    private static func deservesWakingFromRest(_ event: CompanionEvent) -> Bool {
-        switch event.kind {
-        case .attentionRequired, .achievement, .negative, .setback:
-            true
-        case .activityStarted, .inspecting, .highIntensity, .positive, .calm, .idle, .activityEnded:
-            false
-        }
     }
 
     /// A Stop hook cannot run for a session that was interrupted or killed, and

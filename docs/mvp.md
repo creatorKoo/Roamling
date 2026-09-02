@@ -321,7 +321,7 @@ AXUIElement
 `FocusSnapshot`의 `windowID`를 `windowFrame`으로 바꿨다. private API 없이 창을
 `CGWindowNumber`로 매칭할 수 없어 id가 계속 nil이었기 때문이다.
 
-## Current gate — MVP 4: It Finds Empty Space
+## Completed — MVP 4: It Finds Empty Space
 
 지금까지의 배치는 창 geometry만 안다. 창 안 어디가 비어 있는지는 모르므로 문서 한가운데,
 코드 위, 버튼 위에 앉을 수 있다. 이 gate는 Screen Recording을 opt-in으로 켰을 때만 화면
@@ -384,6 +384,18 @@ CandidateScore =
 - agent를 보고 있지 않은 평상시 배회에서도 본문 위에 앉지 않는다.
 - 자는 동안 routine agent event로는 깨지 않고 결과·요청 event에만 깬다.
 - 빈 영역 점수화를 pure test로 검증하고 전체 suite를 통과한다.
+
+2026-09-02 사용자가 실사용에서 펫이 본문과 UI를 피해 앉는 것을 확인하고 다음 단계
+진행을 승인했다. gate 안에서 계획과 갈린 곳이 셋이다. seat hold의 재확인 주기는 위
+in-scope의 1초가 아니라 capture 1회 62ms 실측에 맞춘 3초(agent 관찰)·6초(배회·휴식)로
+잡았다. 실사용에서 잡은 결함 둘 — 배회 중 졸던 자리를 두고 display corner까지 걸어가
+자던 것, 자리가 글자로 덮여 비키려는 걸음을 곁에 있는 커서가 취소하던 것 — 은 capture가
+검증한 자리에서만 그대로 자는 `napsInPlace`와 커서의 시선보다 우선하는 `.escape`
+intent로 고쳤다(`docs/placement.md` 3.2.2). 마지막으로 "routine event로는 깨지 않는다"는
+규칙이 `RoamlingRuntime`의 private 함수라 어떤 테스트도 지키지 않았는데, 닫으면서
+`CompanionEventKind.wakesRestingPet`으로 Core에 옮겨 pure test가 잡게 했다. 앱의
+두뇌가 macOS 모듈에 있어 검증이 닿지 않는 문제의 작은 사례이고, `docs/windows.md`의
+B1이 같은 문제를 크게 가리킨다.
 
 ## Exit rule
 
