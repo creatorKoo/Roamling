@@ -7,7 +7,7 @@ import Foundation
 @main
 struct RoamlingLogicTestMain {
     static func main() {
-        let tests = coreLogicTests() + petLogicTests() + sourceLogicTests()
+        let tests = coreLogicTests() + petLogicTests() + sourceLogicTests() + runtimeLogicTests()
         var failures = 0
 
         for test in tests {

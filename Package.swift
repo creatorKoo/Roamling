@@ -68,7 +68,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "RoamlingLogicTests",
-            dependencies: ["RoamlingCore", "RoamlingPet", "RoamlingSources"],
+            dependencies: ["RoamlingCore", "RoamlingPet", "RoamlingSources", "RoamlingEngine"],
             path: "Tests/RoamlingLogicTests",
             linkerSettings: [
                 .linkedFramework("ImageIO"),
