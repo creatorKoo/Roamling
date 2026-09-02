@@ -11,3 +11,10 @@ __pycache__/
 
 # Cargo build products for the Rust core.
 rust/target/
+
+# Generated Swift bindings for the Rust core (scripts/build-rust-core.sh).
+Sources/RoamlingCoreRs/*
+!Sources/RoamlingCoreRs/README.md
+
+Sources/CRoamlingCoreFFI/*
+!Sources/CRoamlingCoreFFI/README.md

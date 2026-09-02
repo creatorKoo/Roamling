@@ -5,7 +5,10 @@
 //! time. See `docs/windows.md`, "조각내서 갈아탄다", for the order and for why
 //! the Swift original stays beside each unit until their outputs agree.
 
+uniffi::setup_scaffolding!();
+
 pub mod coordinate_space;
+pub mod ffi;
 pub mod geometry;
 pub mod safe_zone;
 pub mod topology;

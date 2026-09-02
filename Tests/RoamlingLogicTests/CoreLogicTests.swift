@@ -3,6 +3,7 @@
 
 import Foundation
 import RoamlingCore
+import RoamlingEngine
 
 func coreLogicTests() -> [LogicTest] {
     [
@@ -98,6 +99,67 @@ func coreLogicTests() -> [LogicTest] {
             )
             // A session that will never speak again has to stop owning the pet.
             try expect(ActivityLifetime.hasFallenSilent(lastEventAt: heard, now: heard + 600))
+        },
+        LogicTest(name: "the Rust safe zones agree with the Swift ones the app replaced") {
+            // The switch-over check. The Swift planner is still here as the
+            // control; when it goes, so does this test.
+            var seed: UInt64 = 0x2545_F491_4F6C_DD1D
+            func next(_ scale: Double = 1) -> Double {
+                seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17
+                return (Double(seed % 400_001) / 100.0 - 2000.0) * scale
+            }
+            var compared = 0
+            for iteration in 0..<200 {
+                let displays = (0...(iteration % 3)).map { index -> DisplaySnapshot in
+                    let x = next(), y = next()
+                    let w = abs(next()), h = abs(next())
+                    let frame = WorldRect(x: x, y: y, width: w, height: h)
+                    let inset = abs(next(0.02))
+                    return DisplaySnapshot(
+                        id: "d\(index)",
+                        name: "d\(index)",
+                        frame: frame,
+                        visibleFrame: WorldRect(
+                            x: frame.minX + inset,
+                            y: frame.minY + inset,
+                            width: max(0, frame.size.width - inset * 2),
+                            height: max(0, frame.size.height - inset * 2)
+                        ),
+                        scale: 1
+                    )
+                }
+                let world = DesktopWorldSnapshot(displays: displays)
+                let swiftZones = BasicSafeZonePlanner.safeZones(in: world)
+                let rustZones = RustCoreTestBridge.safeZones(in: world)
+                try expect(
+                    swiftZones.count == rustZones.count,
+                    "zone count differs at \(iteration): \(swiftZones.count) vs \(rustZones.count)"
+                )
+                for (lhs, rhs) in zip(swiftZones, rustZones) {
+                    try expect(lhs.frame == rhs.frame, "frame differs: \(lhs.frame) vs \(rhs.frame)")
+                    try expect(lhs.score == rhs.score, "score differs: \(lhs.score) vs \(rhs.score)")
+                    try expect(lhs.confidence == rhs.confidence)
+                    try expect(lhs.reason == rhs.reason, "reason differs: \(lhs.reason) vs \(rhs.reason)")
+                    compared += 1
+                }
+
+                let position = WorldPoint(x: next(), y: next())
+                let pointer = iteration % 3 == 0 ? nil : WorldPoint(x: next(), y: next())
+                let size = WorldSize(width: abs(next(0.05)), height: abs(next(0.05)))
+                let swiftRest = BasicSafeZonePlanner.destination(
+                    in: world, currentPosition: position,
+                    pointerPosition: pointer, objectSize: size
+                )
+                let rustRest = RustCoreTestBridge.restDestination(
+                    in: world, currentPosition: position,
+                    pointerPosition: pointer, objectSize: size
+                )
+                try expect(
+                    swiftRest == rustRest,
+                    "rest destination differs at \(iteration): \(String(describing: swiftRest)) vs \(String(describing: rustRest))"
+                )
+            }
+            try expect(compared > 400, "only \(compared) zones compared")
         },
         LogicTest(name: "two routes of equal cost pick the same one every launch") {
             // This failed about half the time before the fix, differently each

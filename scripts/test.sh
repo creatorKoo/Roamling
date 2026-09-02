@@ -24,6 +24,9 @@ if [[ -n "${ROAMLING_SWIFT_SDK:-}" ]]; then
   SWIFT_ARGS+=(--sdk "$ROAMLING_SWIFT_SDK")
 fi
 
+# The Swift build links the Rust core, so it has to exist first.
+"$REPOSITORY_DIR/scripts/build-rust-core.sh"
+
 # The portable modules must not reach for a window system, for Apple's image
 # frameworks, or for Network. The compiler will not catch this on macOS -- the
 # SDK ships them all, so an accidental import builds fine here and only fails on

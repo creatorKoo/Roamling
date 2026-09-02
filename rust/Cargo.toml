@@ -6,3 +6,7 @@ members = ["roamling-core"]
 version = "0.1.0"
 edition = "2021"
 license = "GPL-3.0-only"
+
+[profile.release]
+lto = true
+codegen-units = 1

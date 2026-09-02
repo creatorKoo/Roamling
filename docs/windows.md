@@ -180,8 +180,8 @@ macOS에서 실제로 문제를 일으키기 시작하거나, `RoamlingMac`이 �
 
 | 단위 | 내용 | 줄 | 모양 |
 |---|---|---:|---|
-| 1 | Geometry + CoordinateSpace | 175 | Rust 내부용 |
-| 2 | BasicSafeZone + DesktopWorld + DisplayTopology | 499 | A |
+| 1 | Geometry + CoordinateSpace ✅ 2026-09-02 | 175 | Rust 내부용 |
+| 2 | BasicSafeZone + DesktopWorld + DisplayTopology ✅ 2026-09-03 | 499 | A |
 | 3 | PlacementDirector + InterestPlacement + VisualEmptiness + CandidateScoring | 747 | A |
 | 4 | AttentionModel + ReactionPolicy + Activity | 289 | A |
 | 5 | Movement + Pointer + Behavior + Timing + Tuning | 603 | **B** |
@@ -189,6 +189,16 @@ macOS에서 실제로 문제를 일으키기 시작하거나, `RoamlingMac`이 �
 
 `RoamlingCore`의 잎이 얇아서 이 순서가 성립한다 — `MovementController`는 `WorldPoint`와
 `WorldVector`만 알고 `DesktopWorld`를 모른다.
+
+**단위 2에서 macOS가 처음 갈아탔고, 배선이 예상보다 단순했다.** dylib 대신 **정적 링크**를
+쓰면 W0m.3이 측정한 rpath·`install_name` 교정·재서명이 전부 필요 없다 — 실행 바이너리에
+Rust 심볼 109개가 들어가고 동적 의존은 0, 번들은 8.4 → 9.0 MB. `scripts/build-rust-core.sh`가
+uniffi 바인딩을 생성하고 정적 아카이브를 놓으며, `test.sh`와 `build-app.sh`가 먼저 부른다.
+C 모듈은 `systemLibrary` 타깃이어야 한다 — `-I` 플래그는 그 타깃 안에서만 유효해서
+`RoamlingEngine`까지 전파되지 않는다.
+
+전환 확인은 **두 구현을 나란히 돌려 비교하는 테스트**가 한다(200개 배치, 400+ zone과 rest
+destination 전부 일치). Swift 원본은 그 대조군으로 남아 있고, 지울 때 이 테스트도 같이 간다.
 
 ### 양 플랫폼이 붙는 방식이 다르다
 

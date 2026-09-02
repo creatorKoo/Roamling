@@ -33,6 +33,9 @@ if [[ -n "${ROAMLING_SWIFT_SDK:-}" ]]; then
 fi
 
 cd "$REPOSITORY_DIR"
+# The Swift build links the Rust core statically, so it has to exist first.
+"$REPOSITORY_DIR/scripts/build-rust-core.sh"
+
 swift build -c "$CONFIGURATION" --product Roamling "${SWIFT_ARGS[@]}"
 BIN_DIR="$(swift build -c "$CONFIGURATION" "${SWIFT_ARGS[@]}" --show-bin-path)"
 APP_DIR="$REPOSITORY_DIR/build/Roamling.app"

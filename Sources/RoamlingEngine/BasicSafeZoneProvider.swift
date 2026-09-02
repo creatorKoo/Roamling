@@ -12,6 +12,6 @@ public final class BasicSafeZoneProvider: SafeZoneProviding {
     public init() {}
 
     public func safeZones(in world: DesktopWorldSnapshot) -> [SafeZone] {
-        BasicSafeZonePlanner.safeZones(in: world)
+        RustCore.safeZones(in: world)
     }
 }

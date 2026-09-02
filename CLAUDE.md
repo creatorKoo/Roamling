@@ -16,9 +16,13 @@ swift run Roamling
 ./scripts/build-app.sh release # build/Roamling.app (ad-hoc codesign)
 ```
 
-**Rust 툴체인이 필요하다** (rustup, `~/.cargo/bin`이 PATH에). `rust/roamling-core`가
-Swift Core를 한 단위씩 넘겨받는 중이고 `scripts/test.sh`가 두 스위트를 다 돌린다. cargo가
-없으면 경고만 내고 넘어가지만, **넘어간 만큼 포팅이 검증되지 않은 것이다.**
+**Rust 툴체인이 필수다** (rustup, `~/.cargo/bin`이 PATH에). `rust/roamling-core`가 Swift
+Core를 한 단위씩 넘겨받는 중이고, **앱이 이미 그걸 링크한다** — `scripts/test.sh`와
+`build-app.sh`가 `scripts/build-rust-core.sh`를 먼저 부르므로 cargo 없이는 빌드가 안 된다.
+
+`build-rust-core.sh`는 uniffi 바인딩을 `Sources/RoamlingCoreRs`와 `Sources/CRoamlingCoreFFI`에
+생성한다. **둘 다 빌드 산출물이라 git 미추적이고 손으로 고치지 않는다.** 정적 링크라
+번들에 dylib이 없고 rpath·install_name·재서명이 필요 없다.
 
 `build-app.sh`는 시작할 때 git-ignore된 `scripts/signing.env`가 있으면 source한다.
 거기에 `ROAMLING_CODESIGN_IDENTITY`를 넣어 두면 매번 환경변수를 지정하지 않아도 된다.
@@ -53,6 +57,7 @@ Localizable.strings`에 있고 `localized(_:)` / `localizedFormat(_:_:)`로 읽�
 ```text
 RoamlingCore/     OS 비의존. geometry, world, behavior, attention, reaction
 rust/roamling-core/  같은 것의 Rust 판. 한 단위씩 옮기는 중 (docs/windows.md 3절)
+RoamlingCoreRs/   생성된 uniffi 바인딩. Engine이 RustCore.swift로 감싸 쓴다
 RoamlingPet/      Petdex manifest, atlas runtime, built-in mascot, fallback
                   이미지는 PetImage(RGBA8)다. 디코딩은 PetImageSourcing 뒤에 있다
 RoamlingSources/  ClaudeCode / Codex activity adapter + BSD 소켓 loopback transport

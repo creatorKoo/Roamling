@@ -1284,7 +1284,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             focus: world.focus,
             safeZones: zones
         )
-        restDestination = BasicSafeZonePlanner.destination(
+        restDestination = RustCore.restDestination(
             in: restWorld,
             currentPosition: movement.position,
             pointerPosition: pointerPosition,
