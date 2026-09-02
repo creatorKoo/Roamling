@@ -209,20 +209,31 @@ public struct DisplayTopology: Sendable {
 
     /// Complete graph + Dijkstra. Touching displays have a tiny edge cost, so
     /// a chain of real seams wins over a direct jump across an intervening gap.
+    ///
+    /// Ties go to the lower display index, and that has to be said out loud:
+    /// this used to walk a `Set`, whose iteration order Swift randomizes per
+    /// process, so two equal-cost routes were chosen by coin flip. A symmetric
+    /// desk -- one display either side -- made the pet set off left or right
+    /// at random for the same journey, differently each launch.
     private func shortestDisplayPath(from source: Int, to target: Int) -> [Int] {
         let count = displays.count
         var distance = Array(repeating: Double.infinity, count: count)
         var previous = Array<Int?>(repeating: nil, count: count)
-        var unvisited = Set(displays.indices)
+        var visited = [Bool](repeating: false, count: count)
         distance[source] = 0
 
-        while !unvisited.isEmpty {
-            guard let current = unvisited.min(by: { distance[$0] < distance[$1] }) else { break }
-            unvisited.remove(current)
+        while true {
+            var current: Int?
+            for index in 0..<count where !visited[index] {
+                if let best = current, distance[index] >= distance[best] { continue }
+                current = index
+            }
+            guard let current else { break }
+            visited[current] = true
             if current == target { break }
             if !distance[current].isFinite { break }
 
-            for neighbor in unvisited where neighbor != current {
+            for neighbor in 0..<count where !visited[neighbor] && neighbor != current {
                 let crossing = portal(from: displays[current], to: displays[neighbor])
                 let weight = max(1, crossing.gap)
                 let candidate = distance[current] + weight

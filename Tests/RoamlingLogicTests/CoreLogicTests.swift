@@ -99,6 +99,44 @@ func coreLogicTests() -> [LogicTest] {
             // A session that will never speak again has to stop owning the pet.
             try expect(ActivityLifetime.hasFallenSilent(lastEventAt: heard, now: heard + 600))
         },
+        LogicTest(name: "two routes of equal cost pick the same one every launch") {
+            // This failed about half the time before the fix, differently each
+            // run: Dijkstra walked a Set, and Swift randomizes Set order per
+            // process, so a symmetric desk sent the pet left or right by coin
+            // flip on the same journey.
+            func square(_ id: String, _ x: Double, _ y: Double) -> DisplaySnapshot {
+                DisplaySnapshot(
+                    id: id,
+                    name: id,
+                    frame: WorldRect(x: x, y: y, width: 100, height: 100),
+                    visibleFrame: WorldRect(x: x, y: y, width: 100, height: 100),
+                    scale: 1
+                )
+            }
+            // S and T face each other across a gap of 300; A and B are mirrored
+            // detours costing 283.84 each, so the two best routes tie exactly.
+            let topology = DisplayTopology(displays: [
+                square("S", 0, 0), square("T", 0, -400),
+                square("A", -200, -200), square("B", 200, -200)
+            ])
+            let route = topology.route(
+                from: WorldPoint(x: 50, y: 50),
+                to: WorldPoint(x: 50, y: -350)
+            )
+            try expect(
+                route.displayIDs == ["S", "A", "T"],
+                "expected the lower display index to win, got \(route.displayIDs)"
+            )
+            // Same answer however many times it is asked, within a run too.
+            for _ in 0..<50 {
+                let again = topology.route(
+                    from: WorldPoint(x: 50, y: 50),
+                    to: WorldPoint(x: 50, y: -350)
+                )
+                try expect(again.displayIDs == route.displayIDs)
+                try expect(again.waypoints == route.waypoints)
+            }
+        },
         LogicTest(name: "the tuning panel cannot offer a value the model refuses") {
             // The panel used to restate these bounds, and one of them drifted:
             // it capped catchArmDistance at 140 while the model allowed up to
