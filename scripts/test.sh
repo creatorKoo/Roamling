@@ -33,6 +33,7 @@ PORTABLE_DIRS=(
   Sources/RoamlingPet
   Sources/RoamlingSources
   Sources/RoamlingEngine
+  Sources/RoamlingShell
 )
 if grep -rnE --include='*.swift' \
   '^[[:space:]]*(@_exported[[:space:]]+)?import[[:space:]]+(AppKit|Cocoa|SwiftUI|ScreenCaptureKit|ApplicationServices|Quartz|CoreGraphics|ImageIO|CoreImage)\b' \

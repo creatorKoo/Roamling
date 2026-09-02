@@ -342,7 +342,7 @@ shipped `mochi-v3` 패키지(96) · placeholder(88). 크롭에 1픽셀 오프셋
 `NWListener` → 이식 가능한 loopback HTTP listener. curl 경로 OS 분기. `PetCatalog` 검색 경로에
 `%APPDATA%\Roamling\Pets` 추가.
 
-### W3b — 셸 표면을 데이터로 (macOS, 동작 변화 0)
+### W3b — 셸 표면을 데이터로 (macOS, 동작 변화 0) ✅ 완료 2026-09-02
 
 **W4가 두 번째 셸을 만드는 순간 갈라질 것들을 먼저 모은다.** W1이 런타임에 한 것과 같은
 일을 UI 표면에 한다 — 구조는 포터블 모듈에 데이터로 두고, 각 플랫폼은 렌더만 한다.
@@ -378,6 +378,23 @@ Windows 셸이 못 읽는다. `LocalizedText.swift`는 이미 Foundation 20줄�
 **올바르게 플랫폼에 남는 것** (옮기지 않는다): provider 7종, 오버레이 패널,
 `MacPlaceholderArt`, `MacPetImageSource`, `MacPlatform.makeServices()`, 그리고 앱 수명주기
 (`NSApp.setActivationPolicy(.accessory)`, terminate).
+
+**실제로 생긴 것** (2026-09-02):
+
+- `RoamlingShell` — `ShellMenu.items(for:)`(런타임 상태의 순수 함수), `MenuAction`(닫힌 집합),
+  `ShellController.perform`, `ShellPrompt`, 그리고 문자열 91개. **위젯은 하나도 없다.**
+- `RoamlingAppDelegate`는 608줄 → **189줄**. 남은 것은 렌더와 모달뿐이다.
+- `RuntimeTuningKey` + `RuntimeTuning.limits(for:)`(Core) — 슬라이더 범위의 정본.
+  `catchArmDistance`가 실제로 넓어졌다: pointer awareness 360에서 이제 300을 받는다.
+- 테스트 5개가 붙었다. 메뉴가 값이 된 덕에 **처음으로 검증된다** — 펫·크기가 정확히 하나만
+  체크되는지, 토글이 자기가 뒤집는 상태를 보고하는지, 설정·권한을 건드리는 동작이 전부
+  먼저 묻고 되돌릴 수 있는 동작은 묻지 않는지, 번역 안 된 키가 제목으로 새지 않는지.
+  전체 133개 통과.
+- import 게이트가 `Sources/RoamlingShell`까지 덮는다.
+
+**남은 것**: `RuntimeTuningWindowController`(SwiftUI 257줄)의 *레이아웃*은 아직 macOS 전용이다.
+필드 목록·범위·단위는 Core와 Shell이 들고 있으므로 Windows는 렌더러만 쓰면 되지만, 섹션 제목과
+순서는 아직 SwiftUI 뷰 안에 있다. W4에서 트레이를 만들 때 같이 뺀다.
 
 **Exit**: W1·W2와 같다 — 메뉴·튜닝 패널·알림이 실사용에서 전과 같고, `catchArmDistance`만
 Core의 범위대로 넓어진다(이건 의도된 수정이므로 따로 확인받는다).
@@ -545,7 +562,7 @@ MVP 4 exit rule 충족  ✅ 2026-09-02
    (macOS 머신) W1 ✅ 2026-09-02 -> W2 ✅ 2026-09-02 -> W2b
         |
         v
-   W3 -> W3b -> W4 -> W5 -> W6 -> W7
+   W3 -> W3b ✅ -> W4 -> W5 -> W6 -> W7
         ^
         +-- W2b(디코더)는 여기까지 미룬다. 언어 결정과 같은 결정이다.
              ^                ^

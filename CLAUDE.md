@@ -32,15 +32,16 @@ compiler/SDK mismatch가 나면 두 script 모두 `ROAMLING_SWIFT_SDK=/path/to/M
 
 ## 사용자에게 보이는 문자열
 
-menu, alert, tuning panel copy는 전부 `Sources/RoamlingMac/Resources/{en,ko}.lproj/
-Localizable.strings`에 있고 `localized(_:)` / `localizedFormat(_:_:)`로 읽는다. 새 UI
+menu, alert, tuning panel copy는 전부 `Sources/RoamlingShell/Resources/{en,ko}.lproj/
+Localizable.strings`에 있고 `localized(_:)` / `localizedFormat(_:_:)`로 읽는다. **메뉴 트리와
+알림 문구도 같은 모듈(`ShellMenu` · `ShellPrompt`)에 있다** — AppKit은 렌더만 한다. 새 UI
 문자열을 넣을 때는 **두 파일에 같은 key를 넣는다.** en이 base라 ko를 빠뜨리면 조용히
 영어로 나온다. 언어 분기 코드는 쓰지 않는다 — 한국어는 ko.lproj, 나머지는 bundle이
 알아서 en으로 떨어진다.
 
 제품명(`Roamling`, `Claude Code`, `Codex`)은 번역하지 않는다.
 
-`RoamlingMac`도 resource bundle을 가지므로 `scripts/build-app.sh`가 `$BIN_DIR/*.bundle`을
+`RoamlingShell`과 `RoamlingPet`이 resource bundle을 가지므로 `scripts/build-app.sh`가 `$BIN_DIR/*.bundle`을
 전부 복사한다. 빠지면 `Bundle.module`이 런타임에 trap한다.
 
 ## 모듈 경계
@@ -51,12 +52,13 @@ RoamlingPet/      Petdex manifest, atlas runtime, built-in mascot, fallback
                   이미지는 PetImage(RGBA8)다. 디코딩은 PetImageSourcing 뒤에 있다
 RoamlingSources/  ClaudeCode / Codex activity adapter + loopback transport
 RoamlingEngine/   RoamlingRuntime — tick loop, placement, activity orchestration
-RoamlingMac/      AppKit display, pointer, overlay, menu, app delegate
+RoamlingShell/    메뉴 트리·알림 문구·Localizable.strings. 위젯은 없다
+RoamlingMac/      AppKit display, pointer, overlay, 메뉴 렌더러, app delegate
 RoamlingApp/      entry point
 ```
 
-**Core·Pet·Sources·Engine 넷은 window system도 Apple 이미지 프레임워크도 import하지
-않는다.** macOS SDK에 다 있어서 컴파일러는 이걸 못 잡는다 — `scripts/test.sh`가 grep으로
+**Core·Pet·Sources·Engine·Shell 다섯은 window system도 Apple 이미지 프레임워크도
+import하지 않는다.** macOS SDK에 다 있어서 컴파일러는 이걸 못 잡는다 — `scripts/test.sh`가 grep으로
 막고, 걸리면 non-zero로 끝난다. 런타임이 플랫폼에 닿는 통로는 `PlatformServices` 하나이고, macOS 쪽 조립은
 `MacPlatform.makeServices()` 한 함수에 모여 있다.
 
