@@ -48,24 +48,25 @@ Localizable.strings`에 있고 `localized(_:)` / `localizedFormat(_:_:)`로 읽�
 ```text
 RoamlingCore/     OS 비의존. geometry, world, behavior, attention, reaction
 RoamlingPet/      Petdex manifest, atlas runtime, built-in mascot, fallback
+                  이미지는 PetImage(RGBA8)다. 디코딩은 PetImageSourcing 뒤에 있다
 RoamlingSources/  ClaudeCode / Codex activity adapter + loopback transport
 RoamlingEngine/   RoamlingRuntime — tick loop, placement, activity orchestration
 RoamlingMac/      AppKit display, pointer, overlay, menu, app delegate
 RoamlingApp/      entry point
 ```
 
-**Core·Pet·Sources·Engine 넷은 window system을 import하지 않는다.** macOS SDK에 AppKit이
-있어서 컴파일러는 이걸 못 잡는다 — `scripts/test.sh`가 grep으로 막고, 걸리면 non-zero로
-끝난다. 런타임이 플랫폼에 닿는 통로는 `PlatformServices` 하나이고, macOS 쪽 조립은
+**Core·Pet·Sources·Engine 넷은 window system도 Apple 이미지 프레임워크도 import하지
+않는다.** macOS SDK에 다 있어서 컴파일러는 이걸 못 잡는다 — `scripts/test.sh`가 grep으로
+막고, 걸리면 non-zero로 끝난다. 런타임이 플랫폼에 닿는 통로는 `PlatformServices` 하나이고, macOS 쪽 조립은
 `MacPlatform.makeServices()` 한 함수에 모여 있다.
 
 의존 방향은 항상 바깥 → Core다. Core에 AppKit이나 agent-specific 타입을 넣지 않는다.
 자세한 근거는 `docs/architecture.md`, MVP 0~4의 acceptance criteria와 실제로 실린 것은
 `docs/mvp.md`에 있다. **MVP 사다리는 4에서 멈췄고(2026-09-02 완료), W1 Runtime 추출도 같은 날
-닫혔다. 현재 게이트는 `docs/windows.md`의 W2 — 이미지 파이프라인 탈-CoreGraphics**다.
-exit rule이 있으므로 사용자가 실사용 확인을 하기 전에 다음 게이트로 넘어가지 않는다.
-W2의 exit는 W1과 같이 "동작이 달라진 것을 사용자가 느끼지 못한다"에 렌더 프레임 바이트
-비교가 더해진 것이므로, 리팩터 게이트 중에는 **동작·타이밍·기본값을 고치지 않는다.**
+닫혔다. W2(이미지 파이프라인 탈-CoreGraphics)도 2026-09-02에 구현이 끝났고 사용자의
+실사용 확인만 남았다.** exit rule이 있으므로 그 확인 전에 다음 게이트로 넘어가지 않는다.
+리팩터 게이트 중에는 **동작·타이밍·기본값을 고치지 않는다** — W2의 exit에는 렌더 프레임
+336개의 바이트 비교가 포함돼 있고, 그 픽스처는 `Tests/RoamlingLogicTests/PreW2FrameHashes.swift`다.
 
 **이 경계가 Windows port의 전제다.** `docs/windows.md`에 모듈별 실측 이식 비용, 언어
 선택 네 가지의 비교, 그리고 2026-09-01에 Windows에서 실행한 W0 스파이크 결과가 있다.
