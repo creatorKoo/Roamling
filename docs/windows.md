@@ -935,15 +935,77 @@ geometry·world 282줄이다. uniffi가 만드는 Swift 바인딩 989줄은 **�
 Rust 쪽이 **유일한** 정의가 되므로 이 충돌은 사라진다 — 다만 그 말은 곧 **전환이 부분적일 수
 없다는 뜻**이다. 두 벌을 나란히 두면 매 참조를 한정해야 한다.
 
+### W0m.3 — 디코더 스파이크: Rust가 B3를 없애는가 (2026-09-02)
+
+W2가 디코딩을 `PetImageSourcing` 뒤로 밀어 둔 덕에 **런타임 1,700줄을 옮기지 않고** D의
+핵심 질문 셋을 잴 수 있었다. 바꾼 Swift는 `RustPetImageSource` 한 구조체뿐이고 나머지
+앱은 자기가 무엇으로 디코드되는지 모른다.
+
+**1. 바이트 동일한가 → 그렇다.** `image` 0.25.10으로 디코드한 결과가 ImageIO와
+**248프레임 전부 일치**한다(내장 mochi 96 · fat-mochi 56 · 패키지 mochi-v3 96;
+placeholder 88은 플랫폼 드로잉이라 제외). W2의 게이트를 그대로 돌린 것이다.
+
+한 가지는 맞춰야 했다 — **`image`는 straight alpha, ImageIO는 premultiplied**를 준다.
+Rust 쪽에서 `(c * a + 127) / 255`로 반올림 곱을 해야 일치한다. 이걸 Swift에서 하면 경계를
+건너는 것이 `PetImage`가 약속한 것과 달라지므로 Rust 안에서 한다.
+
+**그리고 C가 없다.** `image-webp` · `png` · `zlib-rs` 전부 순수 Rust다. 4절 W2b가 A 경로에
+적어둔 "libwebp + miniz 약 4만 줄 벤더링"이 **D에서는 `Cargo.toml` 한 줄**이 된다.
+
+**2. 11.5 MB를 건네는 비용 → 감당된다.** 아틀라스는 1.15 MB로 실려 11.5 MB로 풀린다.
+
+| | ms/decode |
+|---|---:|
+| ImageIO (지금) | **19.87** |
+| Rust native (FFI 없음) | 24.09 |
+| Rust via uniffi | **39.37** |
+
+FFI 세금은 **11.5 MB당 15.3 ms**(약 750 MB/s)다. 어제 잰 "크로싱은 27 ns로 공짜, 비싼 것은
+직렬화"와 같은 결론이고 이번엔 최악의 페이로드에서 확인했다. **디코드는 실행당 두 번
+(표준 시트 + 확장 시트) 일어나고 그 뒤로는 없다.** 시작이 40 ms 늘어난다는 뜻이라 무의미하다.
+Rust 자체가 ImageIO보다 21% 느린 것도 같은 이유로 무의미하다.
+
+**3. 두 언어 빌드와 서명 → 통과한다.** 이게 12절이 남긴 질문 (2)번이었고 제일 모르던
+부분이다. dylib을 `Contents/Frameworks/`에 넣고, identity로 서명하고,
+`codesign --verify --deep --strict`가 통과하고, **번들 안의 서명된 실행 파일이 rpath로
+Rust dylib을 찾아 실제로 돌았다.**
+
+함정은 하나였고 반드시 밟는다 — **Rust cdylib의 기본 `install_name`이 빌드 머신의 절대
+경로다**(`/Users/.../target/release/deps/lib....dylib`). 그대로 배포하면 다른 머신에서
+로드에 실패한다. `install_name_tool -id @rpath/...` 또는
+`-Clink-arg=-install_name,@rpath/...`로 고치고, 실행 파일에
+`-rpath @executable_path/../Frameworks`를 준다. 그 밖의 의존은 `libiconv`와 `libSystem`
+둘뿐이라 추가로 실을 것이 없다.
+
+비용: dylib 0.88 MB + uniffi Swift 바인딩 dylib 0.17 MB = **번들 +1.08 MB**(8.4 MB → 11 MB,
+디버그 심볼 포함). cold `cargo build --release` 99초.
+
+**판정: D의 디코더 논거는 실측으로 섰다.** WebP가 Windows에서 공짜가 아니라는 사실(B3)이
+A에서는 4만 줄 벤더링이고 D에서는 의존성 한 줄이다. 그리고 그것을 확인하는 데 제품 코드를
+한 줄도 옮기지 않았다 — W1의 `PlatformServices`와 W2의 `PetImageSourcing`이 만든 이음새
+덕이다.
+
+**아직 재지 않은 것**: `AXUIElement` 캐럿과 ScreenCaptureKit 한 프레임을 objc2로 실제로
+뜨는 것(12절 W0m.1의 공백 그대로), 그리고 `RoamlingEngine` 1,700줄을 옮길 때 W0m.2에서 본
+tie-breaking 함정을 테스트가 전부 잡아 주는지. **D는 macOS 셸을 그대로 두므로 첫 번째는
+D에 필요 없다** — C에만 남는 공백이다.
+
 ### 선택지 표에 다섯 번째 줄
 
-| | 로직 | macOS 셸 | Windows 셸 | Swift on Windows 필요? | macOS 재검증 |
-|---|---|---|---|---|---|
-| **A** (현재) | Swift | Swift/AppKit 그대로 | Swift/`WinSDK` 신규 | 예 | 없음 |
-| **A′** | Swift DLL | Swift/AppKit 그대로 | C# | 예 | 없음 |
-| **B** | C# 2벌 | Swift/AppKit 그대로 | C# | 아니오 | 없음 |
-| **C** | Rust 신규 | **Rust/objc2 신규** | Rust/`windows-rs` | 아니오 | **전부** |
-| **D. 제3길** | Rust 신규 | **Swift/AppKit 그대로** | Rust/`windows-rs` | **아니오** | **없음** |
+| | 로직 | macOS 셸 | Windows 셸 | Swift on Windows 필요? | macOS 재검증 | Windows 배포 | WebP(B3) |
+|---|---|---|---|---|---|---|---|
+| **A** (현재) | Swift | Swift/AppKit 그대로 | Swift/`WinSDK` 신규 | 예 | 없음 | 17파일 56 MB | libwebp 벤더링 |
+| **A′** | Swift DLL | Swift/AppKit 그대로 | C# | 예 | 없음 | + .NET 런타임 | libwebp 벤더링 |
+| **B** | C# 2벌 | Swift/AppKit 그대로 | C# | 아니오 | 없음 | .NET | .NET 기본 제공 |
+| **C** | Rust 신규 | **Rust/objc2 신규** | Rust/`windows-rs` | 아니오 | **전부** | **1파일** | `image` 한 줄 |
+| **D. 제3길** | Rust 신규 | **Swift/AppKit 그대로** | Rust/`windows-rs` | **아니오** | **없음** | **1파일** | `image` 한 줄 |
+
+**단일 파일은 Windows에서만 의미가 있다.** macOS는 언어와 무관하게 `.app` 번들이어야 한다 —
+`LSUIElement`(Dock 없는 상주앱), TCC가 권한을 붙이는 `CFBundleIdentifier`,
+`NSScreenCaptureUsageDescription`, 서명·notarize가 전부 번들 전제다. **그리고 그 Windows
+이득은 C만의 것이 아니다** — D의 Windows 셸도 Rust라 Swift가 없다. 11절 1번이
+"21 MB → 0.15 MB가 11,481줄 재작성 값어치가 있나 → 아니오"라고 답했을 때, 그 이득을 얻으려고
+macOS 셸까지 버릴 필요는 없다는 점을 놓쳤다.
 
 D는 C에서 **측정되지 않은 절반을 뺀 것**이다. 로직은 결정적이고 테스트 126개가 덮고 있어
 포팅이 검증 가능하지만, 셸은 사용자가 3-display 앞에 앉아 닫은 값들이 사는 곳이라 재검증이
