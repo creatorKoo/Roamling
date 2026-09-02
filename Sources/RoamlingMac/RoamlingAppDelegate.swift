@@ -17,7 +17,7 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        let runtime = RoamlingRuntime()
+        let runtime = RoamlingRuntime(services: MacPlatform.makeServices())
         self.runtime = runtime
         runtime.start()
         runtime.repairClaudeCodeIntegrationIfNeeded()

@@ -4,10 +4,11 @@
 import Foundation
 import RoamlingCore
 
-/// MVP 0.7's permission-free provider. AppKit-specific menu bar and Dock
-/// exclusion has already been normalized into each display's `visibleFrame`.
+/// MVP 0.7's permission-free provider. Platform-specific menu bar, Dock and
+/// taskbar exclusions have already been normalized into each display's
+/// `visibleFrame`, so what is left is arithmetic every platform shares.
 @MainActor
-public final class MacBasicSafeZoneProvider: SafeZoneProviding {
+public final class BasicSafeZoneProvider: SafeZoneProviding {
     public init() {}
 
     public func safeZones(in world: DesktopWorldSnapshot) -> [SafeZone] {

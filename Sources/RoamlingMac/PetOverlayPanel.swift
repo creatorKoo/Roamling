@@ -3,9 +3,13 @@
 
 import AppKit
 import RoamlingCore
+import RoamlingEngine
 
+/// AppKit screen points, before anyone has decided what they mean. Stays
+/// inside this file: `MacOverlayProvider` converts and forwards world points
+/// to the runtime.
 @MainActor
-public protocol PetOverlayViewDelegate: AnyObject {
+protocol PetOverlayViewDelegate: AnyObject {
     func petOverlayMouseDown(screenPoint: NSPoint)
     func petOverlayDragged(screenPoint: NSPoint, distance: CGFloat)
     func petOverlayMouseUp(screenPoint: NSPoint, wasDragged: Bool)
@@ -13,7 +17,7 @@ public protocol PetOverlayViewDelegate: AnyObject {
 
 @MainActor
 public final class PetOverlayView: NSView {
-    public weak var delegate: PetOverlayViewDelegate?
+    weak var delegate: PetOverlayViewDelegate?
 
     public var hitRegionScale: Double = 1 {
         didSet {
@@ -129,23 +133,26 @@ public final class PetOverlayPanel: NSPanel {
 }
 
 @MainActor
-public final class MacOverlayProvider: OverlayProviding {
+public final class MacOverlayProvider: PetOverlayProviding, PetOverlayViewDelegate {
     public static let baseSize = WorldSize(width: 96, height: 104)
 
     public let view: PetOverlayView
     public let panel: PetOverlayPanel
 
     public private(set) var scale: Double
-    public var coordinateSpace: DesktopCoordinateSpace
+    public weak var inputHandler: (any PetOverlayInputHandling)?
+
+    private let readCoordinateSpace: () -> DesktopCoordinateSpace
+    private var coordinateSpace: DesktopCoordinateSpace { readCoordinateSpace() }
     private var worldPosition: WorldPoint = .zero
     private var interactionEnabled = false
 
     public init(
-        coordinateSpace: DesktopCoordinateSpace,
         scale: Double = 1,
-        hitRegionScale: Double = 1
+        hitRegionScale: Double = 1,
+        coordinateSpace: @escaping () -> DesktopCoordinateSpace
     ) {
-        self.coordinateSpace = coordinateSpace
+        readCoordinateSpace = coordinateSpace
         self.scale = scale.clamped(to: 0.6...1.8)
         let size = NSSize(
             width: Self.baseSize.width * self.scale,
@@ -154,6 +161,29 @@ public final class MacOverlayProvider: OverlayProviding {
         view = PetOverlayView(frame: NSRect(origin: .zero, size: size))
         view.hitRegionScale = hitRegionScale
         panel = PetOverlayPanel(contentView: view, size: size)
+        view.delegate = self
+    }
+
+    private func worldPoint(fromScreen point: NSPoint) -> WorldPoint {
+        coordinateSpace.pointFromAppKit(WorldPoint(x: Double(point.x), y: Double(point.y)))
+    }
+
+    func petOverlayMouseDown(screenPoint: NSPoint) {
+        inputHandler?.petOverlayPointerDown(at: worldPoint(fromScreen: screenPoint))
+    }
+
+    func petOverlayDragged(screenPoint: NSPoint, distance: CGFloat) {
+        inputHandler?.petOverlayPointerDragged(
+            to: worldPoint(fromScreen: screenPoint),
+            distance: Double(distance)
+        )
+    }
+
+    func petOverlayMouseUp(screenPoint: NSPoint, wasDragged: Bool) {
+        inputHandler?.petOverlayPointerUp(
+            at: worldPoint(fromScreen: screenPoint),
+            wasDragged: wasDragged
+        )
     }
 
     public var objectSize: WorldSize {

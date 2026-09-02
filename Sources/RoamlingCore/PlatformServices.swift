@@ -23,6 +23,23 @@ public protocol DisplayProviding: AnyObject {
     func currentDisplaySet() -> DisplaySnapshotSet
 }
 
+/// The one coordinate space every provider reads from and the runtime alone
+/// writes to.
+///
+/// Providers need the current space to convert what the OS hands them, and
+/// the space is only known after a display reading -- which the runtime does,
+/// because it is the one that decides an empty reading means "keep the last
+/// space" rather than "the desktop is gone". Sharing one box breaks that
+/// circle without letting anyone else move the origin.
+@MainActor
+public final class CoordinateSpaceSource {
+    public var current: DesktopCoordinateSpace
+
+    public init(_ current: DesktopCoordinateSpace = DesktopCoordinateSpace(worldTop: 0)) {
+        self.current = current
+    }
+}
+
 /// Tells the caller that the displays have changed shape. Kept apart from
 /// `DisplayProviding` because a platform can answer "what is on screen now"
 /// without being able to say "and tell me when that changes" -- a fake in a

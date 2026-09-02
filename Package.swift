@@ -16,7 +16,8 @@ let package = Package(
         .executable(name: "RoamlingLogicTests", targets: ["RoamlingLogicTests"]),
         .library(name: "RoamlingCore", targets: ["RoamlingCore"]),
         .library(name: "RoamlingPet", targets: ["RoamlingPet"]),
-        .library(name: "RoamlingSources", targets: ["RoamlingSources"])
+        .library(name: "RoamlingSources", targets: ["RoamlingSources"]),
+        .library(name: "RoamlingEngine", targets: ["RoamlingEngine"])
     ],
     targets: [
         .target(name: "RoamlingCore"),
@@ -31,9 +32,19 @@ let package = Package(
                 .linkedFramework("ImageIO")
             ]
         ),
+        // The app's orchestration, with no window system under it. The only
+        // framework it links is CoreGraphics, for the CGImage that RoamlingPet
+        // still hands out; W2 takes that away and leaves this pure Swift.
+        .target(
+            name: "RoamlingEngine",
+            dependencies: ["RoamlingCore", "RoamlingPet", "RoamlingSources"],
+            linkerSettings: [
+                .linkedFramework("CoreGraphics")
+            ]
+        ),
         .target(
             name: "RoamlingMac",
-            dependencies: ["RoamlingCore", "RoamlingPet", "RoamlingSources"],
+            dependencies: ["RoamlingCore", "RoamlingPet", "RoamlingSources", "RoamlingEngine"],
             resources: [
                 .process("Resources")
             ],

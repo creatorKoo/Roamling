@@ -1,13 +1,14 @@
 // SPDX-FileCopyrightText: 2026 GooBeom Jeoung
 // SPDX-License-Identifier: GPL-3.0-only
 
-import AppKit
+import Foundation
 import RoamlingCore
+import RoamlingEngine
 import RoamlingPet
 import RoamlingSources
 
 @MainActor
-public final class RoamlingRuntime: PetOverlayViewDelegate {
+public final class RoamlingRuntime: PetOverlayInputHandling {
     private enum DefaultsKey {
         static let roaming = "roamling.roaming"
         static let avoidPointer = "roamling.avoidPointer"
@@ -71,23 +72,31 @@ public final class RoamlingRuntime: PetOverlayViewDelegate {
     public var codexIntegrationStatus: CodexIntegrationStatus { codexInstaller.status() }
     public var codexReceiverState: CodexReceiverState { codexSource.state }
 
-    private let displayProvider = MacDisplayProvider()
-    private let safeZoneProvider = MacBasicSafeZoneProvider()
-    private let userIdleProvider = MacUserIdleProvider()
-    private let captureProvider = MacCaptureProvider()
-    private var pointerProvider: MacPointerProvider!
-    private var windowProvider: MacWindowProvider!
-    private var focusProvider: MacFocusProvider!
+    private let services: PlatformServices
+
+    private var displayProvider: any DisplayProviding { services.display }
+    private var displayChanges: any DisplayChangeObserving { services.displayChanges }
+    private var safeZoneProvider: any SafeZoneProviding { services.safeZone }
+    private var userIdleProvider: any UserIdleProviding { services.userIdle }
+    private var captureProvider: any CaptureProviding { services.capture }
+    private var pointerProvider: any PointerProviding { services.pointer }
+    private var windowProvider: any WindowProviding { services.window }
+    private var focusProvider: any FocusProviding { services.focus }
+    private var overlay: any PetOverlayProviding { services.overlay }
+
     private let catalog: PetCatalog
     private let loader = PetLoader()
-    private let overlay: MacOverlayProvider
     private let claudeCodeSource: ClaudeCodeSource
     private let claudeCodeInstaller: ClaudeCodeHookInstaller
     private let codexSource: CodexSource
     private let codexInstaller: CodexHookInstaller
 
     private var displays: [DisplaySnapshot]
-    private var coordinateSpace: DesktopCoordinateSpace
+    /// Stored in the services so the providers see every move of the origin.
+    private var coordinateSpace: DesktopCoordinateSpace {
+        get { services.coordinateSpace.current }
+        set { services.coordinateSpace.current = newValue }
+    }
     private var world: DesktopWorldSnapshot
     private var movement: MovementController
     private var behavior: BehaviorController
@@ -156,7 +165,7 @@ public final class RoamlingRuntime: PetOverlayViewDelegate {
     private var activityArrivalReaction: CompanionReaction?
     private var running = false
 
-    public init() {
+    public init(services: PlatformServices) {
         let defaults = UserDefaults.standard
         defaults.register(defaults: [
             DefaultsKey.roaming: true,
@@ -181,33 +190,27 @@ public final class RoamlingRuntime: PetOverlayViewDelegate {
             loader: PetLoader()
         )
 
-        let displayProvider = MacDisplayProvider()
-        let displaySet = displayProvider.currentDisplaySet()
+        let displaySet = services.display.currentDisplaySet()
         let initialWorld = DesktopWorldSnapshot(displays: displaySet.displays)
-        let objectScale = defaults.double(forKey: DefaultsKey.scale).clamped(to: 0.6...1.8)
-        let objectSize = WorldSize(
-            width: MacOverlayProvider.baseSize.width * objectScale,
-            height: MacOverlayProvider.baseSize.height * objectScale
-        )
+        // Before anything asks the overlay where it is: the providers convert
+        // through this box, and the overlay is about to be positioned.
+        services.coordinateSpace.current = displaySet.coordinateSpace
+        services.overlay.setScale(defaults.double(forKey: DefaultsKey.scale))
+        services.overlay.setHitRegionScale(runtimeTuning.hitRegionScale)
         let initialPosition = Self.initialPosition(
             defaults: defaults,
             world: initialWorld,
-            objectSize: objectSize
+            objectSize: services.overlay.objectSize
         )
 
+        self.services = services
         self.catalog = catalog
         installedPets = descriptors
         asset = initialAsset
         self.selectedBuiltInPet = initialAsset.packageURL == nil ? selectedBuiltInPet : nil
         displays = displaySet.displays
-        coordinateSpace = displaySet.coordinateSpace
         world = initialWorld
         tuning = runtimeTuning
-        overlay = MacOverlayProvider(
-            coordinateSpace: displaySet.coordinateSpace,
-            scale: objectScale,
-            hitRegionScale: runtimeTuning.hitRegionScale
-        )
         claudeCodeSource = ClaudeCodeSource(token: claudeCodeHookToken)
         claudeCodeInstaller = ClaudeCodeHookInstaller(
             settingsURL: FileManager.default.homeDirectoryForCurrentUser
@@ -235,27 +238,17 @@ public final class RoamlingRuntime: PetOverlayViewDelegate {
         isPointerAvoidanceEnabled = defaults.bool(forKey: DefaultsKey.avoidPointer)
         areInteractionsEnabled = defaults.bool(forKey: DefaultsKey.interactions)
         nextWanderAt = ProcessInfo.processInfo.systemUptime + 2.2
-
-        pointerProvider = MacPointerProvider { [weak self] in
-            self?.coordinateSpace ?? displaySet.coordinateSpace
-        }
-        windowProvider = MacWindowProvider { [weak self] in
-            self?.coordinateSpace ?? displaySet.coordinateSpace
-        }
-        focusProvider = MacFocusProvider { [weak self] in
-            self?.coordinateSpace ?? displaySet.coordinateSpace
-        }
     }
 
     public func start() {
         guard !running else { return }
         running = true
-        overlay.view.delegate = self
+        overlay.inputHandler = self
         overlay.setPosition(movement.position)
         renderCurrentFrame()
         overlay.setVisible(true)
 
-        screenObserver = displayProvider.observeDisplayChanges { [weak self] in
+        screenObserver = displayChanges.observeDisplayChanges { [weak self] in
             self?.handleDisplayChange()
         }
         startActivitySources()
@@ -418,13 +411,12 @@ public final class RoamlingRuntime: PetOverlayViewDelegate {
         }
     }
 
-    public func petOverlayMouseDown(screenPoint: NSPoint) {
+    public func petOverlayPointerDown(at pointer: WorldPoint) {
         let now = ProcessInfo.processInfo.systemUptime
         guard areInteractionsEnabled, now <= catchArmedUntil else {
             overlay.setInteractionEnabled(false)
             return
         }
-        let pointer = corePoint(fromAppKitScreenPoint: screenPoint)
         dragOffset = movement.position - pointer
         clickReactionUntil = 0
         isClickReactionPending = false
@@ -436,27 +428,25 @@ public final class RoamlingRuntime: PetOverlayViewDelegate {
         updateAnimation(pointerDegrees: lastPointerDecision?.lookDirectionDegrees)
     }
 
-    public func petOverlayDragged(screenPoint: NSPoint, distance: CGFloat) {
+    public func petOverlayPointerDragged(to pointer: WorldPoint, distance: Double) {
         guard behavior.state == .caught || behavior.state == .dragged else { return }
         let now = ProcessInfo.processInfo.systemUptime
         if distance > 4 {
             isDragging = true
             behavior.handle(.dragMoved, at: now)
         }
-        let pointer = corePoint(fromAppKitScreenPoint: screenPoint)
         movement.teleport(to: pointer + dragOffset)
         overlay.setPosition(movement.position)
         updateAnimation(pointerDegrees: nil)
         renderCurrentFrame()
     }
 
-    public func petOverlayMouseUp(screenPoint: NSPoint, wasDragged: Bool) {
+    public func petOverlayPointerUp(at pointer: WorldPoint, wasDragged: Bool) {
         guard behavior.state == .caught || behavior.state == .dragged else {
             overlay.setInteractionEnabled(false)
             return
         }
         let now = ProcessInfo.processInfo.systemUptime
-        let pointer = corePoint(fromAppKitScreenPoint: screenPoint)
         if wasDragged || isDragging {
             movement.teleport(to: pointer + dragOffset)
             finishDrop(at: now)
@@ -932,11 +922,11 @@ public final class RoamlingRuntime: PetOverlayViewDelegate {
 
     /// Accessibility stays off until the user turns it on from the menu, so the
     /// app never prompts merely because it launched.
-    public var isAccessibilityAuthorized: Bool { focusProvider?.isAuthorized ?? false }
+    public var isAccessibilityAuthorized: Bool { focusProvider.isAuthorized }
 
     @discardableResult
     public func requestAccessibilityAuthorization() -> Bool {
-        focusProvider?.requestAuthorization() ?? false
+        focusProvider.requestAuthorization()
     }
 
     /// Visual placement stays off until the user turns it on from the menu.
@@ -948,7 +938,7 @@ public final class RoamlingRuntime: PetOverlayViewDelegate {
     }
 
     private func refreshedFocus(at timestamp: TimeInterval, force: Bool) -> FocusSnapshot? {
-        guard focusProvider?.isAuthorized == true else {
+        guard focusProvider.isAuthorized else {
             // Revoking the permission has to take effect on the next event, not
             // leave a stale caret behind.
             cachedFocus = nil
@@ -1594,7 +1584,6 @@ public final class RoamlingRuntime: PetOverlayViewDelegate {
         displays = displaySet.displays
         coordinateSpace = displaySet.coordinateSpace
         world = DesktopWorldSnapshot(displays: displays)
-        overlay.coordinateSpace = coordinateSpace
         let newWorldPoint = coordinateSpace.pointFromAppKit(oldAppKitPoint)
         let clamped = world.clamp(newWorldPoint, objectSize: overlay.objectSize)
         isEvadeTransitioning = false
@@ -1613,10 +1602,6 @@ public final class RoamlingRuntime: PetOverlayViewDelegate {
         animationPlayer = PetAnimationPlayer(asset: newAsset)
         updateAnimation(pointerDegrees: nil)
         renderCurrentFrame()
-    }
-
-    private func corePoint(fromAppKitScreenPoint point: NSPoint) -> WorldPoint {
-        coordinateSpace.pointFromAppKit(WorldPoint(x: Double(point.x), y: Double(point.y)))
     }
 
     private func persistPosition() {
