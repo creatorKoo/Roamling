@@ -74,6 +74,9 @@ struct App {
     /// Windows has no permission prompt for either of these, so consent is a
     /// setting instead -- and both start off. `docs/windows.md` section 6.
     visual: bool,
+    /// Read from settings and honoured by the tick, but nothing turns it on:
+    /// the core only asks for a caret while watching a window, and that starts
+    /// with an agent event. See the note in `tray::show_menu`.
     cursor_aware: bool,
     capturer: capture::Capturer,
     /// When the last luminance readback happened, for the interval the core asks for.
@@ -535,7 +538,6 @@ unsafe fn dispatch(hwnd: HWND, msg: u32, lp: LPARAM, app: &mut App) -> bool {
                     avoiding: app.avoiding,
                     interactive: app.interactive,
                     visual: app.visual,
-                    cursor_aware: app.cursor_aware,
                 };
                 match tray::show_menu(hwnd, state) {
                     tray::CMD_ROAMING => {

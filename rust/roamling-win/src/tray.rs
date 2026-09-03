@@ -31,6 +31,7 @@ pub const CMD_ROAMING: usize = 1;
 pub const CMD_AVOID_POINTER: usize = 2;
 pub const CMD_INTERACTIONS: usize = 3;
 pub const CMD_VISUAL: usize = 4;
+/// Reserved. See the note in `show_menu` for why nothing offers it yet.
 pub const CMD_CURSOR_AWARE: usize = 5;
 pub const CMD_QUIT: usize = 6;
 
@@ -143,7 +144,6 @@ pub struct MenuState {
     pub avoiding: bool,
     pub interactive: bool,
     pub visual: bool,
-    pub cursor_aware: bool,
 }
 
 /// Show the menu and return the chosen command, or 0.
@@ -162,7 +162,10 @@ pub fn show_menu(hwnd: HWND, state: MenuState) -> usize {
             (checked(state.avoiding), CMD_AVOID_POINTER, "menu.avoidPointer"),
             (checked(state.interactive), CMD_INTERACTIONS, "menu.catchDrag"),
             (checked(state.visual), CMD_VISUAL, "menu.visualPlacement"),
-            (checked(state.cursor_aware), CMD_CURSOR_AWARE, "menu.accessibility"),
+            // "커서 인식"은 여기 없다. 코드는 focus.rs 에 있지만 코어가 캐럿을
+            // 묻는 것은 펫이 어떤 창을 보고 있을 때뿐이고, 그 상태는 agent
+            // 이벤트로만 시작된다. RoamlingSources 가 이식되기 전까지 이 토글은
+            // 아무것도 하지 않으므로, 있는 척하지 않는다.
         ] {
             let label = wide(localized(key));
             let _ = AppendMenuW(menu, MF_STRING | flag, id, PCWSTR(label.as_ptr()));

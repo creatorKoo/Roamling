@@ -973,6 +973,41 @@ macOS는 코어에 **논리 포인트**를 주고 backing factor를 따로 보�
 
 Window / Focus / Capture. 5절 참조.
 
+#### 실제로 어디까지 도달하는가 (2026-09-04)
+
+**구현한 것과 실제로 동작하는 것을 나눠 적는다.** 셋 중 하나만 온전히 산다.
+
+| provider | 구현 | 도달 가능 |
+|---|---|---|
+| **Capture** (빈 공간) | ✅ DXGI Duplication | ✅ 실측으로 확인 |
+| **Focus** (캐럿) | ✅ `focus.rs`, `GetGUIThreadInfo` | ❌ **불려지지 않는다** |
+| **Window** | ❌ | — 소비자가 없다 |
+
+**둘의 공백이 같은 뿌리다: `RoamlingSources`(agent 연동)가 아직 이식되지 않았다.**
+
+`finish_tick`의 이 줄이 전부를 가른다:
+
+```rust
+let focus = if !is_watching {
+    None                  // <- Windows 에서는 항상 여기
+} else if ...
+```
+
+`is_watching`은 `activity.is_watching_window()`이고, 그것은 `handle_activity_event`로
+들어온 agent 이벤트에서만 시작된다. Windows에는 그 이벤트가 오지 않으므로 **캐럿은
+질의되지도, 배치에 쓰이지도 않는다.** `begin_tick`이 focus 질의를 요청하는 조건도 같다.
+
+창 provider도 마찬가지다. macOS에서 그것의 유일한 소비자는
+`windowProvider.currentActivityLocationHint()`이고, 그 값은 `CompanionEvent`에 붙는다 —
+이벤트가 없으면 붙일 곳이 없다.
+
+**그래서 트레이 메뉴에는 "커서 인식"이 없다.** 코드는 `focus.rs`에 있고 설정 키도 있지만,
+켜도 아무 일이 일어나지 않는 토글을 보여주는 것은 거짓 약속이다. `RoamlingSources`가
+오면 그때 메뉴에 넣는다.
+
+`Capture`는 다르다 — `luminance_requests`는 배회와 배치 과정에서 나오므로 agent 없이도
+돈다. 로그에서 실제로 확인했다.
+
 ### W6 — 패키징
 
 10절의 실측(17파일 · 56.0 MB · zip 21.3 MB · 단일 파일 불가)이 이 게이트의 입력이다.
