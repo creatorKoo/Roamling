@@ -1,6 +1,11 @@
 // SPDX-FileCopyrightText: 2026 GooBeom Jeoung
 // SPDX-License-Identifier: GPL-3.0-only
 
+
+// A console follows a console-subsystem process around, which is wrong for
+// something that lives in the tray. Debug builds keep it, because the state
+// log printed there is how the loop is watched while it is being built.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 //! W4: the Windows shell.
 //!
 //! The pet's decisions are not here. `roamling-core::PetRuntime` makes all of
@@ -13,6 +18,7 @@
 //! overlay needs. See `docs/windows.md`, section 9.
 
 mod platform;
+mod settings;
 mod sprite;
 mod strings;
 mod tray;
@@ -22,6 +28,7 @@ use roamling_core::{
     PetAnimationPlayer, PetRuntime, RuntimeTuning, TickInput, WorldPoint, WorldSize,
 };
 use roamling_pet::PetAsset;
+use settings::Settings;
 use sprite::Surface;
 use std::cell::RefCell;
 use std::time::Instant;
@@ -61,6 +68,7 @@ struct App {
     roaming: bool,
     avoiding: bool,
     interactive: bool,
+    settings: Settings,
     /// Last reported state, so the log says what changed rather than repeating.
     last_state: BehaviorState,
 }
@@ -95,19 +103,41 @@ fn main() -> Result<()> {
         );
     }
 
+    let stored = Settings::load();
     let first = displays[0].visible_frame;
-    let start = WorldPoint::new(
+    let centre = WorldPoint::new(
         first.origin.x + first.size.width / 2.0,
         first.origin.y + first.size.height / 2.0,
     );
+    // A remembered seat is only worth restoring if it is still on a screen.
+    // Unplugging the monitor it was sleeping on should not strand it offscreen.
+    let start = match (
+        stored.bool(settings::HAS_POSITION, false),
+        stored.number(settings::POSITION_X),
+        stored.number(settings::POSITION_Y),
+    ) {
+        (true, Some(x), Some(y))
+            if displays
+                .iter()
+                .any(|display| display.frame.contains(WorldPoint::new(x, y))) =>
+        {
+            WorldPoint::new(x, y)
+        }
+        _ => centre,
+    };
     let seed = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos() as u64)
         .unwrap_or(1);
 
+    let roaming = stored.bool(settings::ROAMING, true);
+    let avoiding = stored.bool(settings::AVOID_POINTER, true);
+    let interactive = stored.bool(settings::INTERACTIONS, true);
+
     let mut pet = PetRuntime::new(start, RuntimeTuning::default(), seed);
     pet.set_displays(displays.clone());
     pet.set_object_size(WorldSize::new(BASE_WIDTH, BASE_HEIGHT));
+    pet.set_flags(roaming, avoiding, interactive);
 
     let resolver = AnimationResolver::new(asset.tracks.clone(), asset.behavior_mappings.clone());
     let player = PetAnimationPlayer::new(&resolver);
@@ -127,9 +157,10 @@ fn main() -> Result<()> {
             drag_from: None,
             dragged: false,
             tick_ms: 0,
-            roaming: true,
-            avoiding: true,
-            interactive: true,
+            roaming,
+            avoiding,
+            interactive,
+            settings: stored,
             last_state: BehaviorState::Idle,
         })
     });
@@ -246,6 +277,10 @@ fn tick(hwnd: HWND, app: &mut App) {
     app.player.set_look_frame(look);
     app.player.update(output.delta_time * output.locomotion_rate);
 
+    if output.persist_position {
+        remember(app, output.position);
+    }
+
     set_click_through(hwnd, !output.interaction_enabled);
     draw(hwnd, app, output.position, scale);
 
@@ -260,6 +295,14 @@ fn tick(hwnd: HWND, app: &mut App) {
 
 /// The scale of whichever display the pet is standing on, so it stays the same
 /// physical size as it crosses a mixed-DPI seam.
+/// The pet came to rest somewhere worth keeping. Same three keys the macOS
+/// runtime writes, so the two platforms describe a seat the same way.
+fn remember(app: &mut App, position: WorldPoint) {
+    app.settings.set(settings::POSITION_X, position.x);
+    app.settings.set(settings::POSITION_Y, position.y);
+    app.settings.set(settings::HAS_POSITION, true);
+}
+
 fn scale_under(app: &App, position: WorldPoint) -> f64 {
     let mut fallback = 1.0;
     for display in &app.displays {
@@ -326,6 +369,9 @@ fn set_click_through(hwnd: HWND, through: bool) {
 /// Every interaction ends the same way: the runtime answers, and if it says the
 /// picture changed, it goes up.
 fn apply(hwnd: HWND, app: &mut App, output: InteractionOutput) {
+    if output.persist_position {
+        remember(app, output.position);
+    }
     if let Some(enabled) = output.set_interaction_enabled {
         set_click_through(hwnd, !enabled);
     }
@@ -419,14 +465,17 @@ unsafe fn dispatch(hwnd: HWND, msg: u32, lp: LPARAM, app: &mut App) -> bool {
                     tray::CMD_ROAMING => {
                         app.roaming = !app.roaming;
                         app.pet.set_roaming_enabled(app.roaming, now);
+                        app.settings.set(settings::ROAMING, app.roaming);
                     }
                     tray::CMD_AVOID_POINTER => {
                         app.avoiding = !app.avoiding;
                         app.pet.set_pointer_avoidance_enabled(app.avoiding);
+                        app.settings.set(settings::AVOID_POINTER, app.avoiding);
                     }
                     tray::CMD_INTERACTIONS => {
                         app.interactive = !app.interactive;
                         app.pet.set_interactions_enabled(app.interactive);
+                        app.settings.set(settings::INTERACTIONS, app.interactive);
                     }
                     tray::CMD_QUIT => {
                         tray::remove(hwnd);

@@ -902,9 +902,44 @@ macOS는 `Bundle`이 알아서 하지만 Windows에는 대응물이 없으므로
 보이는 것은 다른 이야기다. 사용자가 직접 고정해야 하고 이를 강제하는 지원 API는 없으므로,
 W6의 설치 관리자도 대신 해줄 수 없다 — 첫 실행 안내에 적을 일이다.
 
+#### 껐다 켜도 있던 자리에
+
+`%APPDATA%\Roamling\settings.txt`에 평평한 `key=value`로 남긴다. **키는 macOS의
+`UserDefaults` 이름 그대로다** — `roamling.roaming` · `roamling.position.x` 등. 두 플랫폼이
+같은 어휘를 쓰므로 "배회가 꺼져 있나"에 찾아볼 곳이 하나뿐이다. 기본값도 그쪽
+`register(defaults:)`와 같아서 셋 다 켜진 채로 시작한다.
+
+**기억한 자리는 아직 화면 위일 때만 복원한다.** 자고 있던 모니터를 뽑았다고 펫이 화면 밖에
+갇히면 안 된다. 파일은 임시 파일을 거쳐 rename하므로 쓰다 죽어도 "저장된 자리 없음"으로
+읽히는 잘린 파일이 남지 않는다.
+
+실제로 확인했다 — 재우고 종료한 뒤 다시 띄우니 `(128, 1432)`에서 시작해 곧장 다시 잠들었다.
+두 번째 실행은 `FindSleepSpot`을 건너뛰고 `Sit -> Sleep`으로 갔는데, 이는 MVP 4의 "좋은
+자리에서 idle이 이어지면 그 자리에서 그대로 잔다"가 Windows에서도 도는 것이다.
+
+#### 콘솔은 debug에만 있다
+
+```rust
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+```
+
+트레이에 사는 것에 콘솔이 따라다니면 안 된다. debug 빌드는 유지하는데, 거기 찍히는 상태
+로그가 루프를 지켜보는 방법이기 때문이다. 확인: release는 `subsystem (Windows GUI)`,
+debug는 `(Windows CUI)`.
+
+##### 배포 크기 실측 — 10절의 예측이 맞았다
+
+```text
+release 단일 exe   2.05 MB   (그중 약 1.2 MB가 컴파일에 박힌 아틀라스)
+```
+
+10절의 Swift 실측은 17파일 56.0 MB에 단일 파일 불가였다. **같은 앱이 파일 하나 2 MB가
+됐고, 그 절반 이상이 스프라이트 시트다.** 3절에서 D를 고른 이유 중 배포 항목이 실물로
+확인된 셈이다.
+
 ##### 아직 없는 것
 
-위치 저장 · agent 연동(`RoamlingSources`, MVP 0 밖) · `ShellMenu`의 나머지.
+agent 연동(`RoamlingSources`, MVP 0 밖) · `ShellMenu`의 나머지 · W5의 provider들.
 
 개발 중에는 `ROAMLING_ALLOW_CAPTURE=1`로 캡처 제외를 끌 수 있다. 켜져 있으면 펫이
 스크린샷에 안 찍혀서 무엇이 그려졌는지 눈으로 확인할 방법이 없다.
