@@ -184,10 +184,13 @@ macOS에서 실제로 문제를 일으키기 시작하거나, `RoamlingMac`이 �
 | 2 | BasicSafeZone + DesktopWorld + DisplayTopology ✅ 2026-09-03 | 499 | A |
 | 3a | VisualEmptiness + CandidateScoring ✅ 2026-09-03 | 207 | A |
 | 3b | InterestPlacement ✅ 2026-09-03 | 229 | A |
-| 5 | + PlacementDirector, 상태를 들고 있어 B로 옮김 | 366 | **B** |
 | 4 | AttentionModel + ReactionPolicy + Activity | 289 | A |
-| 5 | Movement + Pointer + Behavior + Timing + Tuning | 603 | **B** |
+| 5 | Movement + Pointer + Behavior + Timing + Tuning + **PlacementDirector** | 969 | **B** |
 | 6 | `RoamlingEngine` | 1,453 | **B**, tick 1회 |
+
+`PlacementDirector` 366줄은 원래 단위 3에 있었는데 5로 옮겼다 — tick 사이에 상태(자리, 여정,
+마지막 리뷰)를 들고 있어서 호출마다 변환하는 A가 아니라 상태를 Rust가 들고 핸들로 부르는
+B다. 3b는 그 director가 **묻는 대상**(`InterestPlacing`)만 Rust로 넘겼다.
 
 `RoamlingCore`의 잎이 얇아서 이 순서가 성립한다 — `MovementController`는 `WorldPoint`와
 `WorldVector`만 알고 `DesktopWorld`를 모른다.
