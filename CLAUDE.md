@@ -56,7 +56,8 @@ Localizable.strings`에 있고 `localized(_:)` / `localizedFormat(_:_:)`로 읽�
 
 ```text
 RoamlingCore/     OS 비의존. geometry, world, behavior, attention, reaction
-rust/roamling-core/  같은 것의 Rust 판. 한 단위씩 옮기는 중 (docs/windows.md 3절)
+rust/roamling-core/  결정 로직의 정본. 단위 1~7 완료 — Core 전체 + tick 본체 +
+                  애니메이션 해석. Swift 쪽 원본은 대조군으로만 남아 있다
 RoamlingCoreRs/   생성된 uniffi 바인딩. Engine이 RustCore.swift로 감싸 쓴다
 RoamlingPet/      Petdex manifest, atlas runtime, built-in mascot, fallback
                   이미지는 PetImage(RGBA8)다. 디코딩은 PetImageSourcing 뒤에 있다
@@ -82,8 +83,28 @@ import하지 않는다.** macOS SDK에 다 있어서 컴파일러는 이걸 못 
 않는다** — W2의 exit에는 렌더 프레임 336개의 바이트 비교가 포함됐고, 그 픽스처는
 `Tests/RoamlingLogicTests/PreW2FrameHashes.swift`다.
 
-**언어 결정은 2026-09-02에 D(Rust core + Swift macOS 셸)로 닫혔다.** 근거·포팅 순서·되돌아올
-조건은 `docs/windows.md` 3절 "결정: D"에 있다. 아직 Rust 코드는 없고 W4부터 시작한다.
+**언어 결정은 2026-09-02에 D(Rust core + Swift macOS 셸)로 닫혔고, 포팅은 2026-09-03에
+단위 1~7이 끝났다.** 근거·순서·되돌아올 조건은 `docs/windows.md` 3절에 있다.
+
+**펫이 무엇을 할지 결정하는 코드는 이제 전부 `rust/roamling-core`에 있다.** geometry ·
+world · topology · emptiness · 배치 · attention · 반응 · 튜닝 · 활동 지휘 · tick 본체 ·
+애니메이션 해석까지. macOS 앱이 그것을 쓰고 있고 `RoamlingRuntime`은 667줄만 남았다 —
+타이머 · UserDefaults · 진단 파일 · agent 구독 · 스프라이트 시트, 즉 결정이 아닌 것들뿐이다.
+**현재 게이트는 W4(Windows 최소 루프)이고, 착수 순서와 호출 예시는 `docs/windows.md`의
+W4 절에 있다.**
+
+포팅 규칙은 그대로다: **살아 있는 구현은 항상 1벌.** Swift 원본은 대조군으로 Core에
+남아 있고(`MovementController` · `PlacementDirector` · `AttentionModel` 등), 단위마다
+게이트가 둘이다 — `cargo test`의 differential fixture 10개(14 MB, 6만+ 케이스)와 Swift
+쪽에서 두 구현을 나란히 돌려 비교하는 테스트. 런타임처럼 위에 호출자가 없어 대조군을
+만들 수 없는 경우에는 **실물을 40초 녹화해서**(`Tests/RoamlingLogicTests/RuntimeTrace.txt`)
+바이트 단위로 같은 답을 요구한다. 재생성은
+`ROAMLING_WRITE_TRACE=<path> swift run RoamlingLogicTests`이고, **통과시키려고 다시 만들지
+않는다.**
+
+**Windows에서 처음 할 일은 `cd rust && cargo test --release`다.** fixture 10개가 전부
+macOS/arm64에서 생성됐고 x86_64에서는 한 번도 돌지 않았다 — `hypot` · `atan2` · `round`는
+IEEE가 정확값을 요구하지 않으므로 깨질 수 있고, 깨지면 그것이 실패가 아니라 발견이다.
 
 **이 경계가 Windows port의 전제다.** `docs/windows.md`에 모듈별 실측 이식 비용, 언어
 선택 네 가지의 비교, 그리고 2026-09-01에 Windows에서 실행한 W0 스파이크 결과가 있다.
