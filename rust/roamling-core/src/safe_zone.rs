@@ -3,9 +3,7 @@
 
 //! Ported from `Sources/RoamlingCore/BasicSafeZone.swift`.
 //!
-//! `naps_in_place` stays in Swift for now: it reads a luminance field, which
-//! arrives with unit 3.
-
+use crate::emptiness::{LuminanceField, VisualEmptiness};
 use crate::geometry::{swift_max, swift_min, WorldPoint, WorldRect, WorldSize};
 use crate::world::{last_maximum, DesktopWorldSnapshot, DisplaySnapshot, SafeZone};
 
@@ -30,6 +28,36 @@ enum DockEdge {
 pub struct BasicSafeZonePlanner;
 
 impl BasicSafeZonePlanner {
+    /// Whether the spot the pet dozed off on is fit to sleep on, or whether it
+    /// should tuck into a safe zone first.
+    ///
+    /// Asked once, when sitting ends. Sleep is the one state with no timer, so
+    /// the spot has to hold for as long as the user is away, and the roaming
+    /// rule that keeps a standing pet off the user's work stops running the
+    /// moment rest owns movement.
+    ///
+    /// A field that cannot judge answers no -- the opposite of how a chosen
+    /// seat reads a missing capture. The difference is that a seat was picked
+    /// deliberately and a roaming spot was not.
+    pub fn naps_in_place(
+        position: WorldPoint,
+        object_size: WorldSize,
+        field: Option<&LuminanceField>,
+        threshold: f64,
+    ) -> bool {
+        let Some(field) = field else { return false };
+        let frame = WorldRect::new(
+            position.x - object_size.width / 2.0,
+            position.y - object_size.height / 2.0,
+            object_size.width,
+            object_size.height,
+        );
+        match VisualEmptiness::score(frame, field) {
+            Some(score) => score >= threshold,
+            None => false,
+        }
+    }
+
     pub fn safe_zones(world: &DesktopWorldSnapshot) -> Vec<SafeZone> {
         world.displays.iter().flat_map(Self::safe_zones_on).collect()
     }

@@ -161,6 +161,50 @@ func coreLogicTests() -> [LogicTest] {
             }
             try expect(compared > 400, "only \(compared) zones compared")
         },
+        LogicTest(name: "the Rust nap check agrees with the Swift one the app replaced") {
+            var seed: UInt64 = 0x1D87_2B4C_66E9_A031
+            func next(_ scale: Double = 1) -> Double {
+                seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17
+                return (Double(seed % 200_001) / 100.0 - 1000.0) * scale
+            }
+            func unit() -> Double {
+                seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17
+                return seed % 7 == 0 ? Double(seed % 1001) / 1000.0 : Double(seed % 61) / 1000.0
+            }
+            var judged = 0
+            for iteration in 0..<150 {
+                let columns = 2 + (iteration % 9)
+                let rows = 2 + ((iteration / 3) % 8)
+                let bounds = WorldRect(
+                    x: next(), y: next(),
+                    width: abs(next()) + 1, height: abs(next()) + 1
+                )
+                let samples = (0..<(columns * rows)).map { _ in unit() }
+                guard let field = LuminanceField(
+                    bounds: bounds, columns: columns, rows: rows, samples: samples
+                ) else { continue }
+                let position = WorldPoint(x: next(), y: next())
+                let size = WorldSize(width: abs(next(0.2)) + 1, height: abs(next(0.2)) + 1)
+                let threshold = abs(next(0.001))
+                let swiftAnswer = BasicSafeZonePlanner.napsInPlace(
+                    at: position, objectSize: size, in: field, atLeast: threshold
+                )
+                let rustAnswer = RustCoreTestBridge.napsInPlace(
+                    at: position, objectSize: size, in: field, atLeast: threshold
+                )
+                try expect(
+                    swiftAnswer == rustAnswer,
+                    "nap check differs at \(iteration): swift \(swiftAnswer) vs rust \(rustAnswer)"
+                )
+                // Absent capture answers no on both sides, which is the rule
+                // that keeps an unvetted roaming spot from becoming a bed.
+                try expect(!RustCoreTestBridge.napsInPlace(
+                    at: position, objectSize: size, in: nil, atLeast: threshold
+                ))
+                judged += 1
+            }
+            try expect(judged > 100, "only \(judged) fields judged")
+        },
         LogicTest(name: "two routes of equal cost pick the same one every launch") {
             // This failed about half the time before the fix, differently each
             // run: Dijkstra walked a Set, and Swift randomizes Set order per

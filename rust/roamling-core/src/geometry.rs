@@ -38,7 +38,7 @@ pub fn clamped(value: f64, lower: f64, upper: f64) -> f64 {
     swift_min(swift_max(value, lower), upper)
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct WorldPoint {
     pub x: f64,
     pub y: f64,
@@ -69,7 +69,7 @@ impl WorldPoint {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct WorldVector {
     pub dx: f64,
     pub dy: f64,
@@ -144,7 +144,7 @@ impl WorldVector {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct WorldSize {
     pub width: f64,
     pub height: f64,

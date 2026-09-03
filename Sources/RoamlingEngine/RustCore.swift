@@ -48,6 +48,29 @@ enum RustCore {
         RoamlingCoreRs.safeZones(displays: displays(world)).map(zone)
     }
 
+    static func napsInPlace(
+        at position: WorldPoint,
+        objectSize: WorldSize,
+        in field: LuminanceField?,
+        atLeast threshold: Double
+    ) -> Bool {
+        RoamlingCoreRs.napsInPlace(
+            x: position.x,
+            y: position.y,
+            objectWidth: objectSize.width,
+            objectHeight: objectSize.height,
+            field: field.map {
+                FfiLuminanceField(
+                    bounds: rect($0.bounds),
+                    columns: UInt32($0.columns),
+                    rows: UInt32($0.rows),
+                    samples: $0.samples
+                )
+            },
+            threshold: threshold
+        )
+    }
+
     static func restDestination(
         in world: DesktopWorldSnapshot,
         currentPosition: WorldPoint,
@@ -86,6 +109,17 @@ enum RustCore {
 public enum RustCoreTestBridge {
     public static func safeZones(in world: DesktopWorldSnapshot) -> [SafeZone] {
         RustCore.safeZones(in: world)
+    }
+
+    public static func napsInPlace(
+        at position: WorldPoint,
+        objectSize: WorldSize,
+        in field: LuminanceField?,
+        atLeast threshold: Double
+    ) -> Bool {
+        RustCore.napsInPlace(
+            at: position, objectSize: objectSize, in: field, atLeast: threshold
+        )
     }
 
     public static func restDestination(

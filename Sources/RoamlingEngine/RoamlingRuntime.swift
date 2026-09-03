@@ -1261,10 +1261,11 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         // clear patch of desktop is the ordinary case, and getting up to walk
         // to a corner from it is the trip the user actually sees: a pet that
         // was nodding off suddenly striding across the screen.
-        if BasicSafeZonePlanner.napsInPlace(
+        if RustCore.napsInPlace(
             at: movement.position,
             objectSize: overlay.objectSize,
-            in: judgeableLuminance
+            in: judgeableLuminance,
+            atLeast: BasicInterestPositionPlanner.holdEmptiness
         ) {
             record("rest", "sleeping in place, spot reads clear", at: timestamp)
             enterSleep(at: timestamp)

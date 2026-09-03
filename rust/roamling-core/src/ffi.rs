@@ -8,6 +8,7 @@
 //! whole world rather than a call per rectangle, which is the shape that
 //! measured 0.03% of a frame in `docs/windows.md` section 12.
 
+use crate::emptiness::LuminanceField;
 use crate::geometry::{WorldPoint, WorldRect, WorldSize};
 use crate::safe_zone::BasicSafeZonePlanner;
 use crate::world::{DesktopWorldSnapshot, DisplaySnapshot, SafeZone};
@@ -127,4 +128,40 @@ pub fn rest_destination(
         reason: destination.reason,
         score: destination.score,
     })
+}
+
+/// The luminance grid, flattened. It is already the small downsampled thing --
+/// 64 columns at most -- so passing it whole costs less than holding a handle
+/// that has to be invalidated every time the capture refreshes.
+#[derive(uniffi::Record)]
+pub struct FfiLuminanceField {
+    pub bounds: FfiRect,
+    pub columns: u32,
+    pub rows: u32,
+    pub samples: Vec<f64>,
+}
+
+#[uniffi::export]
+pub fn naps_in_place(
+    x: f64,
+    y: f64,
+    object_width: f64,
+    object_height: f64,
+    field: Option<FfiLuminanceField>,
+    threshold: f64,
+) -> bool {
+    let field = field.and_then(|value| {
+        LuminanceField::new(
+            (&value.bounds).into(),
+            value.columns as usize,
+            value.rows as usize,
+            value.samples,
+        )
+    });
+    BasicSafeZonePlanner::naps_in_place(
+        WorldPoint::new(x, y),
+        WorldSize::new(object_width, object_height),
+        field.as_ref(),
+        threshold,
+    )
 }
