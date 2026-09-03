@@ -386,6 +386,125 @@ func coreLogicTests() -> [LogicTest] {
             }
             try expect(judged > 100, "only \(judged) fields judged")
         },
+        LogicTest(name: "the Rust activity director agrees with the Swift one") {
+            // The director is main-actor isolated, like everything the runtime
+            // touches. The harness's main is nonisolated and on the main thread.
+            try MainActor.assumeIsolated {
+                // Seven fields that only exist across events, so this is a script.
+                // What it adds over the Rust fixture is the crossing: effects come
+                // back as an ordered list and the order is the answer -- a setback
+                // settles the seat, cancels the route and *then* reacts.
+                var seed: UInt64 = 0x18B7_6C2F_D093_4AE5
+                func step() -> UInt64 {
+                    seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17
+                    return seed
+                }
+                func unit() -> Double { Double(step() % 1_000_001) / 1_000_000 }
+                func pick(_ count: Int) -> Int { Int(step() % UInt64(count)) }
+
+                let kinds: [CompanionEventKind] = [
+                    .activityStarted, .activityEnded, .positive, .negative, .achievement,
+                    .setback, .attentionRequired, .inspecting, .highIntensity, .calm, .idle
+                ]
+                let contexts: [UserContext] = [.working, .gaming, .watchingMedia, .browsing, .idle]
+
+                for kind in kinds {
+                    try expect(
+                        SwiftActivityDirector.wantsWindowHint(kind) == RustCoreTestBridge.wantsWindowHint(kind),
+                        "the window-hint rule differs for \(kind)"
+                    )
+                }
+
+                var compared = 0
+                var counter = 0
+                for run in 0..<40 {
+                    let swiftDirector = SwiftActivityDirector()
+                    let rustDirector = RustActivityDirector()
+                    var now = 100.0 + unit() * 20
+                    let sources = 1 + pick(3)
+
+                    for call in 0..<20 {
+                        now += step() % 11 == 0 ? unit() * 400 : unit() * 6
+                        let isResting = step() % 6 == 0
+                        let isHeld = step() % 9 == 0
+                        let roll = unit()
+
+                        let swiftEffects: [ActivityEffect]
+                        let rustEffects: [ActivityEffect]
+                        switch step() % 12 {
+                        case 8:
+                            swiftEffects = swiftDirector.expireSilent(isResting: isResting, at: now)
+                            rustEffects = rustDirector.expireSilent(isResting: isResting, at: now)
+                        case 9:
+                            let isIdle = step() % 3 != 0
+                            swiftEffects = swiftDirector.resumePendingIfReady(
+                                isIdle: isIdle, isHeldByPointer: isHeld,
+                                isResting: isResting, randomUnit: roll, at: now
+                            )
+                            rustEffects = rustDirector.resumePendingIfReady(
+                                isIdle: isIdle, isHeldByPointer: isHeld,
+                                isResting: isResting, randomUnit: roll, at: now
+                            )
+                        case 10:
+                            swiftEffects = swiftDirector.deliverArrivalReaction(
+                                isResting: isResting, at: now
+                            )
+                            rustEffects = rustDirector.deliverArrivalReaction(
+                                isResting: isResting, at: now
+                            )
+                        case 11:
+                            swiftEffects = swiftDirector.sustainOnSeat(isResting: isResting, at: now)
+                            rustEffects = rustDirector.sustainOnSeat(isResting: isResting, at: now)
+                        default:
+                            counter += 1
+                            let hasHint = step() % 3 != 0
+                            let event = CompanionEvent(
+                                id: "e\(counter)",
+                                sourceID: "s\(pick(sources))",
+                                sourceType: .agent,
+                                timestamp: now - unit() * 3,
+                                kind: kinds[pick(kinds.count)],
+                                intensity: step() % 5 == 0 ? unit() * 0.2 : unit(),
+                                context: step() % 4 != 0 ? contexts[pick(contexts.count)] : nil,
+                                locationHint: hasHint
+                                    ? LocationHint(
+                                        approximateRegion: WorldRect(
+                                            x: unit() * 1_400, y: unit() * 800,
+                                            width: 200 + unit() * 400, height: 150 + unit() * 300
+                                        ),
+                                        confidence: unit()
+                                      )
+                                    : nil
+                            )
+                            swiftEffects = swiftDirector.handle(
+                                event, isHeldByPointer: isHeld, isResting: isResting,
+                                randomUnit: roll, at: now
+                            )
+                            rustEffects = rustDirector.handle(
+                                event, isHeldByPointer: isHeld, isResting: isResting,
+                                randomUnit: roll, at: now
+                            )
+                        }
+
+                        try expect(
+                            swiftEffects == rustEffects,
+                            "effects differ at run \(run) call \(call): "
+                                + "\(swiftEffects) vs \(rustEffects)"
+                        )
+                        try expect(
+                            swiftDirector.isWatchingWindow == rustDirector.isWatchingWindow
+                                && swiftDirector.activeSourceID == rustDirector.activeSourceID
+                                && swiftDirector.hint == rustDirector.hint
+                                && swiftDirector.hasArrivalReaction == rustDirector.hasArrivalReaction
+                                && swiftDirector.sustainedReaction == rustDirector.sustainedReaction,
+                            "director state differs at run \(run) call \(call)"
+                        )
+                        compared += 1
+                    }
+                }
+                try expect(compared == 800, "only \(compared) calls compared")
+            }
+        },
         LogicTest(name: "the tuning wire order matches the key list") {
             // Swift sends the index, so this list and `TUNING_KEYS` in
             // `tuning.rs` are one contract. Adding a knob in the middle would

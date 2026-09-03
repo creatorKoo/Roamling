@@ -164,7 +164,9 @@ enum RustCore {
             timestamp: event.timestamp,
             kind: UInt8(kindOrder.firstIndex(of: event.kind) ?? 0),
             intensity: event.intensity,
-            hintConfidence: event.locationHint?.confidence
+            hintConfidence: event.locationHint?.confidence,
+            hintRegion: event.locationHint?.approximateRegion.map(rect),
+            context: event.context.map(contextIndex)
         )
     }
 
@@ -179,6 +181,27 @@ enum RustCore {
 
     static func reactionIndex(_ reaction: CompanionReaction) -> UInt8 {
         UInt8(reactionOrder.firstIndex(of: reaction) ?? 0)
+    }
+
+    static func activityEffect(_ effect: FfiActivityEffect) -> ActivityEffect {
+        switch effect.kind {
+        case 1: .settleInPlace(sourceID: effect.sourceId ?? "")
+        case 2: .cancelRoute
+        case 3: .setNextWanderAt(effect.timestamp)
+        case 4: .applyReaction(reaction(at: effect.reaction) ?? .observe)
+        case 5: .requestLuminance(
+            effect.region.map {
+                WorldRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height)
+            } ?? WorldRect(x: 0, y: 0, width: 0, height: 0)
+        )
+        default: .cancelRest
+        }
+    }
+
+    static func wantsWindowHint(_ kind: CompanionEventKind) -> Bool {
+        RoamlingCoreRs.activityWantsWindowHint(
+            kind: UInt8(kindOrder.firstIndex(of: kind) ?? 0)
+        )
     }
 
     // MARK: - Tuning
@@ -369,6 +392,12 @@ public extension RustCoreTestBridge {
     /// The order tuning keys cross as indices, so a test can pin it against
     /// `RuntimeTuningKey.allCases`.
     static var tuningWireOrder: [RuntimeTuningKey] { RustCore.tuningWireOrder }
+
+    /// The Rust side of the rule that decides whether asking the platform for
+    /// a window is worth the round trip.
+    static func wantsWindowHint(_ kind: CompanionEventKind) -> Bool {
+        RustCore.wantsWindowHint(kind)
+    }
 
     /// A fresh pair of the stateful models, so the switch-over test can drive
     /// them through the same script it drives the Swift ones through.
@@ -698,5 +727,84 @@ public final class RustPlacement {
         case 5: .escape(WorldPoint(x: answer.x, y: answer.y))
         default: .hold
         }
+    }
+}
+
+/// The activity director, with its seven fields in Rust.
+///
+/// Public only so the switch-over test can drive it beside `SwiftActivityDirector`.
+public final class RustActivityDirector: ActivityDirecting {
+    private let handle = ActivityWatch()
+
+    public init() {}
+
+    public var isWatchingWindow: Bool { handle.isWatchingWindow() }
+    public var activeSourceID: String? { handle.activeSourceId() }
+
+    public var hint: LocationHint? {
+        handle.hint().map {
+            LocationHint(
+                approximateRegion: $0.region.map {
+                    WorldRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height)
+                },
+                confidence: $0.confidence
+            )
+        }
+    }
+
+    public var hasArrivalReaction: Bool { handle.hasArrivalReaction() }
+
+    public var sustainedReaction: CompanionReaction? {
+        handle.sustainedReaction().flatMap(RustCore.reaction(at:))
+    }
+
+    public func handle(
+        _ event: CompanionEvent,
+        isHeldByPointer: Bool,
+        isResting: Bool,
+        randomUnit: Double,
+        at timestamp: TimeInterval
+    ) -> [ActivityEffect] {
+        handle.handleEvent(
+            event: RustCore.activityEvent(event),
+            isHeldByPointer: isHeldByPointer,
+            isResting: isResting,
+            randomUnit: randomUnit,
+            timestamp: timestamp
+        ).map(RustCore.activityEffect)
+    }
+
+    public func expireSilent(isResting: Bool, at timestamp: TimeInterval) -> [ActivityEffect] {
+        handle.expireSilent(isResting: isResting, timestamp: timestamp)
+            .map(RustCore.activityEffect)
+    }
+
+    public func resumePendingIfReady(
+        isIdle: Bool,
+        isHeldByPointer: Bool,
+        isResting: Bool,
+        randomUnit: Double,
+        at timestamp: TimeInterval
+    ) -> [ActivityEffect] {
+        handle.resumePendingIfReady(
+            isIdle: isIdle,
+            isHeldByPointer: isHeldByPointer,
+            isResting: isResting,
+            randomUnit: randomUnit,
+            timestamp: timestamp
+        ).map(RustCore.activityEffect)
+    }
+
+    public func deliverArrivalReaction(
+        isResting: Bool,
+        at timestamp: TimeInterval
+    ) -> [ActivityEffect] {
+        handle.deliverArrivalReaction(isResting: isResting, timestamp: timestamp)
+            .map(RustCore.activityEffect)
+    }
+
+    public func sustainOnSeat(isResting: Bool, at timestamp: TimeInterval) -> [ActivityEffect] {
+        handle.sustainOnSeat(isResting: isResting, timestamp: timestamp)
+            .map(RustCore.activityEffect)
     }
 }

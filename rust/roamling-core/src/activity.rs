@@ -61,6 +61,9 @@ pub struct CompanionEvent {
     pub kind: CompanionEventKind,
     pub intensity: f64,
     pub location_hint: Option<LocationHint>,
+    /// What the user was doing when this arrived. Only the reaction policy
+    /// reads it, and only some adapters supply it.
+    pub context: Option<UserContext>,
 }
 
 impl CompanionEvent {
@@ -79,7 +82,13 @@ impl CompanionEvent {
             kind,
             intensity: clamped(intensity, 0.0, 1.0),
             location_hint,
+            context: None,
         }
+    }
+
+    pub fn with_context(mut self, context: Option<UserContext>) -> Self {
+        self.context = context;
+        self
     }
 }
 

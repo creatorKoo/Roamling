@@ -129,7 +129,6 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     private var restDestination: RestDestination?
     /// The window the pet is watching. It outlives any one walk: a parked pet
     /// still has to know which window to judge its seat against.
-    private var activityHint: LocationHint?
     // The director, with its seat, its trip and its last review held in Rust.
     // `docs/windows.md` unit 5b.
     private let placement = RustPlacement()
@@ -160,26 +159,12 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     /// Destinations offered to the emptiness score before a stroll. Enough to
     /// usually find a clear one, few enough that roaming stays aimless.
     private static let wanderCandidateCount = 6
-    private var pendingActivityEvent: CompanionEvent?
-    private var recentActivityEvents: [String: CompanionEvent] = [:]
-    /// Ordered by source, because attention breaks a tied score by taking the
-    /// last it saw -- and a dictionary's order is whatever the hash seed chose
-    /// this launch. Two agents that scored alike would have been picked between
-    /// by coin flip, differently each time the app started.
-    private var liveActivityEvents: [CompanionEvent] {
-        recentActivityEvents.keys.sorted().compactMap { recentActivityEvents[$0] }
-    }
-    /// Both hold state between calls, so the Rust side owns it and this keeps
-    /// a handle. Nothing is shipped back and forth but the events themselves.
-    private let attention = Attention()
-    private let reactions = Reactions()
-    private var lastDispatchedActivityEventID: String?
-    private var activeActivitySourceID: String?
-    /// When the active source last said anything, so a watch that will never
-    /// be ended by a hook can end on its own.
-    private var activityHeardAt: TimeInterval = 0
-    private var activeActivityReaction: CompanionReaction?
-    private var activityArrivalReaction: CompanionReaction?
+    /// Which agent the pet is watching, what it wears, and what it still owes
+    /// the user when it arrives. Seven fields lived here and each was written
+    /// by more than one code path; they are one object now, in Rust.
+    /// `docs/windows.md` unit 6b.
+    private let activity: any ActivityDirecting = RustActivityDirector()
+
     private var running = false
 
     /// - Parameters:
@@ -460,8 +445,17 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         let deltaTime = min(max(now - (lastTickAt ?? now), 0), 0.1)
         lastTickAt = now
         behavior.handle(.tick, at: now)
-        expireSilentActivity(at: now)
-        resumePendingActivityIfReady(at: now)
+        apply(activity.expireSilent(isResting: behavior.state.isResting, at: now), at: now)
+        apply(
+            activity.resumePendingIfReady(
+                isIdle: behavior.state == .idle,
+                isHeldByPointer: behavior.state == .caught || behavior.state == .dragged,
+                isResting: behavior.state.isResting,
+                randomUnit: Double.random(in: 0..<1),
+                at: now
+            ),
+            at: now
+        )
 
         let pointer = pointerProvider.currentPointer(at: now)
         let userIdleDuration = userIdleProvider.idleDuration(at: now)
@@ -535,8 +529,8 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             record("place", Self.describe(intent), at: now)
             record(
                 "agent",
-                activeActivitySourceID.map {
-                    "\($0) window=\(activityHint == nil ? "none" : "found")"
+                activity.activeSourceID.map {
+                    "\($0) window=\(activity.hint == nil ? "none" : "found")"
                 } ?? "none",
                 at: now
             )
@@ -587,7 +581,12 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             // nothing is owed, which is what ends the walk: a pet that has
             // arrived is watching, not still walking.
             if didArrive {
-                deliverArrivalReaction(at: now)
+                apply(
+                    activity.deliverArrivalReaction(
+                        isResting: behavior.state.isResting, at: now
+                    ),
+                    at: now
+                )
                 persistPosition()
             }
         }
@@ -654,9 +653,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     /// window to watch: nothing to sit beside, nowhere to stroll, and no seat
     /// for the decision table to call worth sleeping on. An agent it cannot
     /// locate is not a reason for the pet to stand still.
-    private var isWatchingWindow: Bool {
-        activeActivitySourceID != nil && activityHint != nil
-    }
+    private var isWatchingWindow: Bool { activity.isWatchingWindow }
 
     /// Why the pet is doing what it is doing, kept in memory and copyable from
     /// the menu. Standing and sitting look identical from outside the app, so
@@ -777,11 +774,13 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
 
     private func handleActivityEvent(_ event: CompanionEvent) {
         let now = self.now()
-        let shouldLocate = event.kind == .activityStarted
-            || event.kind == .highIntensity
-            || event.kind == .attentionRequired
+        // The window query costs a synchronous round trip, so the rule for
+        // whether it is worth making lives with the decision and the call
+        // stays here.
         let hint = event.locationHint
-            ?? (shouldLocate ? windowProvider.currentActivityLocationHint() : nil)
+            ?? (RustCore.wantsWindowHint(event.kind)
+                ? windowProvider.currentActivityLocationHint()
+                : nil)
         let located = CompanionEvent(
             id: event.id,
             sourceID: event.sourceID,
@@ -793,135 +792,42 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             locationHint: hint,
             metadata: event.metadata
         )
-
-        // Routine tool completions are useful as adapter-level evidence but do
-        // not deserve attention changes or visible reactions on their own.
-        if located.kind == .positive, located.intensity < 0.15 { return }
-
-        if located.kind == .activityEnded || located.kind == .idle {
-            recentActivityEvents.removeValue(forKey: located.sourceID)
-            if attention.currentSourceId() == located.sourceID {
-                attention.clear(timestamp: now)
-                lastDispatchedActivityEventID = nil
-            }
-            if activeActivitySourceID == located.sourceID {
-                clearActiveActivity(at: now)
-                applyActivityReaction(.calm, at: now)
-            }
-            queueNextAttentionCandidate(at: now)
-            return
-        }
-
-        recentActivityEvents[located.sourceID] = located
-        guard let selectedID = attention.select(
-            events: liveActivityEvents.map(RustCore.activityEvent),
-            timestamp: now
-        ), let selected = recentActivityEvents.values.first(where: { $0.id == selectedID }),
-            selected.id != lastDispatchedActivityEventID else { return }
-
-        if behavior.state == .caught || behavior.state == .dragged {
-            pendingActivityEvent = selected
-            return
-        }
-        if behavior.state.isResting {
-            guard selected.kind.wakesRestingPet else { return }
-            cancelRestForActivity(at: now)
-            pendingActivityEvent = selected
-            return
-        }
-        dispatchActivityEvent(selected, at: now)
+        apply(
+            activity.handle(
+                located,
+                isHeldByPointer: behavior.state == .caught || behavior.state == .dragged,
+                isResting: behavior.state.isResting,
+                randomUnit: Double.random(in: 0..<1),
+                at: now
+            ),
+            at: now
+        )
     }
 
-    /// A Stop hook cannot run for a session that was interrupted or killed, and
-    /// driving agents from a GUI is exactly how that happens. Without this the
-    /// pet stays on duty forever: never roaming, and able to sleep only while
-    /// its seat keeps scoring clear.
-    private func expireSilentActivity(at timestamp: TimeInterval) {
-        guard activeActivitySourceID != nil,
-              ActivityLifetime.hasFallenSilent(
-                lastEventAt: activityHeardAt,
-                now: timestamp
-              ) else { return }
-        clearActiveActivity(at: timestamp)
-        applyActivityReaction(.calm, at: timestamp)
-    }
-
-    private func resumePendingActivityIfReady(at timestamp: TimeInterval) {
-        guard behavior.state == .idle, let event = pendingActivityEvent else { return }
-        pendingActivityEvent = nil
-        dispatchActivityEvent(event, at: timestamp)
-    }
-
-    private func dispatchActivityEvent(_ event: CompanionEvent, at timestamp: TimeInterval) {
-        lastDispatchedActivityEventID = event.id
-        if activeActivitySourceID == nil || activeActivitySourceID == event.sourceID {
-            activityHeardAt = timestamp
-        }
-        let reaction = reactions.reaction(
-            event: RustCore.activityEvent(event),
-            context: RustCore.contextIndex(event.context ?? .idle),
-            isHeldByPointer: behavior.state == .caught || behavior.state == .dragged,
-            randomUnit: Double.random(in: 0..<1),
-            timestamp: timestamp
-        ).flatMap(RustCore.reaction(at:))
-
-        switch event.kind {
-        case .activityStarted:
-            // The hop is the whole reaction. What the pet wears afterwards is
-            // stillness, because Petdex's `jumping` is a duration state and the
-            // next hook event -- a tool starting -- is a beat away.
-            beginWatching(event, sustained: .observe, reaction: reaction ?? .spark, at: timestamp)
-
-        case .inspecting:
-            beginWatching(event, sustained: .observe, reaction: reaction ?? .observe, at: timestamp)
-
-        case .highIntensity:
-            beginWatching(event, sustained: .work, reaction: reaction ?? .work, at: timestamp)
-
-        case .attentionRequired:
-            // The paw is sustained too: the agent stays blocked until the user
-            // answers, so the pet has to keep asking rather than drift off it.
-            beginWatching(event, sustained: .paw, reaction: reaction ?? .paw, at: timestamp)
-
-        case .positive:
-            if let reaction { applyActivityReaction(reaction, at: timestamp) }
-
-        case .achievement:
-            clearActiveActivity(at: timestamp)
-            applyActivityReaction(reaction ?? .glance, at: timestamp)
-            finishTransientActivityEvent(event, at: timestamp)
-
-        case .negative:
-            clearActiveActivity(at: timestamp)
-            applyActivityReaction(reaction ?? .sad, at: timestamp)
-            finishTransientActivityEvent(event, at: timestamp)
-
-        case .setback:
-            activeActivitySourceID = event.sourceID
-            activityHeardAt = timestamp
-            activeActivityReaction = .observe
-            // The trip is off but the window is still the one being watched, so
-            // the hint stays and the seat keeps being judged where the pet is.
-            placement.settleInPlace(sourceID: event.sourceID, at: timestamp)
-            movement.cancelRoute(stop: false)
-            applyActivityReaction(reaction ?? .sad, at: timestamp)
-
-        case .activityEnded, .calm, .idle:
-            if event.kind == .calm,
-               activeActivitySourceID == nil || activeActivitySourceID == event.sourceID {
-                clearActiveActivity(at: timestamp)
-                applyActivityReaction(reaction ?? .calm, at: timestamp)
+    /// Carries out what the activity director decided, in the order it decided
+    /// them. It cannot move the pet itself: movement, behaviour and placement
+    /// are the runtime's, and this is the seam between them.
+    private func apply(_ effects: [ActivityEffect], at timestamp: TimeInterval) {
+        for effect in effects {
+            switch effect {
+            case .cancelRest:
+                cancelRestForActivity(at: timestamp)
+            case let .settleInPlace(sourceID):
+                placement.settleInPlace(sourceID: sourceID, at: timestamp)
+            case .cancelRoute:
+                movement.cancelRoute(stop: false)
+            case let .setNextWanderAt(value):
+                nextWanderAt = value
+            case let .applyReaction(reaction):
+                behavior.handle(.reaction(reaction), at: timestamp)
+            case let .requestLuminance(region):
+                requestLuminanceRefresh(
+                    at: timestamp,
+                    near: region,
+                    every: Self.luminanceRefreshInterval
+                )
             }
         }
-    }
-
-    private func finishTransientActivityEvent(
-        _ event: CompanionEvent,
-        at timestamp: TimeInterval
-    ) {
-        recentActivityEvents.removeValue(forKey: event.sourceID)
-        attention.clear(timestamp: timestamp)
-        queueNextAttentionCandidate(at: timestamp)
     }
 
     /// Accessibility stays off until the user turns it on from the menu, so the
@@ -1000,52 +906,6 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         }
     }
 
-    private func queueNextAttentionCandidate(at timestamp: TimeInterval) {
-        guard let nextID = attention.select(
-            events: liveActivityEvents.map(RustCore.activityEvent),
-            timestamp: timestamp
-        ), let next = recentActivityEvents.values.first(where: { $0.id == nextID }) else {
-            pendingActivityEvent = nil
-            return
-        }
-        pendingActivityEvent = next.id == lastDispatchedActivityEventID ? nil : next
-    }
-
-    /// Records the window to watch and the reaction the user is owed. Where the
-    /// pet stands to watch it is the director's answer, on the next tick.
-    private func beginWatching(
-        _ event: CompanionEvent,
-        sustained: CompanionReaction,
-        reaction: CompanionReaction,
-        at timestamp: TimeInterval
-    ) {
-        if let hint = event.locationHint {
-            activityHint = hint
-            if let region = hint.approximateRegion {
-                requestLuminanceRefresh(
-                    at: timestamp,
-                    near: region,
-                    every: Self.luminanceRefreshInterval
-                )
-            }
-        } else if activeActivitySourceID != event.sourceID {
-            // A different agent arriving without a window to point at: the last
-            // one's window is not evidence about this one, and leaving it in
-            // place would walk the pet to the wrong screen.
-            activityHint = nil
-        }
-        activeActivitySourceID = event.sourceID
-        activityHeardAt = timestamp
-        activeActivityReaction = sustained
-        guard activityHint != nil else {
-            // Nothing to walk to, so the reaction plays where the pet is.
-            activityArrivalReaction = nil
-            applyActivityReaction(reaction, at: timestamp)
-            return
-        }
-        activityArrivalReaction = reaction
-    }
-
     /// Collects everything the placement decision is allowed to look at.
     ///
     /// Nothing here decides anything. Gathering is the adapter's whole job on
@@ -1062,7 +922,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         let isRoaming = isRoamingEnabled && !isWatching
         let isStrollDue = isRoaming && !movement.hasRoute && timestamp >= nextWanderAt
 
-        if isWatching, let region = activityHint?.approximateRegion {
+        if isWatching, let region = activity.hint?.approximateRegion {
             requestLuminanceRefresh(
                 at: timestamp,
                 near: region,
@@ -1091,8 +951,8 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             isEvading: isEvadeTransitioning,
             isWalking: movement.hasRoute,
             isResting: behavior.state.isResting,
-            activitySourceID: activeActivitySourceID,
-            activityHint: activityHint,
+            activitySourceID: activity.activeSourceID,
+            activityHint: activity.hint,
             userIdleDuration: userIdleDuration,
             idleBeforeRest: restConfiguration.idleBeforeRest,
             isRoamingEnabled: isRoamingEnabled,
@@ -1141,7 +1001,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
                 // Nowhere to walk is not a reason to keep trying. The pet
                 // watches from where it stands and the seat is judged there.
                 placement.settleInPlace(
-                    sourceID: activeActivitySourceID,
+                    sourceID: activity.activeSourceID,
                     at: timestamp
                 )
                 holdSeat(at: timestamp, deltaTime: deltaTime)
@@ -1163,8 +1023,13 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         movement.cancelRoute(stop: false)
         movement.maximumSpeed = tuning.walkingSpeed
         _ = movement.update(deltaTime: deltaTime)
-        if activityArrivalReaction != nil {
-            deliverArrivalReaction(at: timestamp)
+        if activity.hasArrivalReaction {
+            apply(
+                activity.deliverArrivalReaction(
+                    isResting: behavior.state.isResting, at: timestamp
+                ),
+                at: timestamp
+            )
             return
         }
         switch behavior.state {
@@ -1177,41 +1042,11 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             // start hop, a glance at a file being read -- is delivered once and
             // then the pet is simply present, which is what a companion beside a
             // busy agent should look like.
-            guard let sustained = activeActivityReaction, sustained.isOngoing else { break }
-            applyActivityReaction(sustained, at: timestamp)
+            apply(
+                activity.sustainOnSeat(isResting: behavior.state.isResting, at: timestamp),
+                at: timestamp
+            )
         }
-    }
-
-    /// The reaction an event asked for is owed to the user until the pet
-    /// settles, whether it walked to a new seat or kept the one it had.
-    private func deliverArrivalReaction(at timestamp: TimeInterval) {
-        let reaction = activityArrivalReaction ?? activeActivityReaction ?? .observe
-        activityArrivalReaction = nil
-        applyActivityReaction(reaction, at: timestamp)
-    }
-
-    private func applyActivityReaction(
-        _ reaction: CompanionReaction,
-        at timestamp: TimeInterval
-    ) {
-        // Reactions never wake the creature by themselves. Callers that mean to
-        // interrupt rest call `cancelRestForActivity` first, so a session that
-        // simply ends leaves a sleeping pet asleep.
-        guard !behavior.state.isResting else { return }
-        behavior.handle(.reaction(reaction), at: timestamp)
-        movement.cancelRoute(stop: false)
-        nextWanderAt = activeActivitySourceID == nil ? timestamp + 2.0 : .infinity
-    }
-
-    /// The director releases the seat on its own once there is no source to
-    /// watch, so nothing here has to remember to clear a placement flag.
-    private func clearActiveActivity(at timestamp: TimeInterval) {
-        activeActivitySourceID = nil
-        activeActivityReaction = nil
-        activityArrivalReaction = nil
-        activityHint = nil
-        movement.cancelRoute(stop: false)
-        nextWanderAt = timestamp + 2.0
     }
 
     private func updateRestLifecycle(

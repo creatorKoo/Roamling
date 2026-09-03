@@ -187,7 +187,9 @@ macOS에서 실제로 문제를 일으키기 시작하거나, `RoamlingMac`이 �
 | 4 | AttentionModel + ReactionPolicy + Activity ✅ 2026-09-03 | 289 | **B** |
 | 5a | Movement + Pointer + Behavior + Timing ✅ 2026-09-03 | 576 | **B** |
 | 5b | **PlacementDirector** ✅ 2026-09-03 | 551 | **B** |
-| 6 | `RoamlingEngine` + RuntimeTuning | 1,697 | **B**, tick 1회 |
+| 6a | RuntimeTuning ✅ 2026-09-03 | 244 | A |
+| 6b | 활동 오케스트레이션 ✅ 2026-09-03 | 244 | **B** |
+| 6c | tick 본체 (rest · roaming · evade · 배치 적용) | ~600 | **B**, tick 1회 |
 
 단위 4도 B가 됐다 — `AttentionModel`은 어느 소스를 보고 있었는지와 언제 떠났는지를,
 `ReactionPolicy`는 마지막 반응 시각을 tick 사이에 들고 있다. Swift가 핸들만 쥐고 이벤트만
@@ -200,14 +202,37 @@ macOS에서 실제로 문제를 일으키기 시작하거나, `RoamlingMac`이 �
 경계로 자르는 편이 검증이 선명하다. (이 표에 있던 969줄은 실측이 아니라 어림이었다 —
 여섯 파일을 세어 보면 1,371줄이다.)
 
-**`RuntimeTuning`은 5b에서 빼서 6으로 옮겼다.** 다른 단위는 Swift 원본을 Core에 대조군으로
+**단위 6은 6a·6b·6c로 갈랐고, 여기서 방법이 한 번 바뀐다.** 지금까지는 "Swift 원본을 Core에
+대조군으로 남기고 런타임이 Rust를 부른다"였는데, **런타임 자신은 그 방법으로 옮길 수 없다** —
+스위치를 쥔 상위 호출자가 없다. 그래서 6b는 런타임의 private 필드 7개와 메서드 10개를 먼저
+`SwiftActivityDirector`로 **들어올려** 타입으로 만들고, 그것을 대조군으로 삼았다. 런타임의
+사본은 같은 커밋에서 지웠으므로 살아 있는 구현은 여전히 1벌이다.
+
+**6b는 답을 effect 목록으로 돌려준다.** 활동 디렉터는 펫을 움직일 수 없다 — movement ·
+behavior · placement 핸들은 런타임 것이다. 그래서 `[CancelRest, SettleInPlace, CancelRoute,
+SetNextWanderAt, ApplyReaction, RequestLuminance]` 중 필요한 것을 **순서대로** 돌려주고
+런타임이 수행한다. **순서가 곧 답이다** — setback은 자리를 확정하고, 경로를 끊고, *그 다음*
+반응한다. 버릴 코드가 아니다: 6c에서 런타임이 건너가면 이 effect들이 직접 호출로 바뀐다.
+
+플랫폼 호출은 규칙과 분리했다. "이 이벤트에 창 위치를 물어볼 가치가 있는가"는 Rust가 답하고
+(`wants_window_hint`), 실제 질의는 Swift가 한다 — 그 질의가 동기 왕복이라서.
+
+**`RuntimeTuning`은 5b에서 빼서 6a가 됐다.** 다른 단위는 Swift 원본을 Core에 대조군으로
 남기고 **런타임이** Rust를 부르는 모양인데, tuning은 타입 자체가 API다 — clamp가 `init`에
 있고 `RuntimeTuning.standard`·Codable 디코드가 Core 안에서 그 `init`을 직접 부른다.
 `RoamlingCore`는 `RoamlingEngine`을 못 부르므로(의존 방향은 항상 바깥 → Core), Rust가
 clamp를 맡으려면 타입을 Engine으로 **옮겨야** 하고 그러면 대조군이 사라진다. 살아 있는
 구현이 항상 1벌이라는 규칙과 대조 테스트 중 하나를 포기해야 하는 자리라서, 타입의 실제
-주인인 런타임이 건너갈 때 같이 옮긴다. (W4의 Windows 튜닝 패널이 같은 범위 표를 필요로
-하므로 미루는 것이지 버리는 것이 아니다.)
+주인인 런타임이 건너갈 때 같이 옮긴다. 6a에서 타입을 `RoamlingEngine`으로 올리고 규칙을 `tuning.rs`로 옮겼다.
+Codable과 11개 저장 필드는 그대로라 읽는 쪽은 아무것도 안 바뀐다. clamp가 순서에 의존하므로
+(`catchArmDistance`는 **이미 clamp된** awareness에 걸린다) fixture 13,701 케이스 중 대부분이
+범위 밖 값이다 — clamp가 실제로 걸릴 때만 순서가 보인다.
+
+**남은 것은 6c, tick 본체다.** rest lifecycle · roaming · evade · 배치 적용(`apply` ·
+`travelToSeat` · `holdSeat`)이고, 이것들은 전부 플랫폼 provider와 `PetAnimationPlayer`를
+직접 부른다. 즉 6c는 **Rust가 Swift를 콜백으로 부르는 방향 전환**이 필요하고, 그게 W4의
+`PlatformServices` 작업과 같은 자리다. 런타임 1,664줄 중 순수 결정 로직은 ~600줄이고
+나머지는 타이머 · UserDefaults · 진단 · 소스 구독 · 펫 로딩이라 이식 대상이 아니다.
 
 **5a가 A 대 B 비용 주장을 실제로 검증한 자리다.** tick당 크로싱 8회로 재보니 Rust 경로가
 4.706 µs/tick, Swift 원본이 0.099 µs/tick(둘 다 release) — 차액 4.6 µs는 60 Hz 프레임 예산의

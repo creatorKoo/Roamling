@@ -8,6 +8,7 @@
 uniffi::setup_scaffolding!();
 
 pub mod activity;
+pub mod activity_director;
 pub mod attention;
 pub mod behavior;
 pub mod coordinate_space;
@@ -28,6 +29,9 @@ pub use geometry::{clamped, swift_max, swift_min, WorldPoint, WorldRect, WorldSi
 pub use activity::{
     ActivityLifetime, CompanionEvent, CompanionEventKind, CompanionReaction, ReactingBehavior,
     UserContext,
+};
+pub use activity_director::{
+    wants_window_hint, ActivityDirector, ActivityEffect,
 };
 pub use attention::{
     AttentionConfiguration, AttentionModel, ReactionConfiguration, ReactionPolicy,
