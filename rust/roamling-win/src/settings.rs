@@ -42,12 +42,7 @@ impl Settings {
         let values = path
             .as_ref()
             .and_then(|path| std::fs::read_to_string(path).ok())
-            .map(|text| {
-                text.lines()
-                    .filter_map(|line| line.split_once('='))
-                    .map(|(key, value)| (key.trim().to_string(), value.trim().to_string()))
-                    .collect()
-            })
+            .map(|text| parse(&text))
             .unwrap_or_default();
         Self { values, path }
     }
@@ -96,5 +91,48 @@ impl Settings {
         if std::fs::write(&temporary, text).is_ok() {
             let _ = std::fs::rename(&temporary, path);
         }
+    }
+}
+
+/// `key=value` a line at a time.
+///
+/// Notepad and PowerShell's `Set-Content -Encoding utf8` both put a byte-order
+/// mark at the front of the file. Left on, it becomes part of the first key and
+/// that key silently stops resolving -- the pet forgets one setting and nothing
+/// says why. Found because a test run wrote the file that way.
+fn parse(text: &str) -> BTreeMap<String, String> {
+    text.trim_start_matches('\u{feff}')
+        .lines()
+        .filter_map(|line| line.split_once('='))
+        .map(|(key, value)| {
+            (
+                key.trim().trim_start_matches('\u{feff}').to_string(),
+                value.trim().to_string(),
+            )
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_byte_order_mark_does_not_eat_the_first_key() {
+        let values = parse("\u{feff}roamling.roaming=false\nroamling.avoidPointer=true\n");
+        assert_eq!(
+            values.get(ROAMING).map(String::as_str),
+            Some("false"),
+            "the mark became part of the key: {values:?}"
+        );
+        assert_eq!(values.len(), 2, "a mangled key survived: {values:?}");
+    }
+
+    /// The comment the writer puts at the top has no `=`, and neither do blank
+    /// lines. Neither should turn into an entry.
+    #[test]
+    fn comments_and_blanks_are_skipped() {
+        let values = parse("# a comment\n\nroamling.roaming=true\n");
+        assert_eq!(values.len(), 1);
     }
 }

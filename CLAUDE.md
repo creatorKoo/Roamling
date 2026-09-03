@@ -19,10 +19,14 @@ swift run Roamling
 Windows에는 Swift가 없다 — 그쪽 빌드는 전부 Rust다.
 
 ```powershell
-.\scripts\test.ps1                  # core + pet + 셸, 실패 시 non-zero
-cargo run -p roamling-win           # debug. 콘솔이 남아 상태 로그가 보인다
-.\rust\target\release\roamling.exe  # release. 콘솔 없이 트레이만
+.\scripts\test.ps1        # core + pet + 셸, 실패 시 non-zero
+.\scripts\run.ps1         # 끄고 -> 빌드 -> 다시 켜기. release, 트레이만
+.\scripts\run.ps1 -Debug  # 같은 것의 debug 빌드. 콘솔에 상태 로그가 찍힌다
 ```
+
+**빌드한 뒤에는 앱을 다시 켠다.** 상주 펫이라 내려둔 채로 두지 않고, 실무적으로도
+**실행 중인 사본이 자기 `roamling.exe`를 잡고 있어** `cargo build`가 "액세스가 거부되었습니다"로
+실패한다. `run.ps1`이 그 셋을 묶어 둔 이유다.
 
 **Rust 툴체인이 필수다** (rustup, `~/.cargo/bin`이 PATH에). `rust/roamling-core`가 Swift
 Core를 한 단위씩 넘겨받는 중이고, **앱이 이미 그걸 링크한다** — `scripts/test.sh`와
