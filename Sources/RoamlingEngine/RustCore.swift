@@ -26,6 +26,10 @@ enum RustCore {
         }
     }
 
+    /// Shared with `RustPlacement`, which builds the same records.
+    static func ffiRect(_ value: WorldRect) -> FfiRect { rect(value) }
+    static func ffiLuminance(_ value: LuminanceField?) -> FfiLuminanceField? { luminance(value) }
+
     private static func rect(_ value: WorldRect) -> FfiRect {
         FfiRect(x: value.minX, y: value.minY, width: value.size.width, height: value.size.height)
     }
@@ -527,5 +531,100 @@ public final class RustPointerModel {
             lookDirectionDegrees: decision.lookDirectionDegrees,
             attentionRate: decision.attentionRate
         )
+    }
+}
+
+/// `PlacementDirector` with its seat, its trip and its last review held in Rust.
+///
+/// Public only so the switch-over test can drive it beside the Swift original
+/// it replaced. That goes when the original does.
+public final class RustPlacement {
+    private let handle = Placement()
+    /// Pushed only when they change. The luminance grid is 64 columns wide and
+    /// refreshes every three seconds at most, so sending it with every tick
+    /// would be the one shape that makes this crossing cost something -- and
+    /// comparing the samples is far cheaper than marshalling them.
+    private var pushedDisplays: [DisplaySnapshot]?
+    private var pushedField: LuminanceField?
+
+    private static let reasonOrder: [PlacementTravelReason] = [
+        .newActivity, .coveringCaret, .coveringWork, .plannedBlind, .followedFocus
+    ]
+
+    public init() {}
+
+    public var isSeated: Bool { handle.isSeated() }
+    public var isTravelling: Bool { handle.isTravelling() }
+
+    public func settleInPlace(sourceID: String?, at timestamp: TimeInterval) {
+        handle.settleInPlace(sourceId: sourceID, timestamp: timestamp)
+    }
+
+    public func decide(_ situation: PetSituation) -> PlacementIntent {
+        if pushedDisplays != situation.world.displays {
+            pushedDisplays = situation.world.displays
+            handle.setDisplays(displays: situation.world.displays.map { display in
+                FfiDisplay(
+                    id: display.id,
+                    frame: RustCore.ffiRect(display.frame),
+                    visibleFrame: RustCore.ffiRect(display.visibleFrame)
+                )
+            })
+        }
+        if pushedField != situation.world.luminance {
+            pushedField = situation.world.luminance
+            handle.setField(field: RustCore.ffiLuminance(situation.world.luminance))
+        }
+
+        let answer = handle.decide(situation: FfiSituation(
+            timestamp: situation.timestamp,
+            x: situation.position.x,
+            y: situation.position.y,
+            objectWidth: situation.objectSize.width,
+            objectHeight: situation.objectSize.height,
+            pointer: situation.pointerPosition.map { [$0.x, $0.y] },
+            walkingSpeed: situation.walkingSpeed,
+            isPointerOwned: situation.isPointerOwned,
+            isPointerWatching: situation.isPointerWatching,
+            isEvading: situation.isEvading,
+            isWalking: situation.isWalking,
+            isResting: situation.isResting,
+            activitySourceId: situation.activitySourceID,
+            hint: situation.activityHint.map {
+                FfiHint(
+                    region: $0.approximateRegion.map(RustCore.ffiRect),
+                    confidence: $0.confidence
+                )
+            },
+            focus: situation.world.focus.map { focus in
+                FfiFocus(
+                    windowFrame: focus.windowFrame.map(RustCore.ffiRect),
+                    focusedElementFrame: focus.focusedElementFrame.map(RustCore.ffiRect),
+                    caretFrame: focus.caretFrame.map(RustCore.ffiRect),
+                    confidence: focus.confidence
+                )
+            },
+            userIdleDuration: situation.userIdleDuration,
+            idleBeforeRest: situation.idleBeforeRest,
+            isRoamingEnabled: situation.isRoamingEnabled,
+            isStrollDue: situation.isStrollDue,
+            strollCandidates: situation.strollCandidates.map { FfiPoint(x: $0.x, y: $0.y) }
+        ))
+
+        return switch answer.kind {
+        case 0: .none
+        case 2: .travel(
+            InterestDestination(
+                point: WorldPoint(x: answer.x, y: answer.y),
+                displayID: answer.displayId,
+                score: answer.score
+            ),
+            reason: Self.reasonOrder[Int(answer.reason)]
+        )
+        case 3: .sleepInPlace
+        case 4: .stroll(WorldPoint(x: answer.x, y: answer.y))
+        case 5: .escape(WorldPoint(x: answer.x, y: answer.y))
+        default: .hold
+        }
     }
 }

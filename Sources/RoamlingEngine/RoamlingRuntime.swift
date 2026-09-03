@@ -130,7 +130,9 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     /// The window the pet is watching. It outlives any one walk: a parked pet
     /// still has to know which window to judge its seat against.
     private var activityHint: LocationHint?
-    private var placement = PlacementDirector(planner: RustInterestPlanner())
+    // The director, with its seat, its trip and its last review held in Rust.
+    // `docs/windows.md` unit 5b.
+    private let placement = RustPlacement()
     private var cachedFocus: FocusSnapshot?
     private var focusQueriedAt: TimeInterval = -.infinity
     private var cachedLuminance: LuminanceField?

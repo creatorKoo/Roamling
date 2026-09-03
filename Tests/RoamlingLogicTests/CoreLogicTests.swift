@@ -550,6 +550,136 @@ func coreLogicTests() -> [LogicTest] {
             }
             try expect(compared == 2_400, "only \(compared) ticks compared")
         },
+        LogicTest(name: "the Rust director agrees with the Swift one it replaced") {
+            // The director carries a seat, a trip and the time of its last
+            // review, so this is a trajectory: the pet walks toward what it was
+            // told, which is the only way arrival and the review beat happen.
+            //
+            // What this adds over the Rust fixture is the crossing. The grid
+            // and the display list are pushed only when they change, and a
+            // missed push would hand the director a world the pet is no longer
+            // standing in.
+            var seed: UInt64 = 0x4B62_D19E_37F0_A85C
+            func step() -> UInt64 {
+                seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17
+                return seed
+            }
+            func unit() -> Double { Double(step() % 1_000_001) / 1_000_000 }
+            func pick(_ count: Int) -> Int { Int(step() % UInt64(count)) }
+            func span(_ low: Double, _ high: Double) -> Double { low + unit() * (high - low) }
+
+            let display = DisplaySnapshot(
+                id: "d0", name: "d0",
+                frame: WorldRect(x: 0, y: 0, width: 1_600, height: 1_000),
+                visibleFrame: WorldRect(x: 0, y: 0, width: 1_600, height: 1_000),
+                scale: 1
+            )
+            let region = WorldRect(x: 900, y: 500, width: 400, height: 300)
+            let hint = LocationHint(approximateRegion: region, confidence: 0.8)
+            let size = WorldSize(width: 60, height: 60)
+
+            /// Flat background with one busy rectangle, because emptiness
+            /// scores flatness: uniform noise reads as busy everywhere and the
+            /// director would never find anywhere worth sitting.
+            func makeField(busyColumn: Int, busyRow: Int) -> LuminanceField? {
+                let columns = 16, rows = 12
+                let samples = (0..<(columns * rows)).map { index -> Double in
+                    let column = index % columns
+                    let row = index / columns
+                    let busy = abs(column - busyColumn) < 3 && abs(row - busyRow) < 3
+                    return busy ? ((column + row) % 2 == 0 ? 0.05 : 0.95) : 0.5
+                }
+                return LuminanceField(
+                    bounds: display.visibleFrame, columns: columns, rows: rows, samples: samples
+                )
+            }
+
+            var compared = 0
+            for run in 0..<30 {
+                var swiftDirector = PlacementDirector(planner: RustCoreTestBridge.interestPlanner)
+                let rustDirector = RustPlacement()
+                var pet = WorldPoint(x: span(60, 1_500), y: span(60, 900))
+                var now = 1_000.0 + unit() * 20
+                var field = makeField(busyColumn: pick(16), busyRow: pick(12))
+
+                for tick in 0..<40 {
+                    now += tick % 5 == 0 ? span(0.4, 1.4) : 1.0 / 30.0
+                    // The capture refreshing is exactly the event the push
+                    // cache has to notice.
+                    if step() % 9 == 0 {
+                        field = step() % 5 == 0
+                            ? nil
+                            : makeField(busyColumn: pick(16), busyRow: pick(12))
+                    }
+                    let hasSource = step() % 6 != 0
+                    let world = DesktopWorldSnapshot(
+                        displays: [display],
+                        focus: step() % 3 == 0
+                            ? FocusSnapshot(
+                                windowFrame: region,
+                                focusedElementFrame: nil,
+                                caretFrame: WorldRect(
+                                    x: pet.x - 1, y: pet.y - 8, width: 2, height: 16
+                                ),
+                                confidence: 0.9
+                              )
+                            : nil,
+                        luminance: field
+                    )
+                    let situation = PetSituation(
+                        timestamp: now,
+                        world: world,
+                        position: pet,
+                        objectSize: size,
+                        pointerPosition: step() % 3 == 0
+                            ? WorldPoint(x: span(0, 1_600), y: span(0, 1_000)) : nil,
+                        walkingSpeed: 160,
+                        isPointerOwned: step() % 17 == 0,
+                        isPointerWatching: step() % 11 == 0,
+                        isEvading: step() % 19 == 0,
+                        isWalking: step() % 7 == 0,
+                        isResting: step() % 13 == 0,
+                        activitySourceID: hasSource ? "s0" : nil,
+                        activityHint: hasSource ? hint : nil,
+                        userIdleDuration: unit() * 200,
+                        idleBeforeRest: step() % 3 == 0 ? 75 : .infinity,
+                        isRoamingEnabled: step() % 5 != 0,
+                        isStrollDue: step() % 12 == 0,
+                        strollCandidates: (0..<pick(4)).map { _ in
+                            WorldPoint(x: span(0, 1_600), y: span(0, 1_000))
+                        }
+                    )
+
+                    let swiftIntent = swiftDirector.decide(situation)
+                    let rustIntent = rustDirector.decide(situation)
+                    try expect(
+                        swiftIntent == rustIntent,
+                        "intent differs at run \(run) tick \(tick): "
+                            + "\(swiftIntent) vs \(rustIntent)"
+                    )
+                    try expect(
+                        swiftDirector.isSeated == rustDirector.isSeated
+                            && swiftDirector.isTravelling == rustDirector.isTravelling,
+                        "director state differs at run \(run) tick \(tick)"
+                    )
+
+                    if case let .travel(destination, _) = swiftIntent {
+                        pet = destination.point
+                    } else if case let .stroll(point) = swiftIntent {
+                        pet = point
+                    } else if case let .escape(point) = swiftIntent {
+                        pet = point
+                    }
+                    if step() % 21 == 0 {
+                        let owner: String? = step() % 2 == 0 ? "s0" : nil
+                        swiftDirector.settleInPlace(sourceID: owner, at: now)
+                        rustDirector.settleInPlace(sourceID: owner, at: now)
+                    }
+                    compared += 1
+                }
+            }
+            try expect(compared == 1_200, "only \(compared) ticks compared")
+        },
         LogicTest(name: "two seats of equal score pick the same one every launch") {
             // Mirrored seats either side of a centred window score identically
             // and sit the same distance from the pet. The candidates used to be

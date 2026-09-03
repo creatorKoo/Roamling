@@ -186,8 +186,8 @@ macOS에서 실제로 문제를 일으키기 시작하거나, `RoamlingMac`이 �
 | 3b | InterestPlacement ✅ 2026-09-03 | 229 | A |
 | 4 | AttentionModel + ReactionPolicy + Activity ✅ 2026-09-03 | 289 | **B** |
 | 5a | Movement + Pointer + Behavior + Timing ✅ 2026-09-03 | 576 | **B** |
-| 5b | RuntimeTuning + **PlacementDirector** | 795 | **B** |
-| 6 | `RoamlingEngine` | 1,453 | **B**, tick 1회 |
+| 5b | **PlacementDirector** ✅ 2026-09-03 | 551 | **B** |
+| 6 | `RoamlingEngine` + RuntimeTuning | 1,697 | **B**, tick 1회 |
 
 단위 4도 B가 됐다 — `AttentionModel`은 어느 소스를 보고 있었는지와 언제 떠났는지를,
 `ReactionPolicy`는 마지막 반응 시각을 tick 사이에 들고 있다. Swift가 핸들만 쥐고 이벤트만
@@ -196,13 +196,29 @@ macOS에서 실제로 문제를 일으키기 시작하거나, `RoamlingMac`이 �
 
 **단위 5는 5a와 5b로 갈랐다.** 5a는 tick 루프가 매 프레임 미는 세 state machine
 (`MovementController` · `PointerInteractionModel` · `BehaviorController`+`BehaviorTiming`)이고,
-5b가 그 위에 앉는 `RuntimeTuning`과 `PlacementDirector`다. "매 tick 불리는 것"과 "그것을
-지휘하는 것"의 경계로 자르는 편이 검증이 선명하다. (이 표에 있던 969줄은 실측이 아니라
-어림이었다 — 여섯 파일을 세어 보면 1,371줄이다.)
+5b가 그 위에 앉는 `PlacementDirector`다. "매 tick 불리는 것"과 "그것을 지휘하는 것"의
+경계로 자르는 편이 검증이 선명하다. (이 표에 있던 969줄은 실측이 아니라 어림이었다 —
+여섯 파일을 세어 보면 1,371줄이다.)
+
+**`RuntimeTuning`은 5b에서 빼서 6으로 옮겼다.** 다른 단위는 Swift 원본을 Core에 대조군으로
+남기고 **런타임이** Rust를 부르는 모양인데, tuning은 타입 자체가 API다 — clamp가 `init`에
+있고 `RuntimeTuning.standard`·Codable 디코드가 Core 안에서 그 `init`을 직접 부른다.
+`RoamlingCore`는 `RoamlingEngine`을 못 부르므로(의존 방향은 항상 바깥 → Core), Rust가
+clamp를 맡으려면 타입을 Engine으로 **옮겨야** 하고 그러면 대조군이 사라진다. 살아 있는
+구현이 항상 1벌이라는 규칙과 대조 테스트 중 하나를 포기해야 하는 자리라서, 타입의 실제
+주인인 런타임이 건너갈 때 같이 옮긴다. (W4의 Windows 튜닝 패널이 같은 범위 표를 필요로
+하므로 미루는 것이지 버리는 것이 아니다.)
 
 **5a가 A 대 B 비용 주장을 실제로 검증한 자리다.** tick당 크로싱 8회로 재보니 Rust 경로가
 4.706 µs/tick, Swift 원본이 0.099 µs/tick(둘 다 release) — 차액 4.6 µs는 60 Hz 프레임 예산의
 **0.03%**이고, 12절이 미리 잰 4.7 µs와 같은 값이다. 벤치는 `output/w-unit5/bench.swift`.
+
+**5b는 grid를 tick마다 보내지 않는다.** `PetSituation`은 world 전체를 들고 있고 그 안의
+luminance grid는 64열 × 40행 = 2,560개 double이다. tick마다 보내면 20 µs/tick인데,
+디스플레이 목록과 grid를 **바뀔 때만** 밀면(캡처는 3초에 한 번) 2.75 µs/tick이다 — 7배
+차이고, 이는 **바꾸기 전 Swift director의 2.86 µs와 같다.** Swift director는 review 때마다
+scene을 마샬링해 Rust planner를 불렀으므로, 방향을 뒤집어 상태를 Rust에 두니 크로싱이
+오히려 줄었다. 벤치는 `output/w-unit5/bench-director.swift`.
 
 5a에서 **경계 자체가 결함을 하나 냈고, 대조 테스트가 잡았다.** `RustPointerModel`이
 `init` 안에서 `configuration`에 대입했는데 **Swift는 `init` 안의 대입에 `didSet`을 실행하지
@@ -210,7 +226,7 @@ macOS에서 실제로 문제를 일으키기 시작하거나, `RoamlingMac`이 �
 커서를 잘못된 속도로 봤다. 알고리즘은 fixture가 비트 단위로 맞다고 증명한 뒤였다. 크로싱은
 fixture가 증명해 주지 않는다.
 
-`PlacementDirector` 366줄은 원래 단위 3에 있었는데 5로 옮겼다 — tick 사이에 상태(자리, 여정,
+`PlacementDirector` 551줄은 원래 단위 3에 있었는데 5로 옮겼다 — tick 사이에 상태(자리, 여정,
 마지막 리뷰)를 들고 있어서 호출마다 변환하는 A가 아니라 상태를 Rust가 들고 핸들로 부르는
 B다. 3b는 그 director가 **묻는 대상**(`InterestPlacing`)만 Rust로 넘겼다.
 
@@ -233,6 +249,21 @@ destination 전부 일치). Swift 원본은 그 대조군으로 남아 있고, �
 (`(e+l)-e != l`). 그래서 생성기가 `t - base == offset`이 성립하는 double을 nextUp/nextDown으로
 찾아 쓰고, 7개 transient 상태 각각을 길이 -1ulp / 정확히 / +1ulp 세 지점에서 tick한다. 그
 스윕을 넣은 뒤 변이 7개가 모두 죽는다.
+
+**5b에서 같은 문제가 더 크게 나왔다.** director의 답 6종 중 난수 시뮬레이션이 낸 것은
+4종뿐이고, `escape`(사용자 문단 위에서 비켜서기)는 8,699줄에 한 번, `coveringCaret`·
+`coveringWork`(앉은 자리가 나중에 틀려짐)는 0번이었다. 원인은 세 가지였고 전부 실측으로
+찾았다 — (1) emptiness는 밝기가 아니라 **평탄도**를 재는데(이웃 차이 0.02면 이미 "꽉 참")
+난수 필드는 어디나 busy라 앉을 자리가 아예 없었다. 배경은 평평하게 두고 busy 사각형을
+몇 개 얹는 식으로 바꿨다. (2) `escape`는 2.5초의 parked dwell을 요구하는데 run이 34 tick
+× 1/30초라 도달 자체가 불가능했다. (3) 도착 후의 자리는 **정의상** caret과 content를 피해
+고른 것이라, 화면이 그 위에서 바뀌지 않는 한 두 규칙은 발동하지 않는다.
+
+그래서 fixture 꼬리를 **스크립트**로 만들었다: 앉힌 다음 caret을 펫 위로 옮기고, 창을
+채우고, 8초 타임아웃을 넘기고, arrival tolerance에 정확히 서 본다. 이 절을 넣은 뒤
+intent 6종·travel 사유 5종이 모두 나오고, 타임아웃·arrival `<=`·caret 규칙·abandon clamp
+변이가 전부 죽는다. **타임아웃은 사용자가 제보한 제자리 걷기 버그를 구조하던 바로 그
+분기다** — 난수만으로는 한 번도 실행되지 않았다.
 
 ### 양 플랫폼이 붙는 방식이 다르다
 

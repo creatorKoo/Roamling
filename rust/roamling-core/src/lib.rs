@@ -16,6 +16,7 @@ pub mod ffi;
 pub mod interest;
 pub mod geometry;
 pub mod movement;
+pub mod placement;
 pub mod pointer;
 pub mod safe_zone;
 pub mod topology;
@@ -35,6 +36,10 @@ pub use behavior::{
     BEHAVIOR_STATES,
 };
 pub use movement::{MovementConfiguration, MovementController, MovementUpdate};
+pub use placement::{
+    PetSituation, PlacementConfiguration, PlacementDirector, PlacementIntent,
+    PlacementTravelReason,
+};
 pub use pointer::{
     look_direction_degrees, PointerDecision, PointerInteractionConfiguration,
     PointerInteractionModel, PointerKinematics, PointerProximity,
