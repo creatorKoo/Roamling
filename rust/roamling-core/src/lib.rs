@@ -9,11 +9,14 @@ uniffi::setup_scaffolding!();
 
 pub mod activity;
 pub mod attention;
+pub mod behavior;
 pub mod coordinate_space;
 pub mod emptiness;
 pub mod ffi;
 pub mod interest;
 pub mod geometry;
+pub mod movement;
+pub mod pointer;
 pub mod safe_zone;
 pub mod topology;
 pub mod world;
@@ -26,6 +29,15 @@ pub use activity::{
 };
 pub use attention::{
     AttentionConfiguration, AttentionModel, ReactionConfiguration, ReactionPolicy,
+};
+pub use behavior::{
+    timing, BehaviorController, BehaviorInput, BehaviorState, BehaviorTransition,
+    BEHAVIOR_STATES,
+};
+pub use movement::{MovementConfiguration, MovementController, MovementUpdate};
+pub use pointer::{
+    look_direction_degrees, PointerDecision, PointerInteractionConfiguration,
+    PointerInteractionModel, PointerKinematics, PointerProximity,
 };
 pub use emptiness::{
     CandidatePositionScorer, LuminanceField, PositionCandidate, VisualEmptiness,

@@ -75,6 +75,13 @@ public struct BehaviorTransition: Equatable, Sendable {
     public let from: BehaviorState
     public let to: BehaviorState
     public let changed: Bool
+
+    /// Public so the Rust core can report one.
+    public init(from: BehaviorState, to: BehaviorState, changed: Bool) {
+        self.from = from
+        self.to = to
+        self.changed = changed
+    }
 }
 
 public struct BehaviorController: Sendable {

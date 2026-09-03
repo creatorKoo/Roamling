@@ -26,6 +26,14 @@ public struct MovementUpdate: Equatable, Sendable {
     public let position: WorldPoint
     public let velocity: WorldVector
     public let reachedDestination: Bool
+
+    /// Public so the Rust core can report one. It is a plain answer with no
+    /// invariants of its own -- the controller that produced it holds those.
+    public init(position: WorldPoint, velocity: WorldVector, reachedDestination: Bool) {
+        self.position = position
+        self.velocity = velocity
+        self.reachedDestination = reachedDestination
+    }
 }
 
 public struct MovementController: Sendable {

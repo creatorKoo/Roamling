@@ -386,6 +386,170 @@ func coreLogicTests() -> [LogicTest] {
             }
             try expect(judged > 100, "only \(judged) fields judged")
         },
+        LogicTest(name: "the behaviour wire order matches the state list") {
+            // Swift sends the index, so this list and `BEHAVIOR_STATES` in
+            // `behavior.rs` are one contract. Adding a state in the middle
+            // renames every state above it, and the pet would start sleeping
+            // when it meant to stretch. Fail here instead.
+            try expect(
+                behaviorStateOrder == BehaviorState.allCases,
+                "the wire order and the state list have drifted apart"
+            )
+        },
+        LogicTest(name: "the Rust tick models agree with the Swift ones they replaced") {
+            // All three carry state, so this is a script rather than a set of
+            // independent comparisons -- a route is walked over hundreds of
+            // ticks, closing speed only exists between two samples, and a
+            // transient state only ends relative to when it began.
+            //
+            // The Rust differential fixture already proves the algorithms match
+            // bit for bit. What this adds is the crossing: the index mappings,
+            // the argument order, and the configuration that only reaches Rust
+            // through a `didSet`.
+            var seed: UInt64 = 0x2F94_C0B7_51DA_836E
+            func step() -> UInt64 {
+                seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17
+                return seed
+            }
+            func unit() -> Double { Double(step() % 1_000_001) / 1_000_000 }
+            func pick(_ count: Int) -> Int { Int(step() % UInt64(count)) }
+            func span(_ low: Double, _ high: Double) -> Double { low + unit() * (high - low) }
+
+            let proximities: [PointerProximity] = [
+                .far, .watching, .slowEvade, .fastEvade, .catchable
+            ]
+            let reactions: [CompanionReaction] = [
+                .glance, .observe, .spark, .work, .paw,
+                .smallCelebrate, .largeCelebrate, .sad, .calm
+            ]
+            var compared = 0
+
+            for run in 0..<40 {
+                let start = WorldPoint(x: span(0, 1_400), y: span(0, 900))
+                let configuration = MovementConfiguration(
+                    maximumSpeed: span(20, 320), acceleration: 90, deceleration: 115
+                )
+                var swiftMovement = MovementController(
+                    position: start, velocity: .zero, configuration: configuration
+                )
+                let rustMovement = RustMovement(
+                    position: start, velocity: .zero, configuration: configuration
+                )
+
+                let startState = BehaviorState.allCases[pick(BehaviorState.allCases.count)]
+                let enteredAt = span(0, 100)
+                var swiftBehavior = BehaviorController(state: startState, enteredAt: enteredAt)
+                let rustBehavior = RustBehavior(state: startState, enteredAt: enteredAt)
+
+                let tuning = RuntimeTuning(
+                    walkingSpeed: span(20, 320),
+                    pointerAwarenessDistance: span(140, 360),
+                    catchArmDistance: span(40, 140),
+                    catchApproachSpeed: span(150, 900)
+                )
+                var swiftPointer = PointerInteractionModel(
+                    configuration: tuning.pointerConfiguration
+                )
+                let rustPointer = RustPointerModel(configuration: tuning.pointerConfiguration)
+
+                var now = enteredAt
+                var pet = start
+                var cursor = WorldPoint(x: pet.x + span(-400, 400), y: pet.y + span(-400, 400))
+
+                for tick in 0..<60 {
+                    now += 1.0 / 60.0
+
+                    if tick % 17 == 0 {
+                        let waypoints = (0..<(1 + pick(3))).map { _ in
+                            WorldPoint(x: span(0, 1_400), y: span(0, 900))
+                        }
+                        swiftMovement.setRoute(waypoints)
+                        rustMovement.setRoute(waypoints)
+                    }
+                    if tick % 23 == 0 {
+                        let speed = span(20, 320)
+                        swiftMovement.configuration.maximumSpeed = speed
+                        rustMovement.maximumSpeed = speed
+                    }
+                    let swiftUpdate = swiftMovement.update(deltaTime: 1.0 / 60.0)
+                    let rustUpdate = rustMovement.update(deltaTime: 1.0 / 60.0)
+                    try expect(
+                        swiftUpdate == rustUpdate,
+                        "movement differs at run \(run) tick \(tick): "
+                            + "\(swiftUpdate) vs \(rustUpdate)"
+                    )
+                    try expect(
+                        swiftMovement.hasRoute == rustMovement.hasRoute
+                            && swiftMovement.destination == rustMovement.destination,
+                        "route state differs at run \(run) tick \(tick)"
+                    )
+                    pet = swiftUpdate.position
+
+                    // The cursor closes on the pet, so the run walks through
+                    // the proximity bands instead of sampling them at random.
+                    cursor = WorldPoint(
+                        x: cursor.x + (pet.x - cursor.x) * unit() * 0.6 + span(-8, 8),
+                        y: cursor.y + (pet.y - cursor.y) * unit() * 0.6 + span(-8, 8)
+                    )
+                    if step() % 29 == 0 {
+                        swiftPointer.reset()
+                        rustPointer.reset()
+                    }
+                    if step() % 31 == 0 {
+                        let replacement = RuntimeTuning(
+                            walkingSpeed: span(20, 320),
+                            pointerAwarenessDistance: span(140, 360),
+                            catchArmDistance: span(40, 140)
+                        ).pointerConfiguration
+                        swiftPointer.configuration = replacement
+                        rustPointer.configuration = replacement
+                    }
+                    let swiftDecision = swiftPointer.evaluate(
+                        pointer: cursor, pet: pet, timestamp: now
+                    )
+                    let rustDecision = rustPointer.evaluate(
+                        pointer: cursor, pet: pet, timestamp: now
+                    )
+                    try expect(
+                        swiftDecision == rustDecision,
+                        "pointer differs at run \(run) tick \(tick): "
+                            + "\(swiftDecision) vs \(rustDecision)"
+                    )
+
+                    let code = pick(14)
+                    let input: BehaviorInput = switch code {
+                    case 0: .beginWander
+                    case 1: .arrived
+                    case 2: .beginRest
+                    case 3: .seekSleepSpot
+                    case 4: .sleepSpotReached
+                    case 5: .beginStretch
+                    case 6: .beginInterestTravel
+                    case 7: .pointer(proximities[pick(proximities.count)])
+                    case 8: .catchBegan
+                    case 9: .dragMoved
+                    case 10: .mouseReleased
+                    case 11: .reaction(reactions[pick(reactions.count)])
+                    case 12: .meaningfulActivity
+                    default: .tick
+                    }
+                    let swiftTransition = swiftBehavior.handle(input, at: now)
+                    let rustTransition = rustBehavior.handle(input, at: now)
+                    try expect(
+                        swiftTransition == rustTransition,
+                        "behaviour differs at run \(run) tick \(tick) on \(input): "
+                            + "\(swiftTransition) vs \(rustTransition)"
+                    )
+                    try expect(
+                        swiftBehavior.state == rustBehavior.state
+                            && swiftBehavior.enteredAt == rustBehavior.enteredAt,
+                        "behaviour state differs at run \(run) tick \(tick)"
+                    )
+                    compared += 1
+                }
+            }
+            try expect(compared == 2_400, "only \(compared) ticks compared")
+        },
         LogicTest(name: "two seats of equal score pick the same one every launch") {
             // Mirrored seats either side of a centred window score identically
             // and sit the same distance from the pet. The candidates used to be

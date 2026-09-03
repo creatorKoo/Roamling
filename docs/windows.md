@@ -185,13 +185,30 @@ macOS에서 실제로 문제를 일으키기 시작하거나, `RoamlingMac`이 �
 | 3a | VisualEmptiness + CandidateScoring ✅ 2026-09-03 | 207 | A |
 | 3b | InterestPlacement ✅ 2026-09-03 | 229 | A |
 | 4 | AttentionModel + ReactionPolicy + Activity ✅ 2026-09-03 | 289 | **B** |
-| 5 | Movement + Pointer + Behavior + Timing + Tuning + **PlacementDirector** | 969 | **B** |
+| 5a | Movement + Pointer + Behavior + Timing ✅ 2026-09-03 | 576 | **B** |
+| 5b | RuntimeTuning + **PlacementDirector** | 795 | **B** |
 | 6 | `RoamlingEngine` | 1,453 | **B**, tick 1회 |
 
 단위 4도 B가 됐다 — `AttentionModel`은 어느 소스를 보고 있었는지와 언제 떠났는지를,
 `ReactionPolicy`는 마지막 반응 시각을 tick 사이에 들고 있다. Swift가 핸들만 쥐고 이벤트만
 넘긴다. 선택된 이벤트는 **id만 돌려받는다** — Swift가 자기 표에서 되찾으므로 이벤트 전체를
 마샬링해 돌려보낼 이유가 없다.
+
+**단위 5는 5a와 5b로 갈랐다.** 5a는 tick 루프가 매 프레임 미는 세 state machine
+(`MovementController` · `PointerInteractionModel` · `BehaviorController`+`BehaviorTiming`)이고,
+5b가 그 위에 앉는 `RuntimeTuning`과 `PlacementDirector`다. "매 tick 불리는 것"과 "그것을
+지휘하는 것"의 경계로 자르는 편이 검증이 선명하다. (이 표에 있던 969줄은 실측이 아니라
+어림이었다 — 여섯 파일을 세어 보면 1,371줄이다.)
+
+**5a가 A 대 B 비용 주장을 실제로 검증한 자리다.** tick당 크로싱 8회로 재보니 Rust 경로가
+4.706 µs/tick, Swift 원본이 0.099 µs/tick(둘 다 release) — 차액 4.6 µs는 60 Hz 프레임 예산의
+**0.03%**이고, 12절이 미리 잰 4.7 µs와 같은 값이다. 벤치는 `output/w-unit5/bench.swift`.
+
+5a에서 **경계 자체가 결함을 하나 냈고, 대조 테스트가 잡았다.** `RustPointerModel`이
+`init` 안에서 `configuration`에 대입했는데 **Swift는 `init` 안의 대입에 `didSet`을 실행하지
+않는다** — 핸들이 첫 튜닝 변경 전까지 기본값(awareness 170 / catch 74)으로 남아서 펫이
+커서를 잘못된 속도로 봤다. 알고리즘은 fixture가 비트 단위로 맞다고 증명한 뒤였다. 크로싱은
+fixture가 증명해 주지 않는다.
 
 `PlacementDirector` 366줄은 원래 단위 3에 있었는데 5로 옮겼다 — tick 사이에 상태(자리, 여정,
 마지막 리뷰)를 들고 있어서 호출마다 변환하는 A가 아니라 상태를 Rust가 들고 핸들로 부르는
@@ -209,6 +226,13 @@ C 모듈은 `systemLibrary` 타깃이어야 한다 — `-I` 플래그는 그 타
 
 전환 확인은 **두 구현을 나란히 돌려 비교하는 테스트**가 한다(200개 배치, 400+ zone과 rest
 destination 전부 일치). Swift 원본은 그 대조군으로 남아 있고, 지울 때 이 테스트도 같이 간다.
+
+**differential fixture는 경계값을 일부러 심어야 한다.** 5a의 fixture를 난수만으로 만들었더니
+`age >= BehaviorTiming.x`를 `>`로 바꾸는 변이 7개가 전부 살아남았다 — 부동소수 난수가 정확히
+공표된 길이에 떨어질 리 없기 때문이다. `enteredAt + length`를 그냥 쓰는 것으로도 부족하다
+(`(e+l)-e != l`). 그래서 생성기가 `t - base == offset`이 성립하는 double을 nextUp/nextDown으로
+찾아 쓰고, 7개 transient 상태 각각을 길이 -1ulp / 정확히 / +1ulp 세 지점에서 tick한다. 그
+스윕을 넣은 뒤 변이 7개가 모두 죽는다.
 
 ### 양 플랫폼이 붙는 방식이 다르다
 

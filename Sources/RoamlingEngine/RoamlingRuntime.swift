@@ -102,9 +102,11 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         set { services.coordinateSpace.current = newValue }
     }
     private var world: DesktopWorldSnapshot
-    private var movement: MovementController
-    private var behavior: BehaviorController
-    private var pointerModel: PointerInteractionModel
+    // The three models the tick loop steps every frame, each with its state in
+    // Rust and a handle on this side. `docs/windows.md` unit 5a.
+    private let movement: RustMovement
+    private let behavior: RustBehavior
+    private let pointerModel: RustPointerModel
     private var animationPlayer: PetAnimationPlayer
 
     private var tickTimer: Timer?
@@ -242,16 +244,17 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         displays = displaySet.displays
         world = initialWorld
         tuning = runtimeTuning
-        movement = MovementController(
+        movement = RustMovement(
             position: initialPosition,
+            velocity: .zero,
             configuration: MovementConfiguration(
                 maximumSpeed: runtimeTuning.walkingSpeed,
                 acceleration: 90,
                 deceleration: 115
             )
         )
-        behavior = BehaviorController(enteredAt: now())
-        pointerModel = PointerInteractionModel(configuration: runtimeTuning.pointerConfiguration)
+        behavior = RustBehavior(enteredAt: now())
+        pointerModel = RustPointerModel(configuration: runtimeTuning.pointerConfiguration)
         animationPlayer = PetAnimationPlayer(asset: initialAsset)
         isRoamingEnabled = defaults.bool(forKey: DefaultsKey.roaming)
         isPointerAvoidanceEnabled = defaults.bool(forKey: DefaultsKey.avoidPointer)
@@ -335,7 +338,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         tuning = normalized
         pointerModel.configuration = normalized.pointerConfiguration
         pointerModel.reset()
-        movement.configuration.maximumSpeed = normalized.walkingSpeed
+        movement.maximumSpeed = normalized.walkingSpeed
         overlay.setHitRegionScale(normalized.hitRegionScale)
         if pauseChanged, !movement.hasRoute,
            behavior.state != .caught, behavior.state != .dragged {
@@ -540,7 +543,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
                 isEvadeTransitioning = false
                 movement.cancelRoute(stop: false)
                 behavior.handle(.pointer(.catchable), at: now)
-                movement.configuration.maximumSpeed = tuning.walkingSpeed
+                movement.maximumSpeed = tuning.walkingSpeed
                 _ = movement.update(deltaTime: deltaTime)
                 nextWanderAt = max(nextWanderAt, now + 1.0)
             } else if isEvadeTransitioning {
@@ -567,7 +570,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
                     applyEvade(decision.escapeVelocity, deltaTime: deltaTime)
                 case .watching, .catchable:
                     movement.cancelRoute(stop: false)
-                    movement.configuration.maximumSpeed = tuning.walkingSpeed
+                    movement.maximumSpeed = tuning.walkingSpeed
                     _ = movement.update(deltaTime: deltaTime)
                     nextWanderAt = max(nextWanderAt, now + 0.8)
                 case .far:
@@ -1147,7 +1150,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         isEvadeTransitioning = false
         restDestination = nil
         behavior.handle(.beginInterestTravel, at: timestamp)
-        movement.configuration.maximumSpeed = tuning.walkingSpeed
+        movement.maximumSpeed = tuning.walkingSpeed
         nextWanderAt = .infinity
         _ = movement.update(deltaTime: deltaTime)
     }
@@ -1156,7 +1159,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     /// current event asked for.
     private func holdSeat(at timestamp: TimeInterval, deltaTime: TimeInterval) {
         movement.cancelRoute(stop: false)
-        movement.configuration.maximumSpeed = tuning.walkingSpeed
+        movement.maximumSpeed = tuning.walkingSpeed
         _ = movement.update(deltaTime: deltaTime)
         if activityArrivalReaction != nil {
             deliverArrivalReaction(at: timestamp)
@@ -1237,7 +1240,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             return true
 
         case .findSleepSpot:
-            movement.configuration.maximumSpeed = max(24, tuning.walkingSpeed * 0.75)
+            movement.maximumSpeed = max(24, tuning.walkingSpeed * 0.75)
             if movement.hasRoute {
                 let update = movement.update(deltaTime: deltaTime)
                 if update.reachedDestination { enterSleep(at: timestamp) }
@@ -1338,7 +1341,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             from: movement.position,
             to: restDestination.point
         )
-        movement.configuration.maximumSpeed = max(24, tuning.walkingSpeed * 0.75)
+        movement.maximumSpeed = max(24, tuning.walkingSpeed * 0.75)
         movement.setRoute(route.waypoints)
         if !movement.hasRoute { enterSleep(at: timestamp) }
     }
@@ -1361,7 +1364,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     /// Walks whatever route roaming already has and paces the next pause.
     /// Choosing where to stroll is priority 9 of the decision table, not this.
     private func updateRoaming(at timestamp: TimeInterval, deltaTime: TimeInterval) {
-        movement.configuration.maximumSpeed = tuning.walkingSpeed
+        movement.maximumSpeed = tuning.walkingSpeed
         guard isRoamingEnabled else {
             movement.cancelRoute(stop: false)
             _ = movement.update(deltaTime: deltaTime)
@@ -1408,7 +1411,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             from: movement.position,
             to: point
         )
-        movement.configuration.maximumSpeed = tuning.walkingSpeed
+        movement.maximumSpeed = tuning.walkingSpeed
         movement.setRoute(route.waypoints)
         if !movement.hasRoute { nextWanderAt = timestamp + 2 }
         _ = movement.update(deltaTime: deltaTime)
@@ -1476,7 +1479,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             objectSize: overlay.objectSize
         ) {
             isEvadeTransitioning = true
-            movement.configuration.maximumSpeed = max(
+            movement.maximumSpeed = max(
                 tuning.walkingSpeed,
                 desiredVelocity.length
             )
@@ -1507,7 +1510,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         } else {
             movement.teleport(to: movement.position + velocity * deltaTime, stop: false)
         }
-        movement.configuration.maximumSpeed = max(tuning.walkingSpeed, desiredVelocity.length)
+        movement.maximumSpeed = max(tuning.walkingSpeed, desiredVelocity.length)
         movement.setVelocity(velocity)
         nextWanderAt = now() + 1.0
     }
@@ -1518,7 +1521,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             behavior.handle(.pointer(.far), at: timestamp)
             return
         }
-        movement.configuration.maximumSpeed = max(
+        movement.maximumSpeed = max(
             tuning.walkingSpeed,
             tuning.pointerConfiguration.fastEvadeSpeed
         )

@@ -173,6 +173,10 @@ enum RustCore {
         UInt8(contextOrder.firstIndex(of: context) ?? 4)
     }
 
+    static func reactionIndex(_ reaction: CompanionReaction) -> UInt8 {
+        UInt8(reactionOrder.firstIndex(of: reaction) ?? 0)
+    }
+
     static func napsInPlace(
         at position: WorldPoint,
         objectSize: WorldSize,
@@ -323,5 +327,205 @@ public extension RustCoreTestBridge {
                 timestamp: timestamp
             ).flatMap(RustCore.reaction(at:))
         }
+    }
+}
+
+// MARK: - The per-tick models
+
+/// The wire order for `BehaviorState`, spelled out rather than taken from
+/// `allCases`. Swift sends the index, so this list and `BEHAVIOR_STATES` in
+/// `behavior.rs` are one contract; `CoreLogicTests` pins it against `allCases`
+/// so that adding a state in the middle fails a test instead of renaming eight
+/// of them at runtime.
+public let behaviorStateOrder: [BehaviorState] = [
+    .idle, .wander, .lookAtPointer, .evadePointer, .caught, .dragged, .dropped,
+    .sit, .findSleepSpot, .sleep, .wake, .stretch, .travelToInterest, .observe,
+    .spark, .work, .waitingForUser, .celebrate, .sad
+]
+
+private let pointerProximityOrder: [PointerProximity] = [
+    .far, .watching, .slowEvade, .fastEvade, .catchable
+]
+
+/// `MovementController` with its state in Rust.
+///
+/// Public only so the switch-over test can drive it beside the Swift
+/// original it replaced. That goes when the original does.
+///
+/// A class, not a struct: the state lives behind the handle, so two copies of a
+/// value type would share it and only look independent. The runtime holds
+/// exactly one and mutates it in place, which is what this is.
+public final class RustMovement {
+    private let handle: Movement
+
+    public init(position: WorldPoint, velocity: WorldVector, configuration: MovementConfiguration) {
+        handle = Movement(
+            x: position.x,
+            y: position.y,
+            dx: velocity.dx,
+            dy: velocity.dy,
+            maximumSpeed: configuration.maximumSpeed,
+            acceleration: configuration.acceleration,
+            deceleration: configuration.deceleration,
+            arrivalRadius: configuration.arrivalRadius
+        )
+    }
+
+    public var position: WorldPoint {
+        let point = handle.position()
+        return WorldPoint(x: point.x, y: point.y)
+    }
+
+    public var velocity: WorldVector {
+        let value = handle.velocity()
+        return WorldVector(dx: value.x, dy: value.y)
+    }
+
+    /// Assigned straight through, the way Swift's
+    /// `movement.configuration.maximumSpeed = ...` was. Running the
+    /// initialiser's clamp here would be a behaviour change dressed as tidying.
+    public var maximumSpeed: Double {
+        get { handle.maximumSpeed() }
+        set { handle.setMaximumSpeed(value: newValue) }
+    }
+
+    public var hasRoute: Bool { handle.hasRoute() }
+
+    public var destination: WorldPoint? {
+        handle.destination().map { WorldPoint(x: $0.x, y: $0.y) }
+    }
+
+    public func setRoute(_ waypoints: [WorldPoint]) {
+        handle.setRoute(waypoints: waypoints.map { FfiPoint(x: $0.x, y: $0.y) })
+    }
+
+    public func cancelRoute(stop: Bool = false) {
+        handle.cancelRoute(stop: stop)
+    }
+
+    public func teleport(to point: WorldPoint, stop: Bool = true) {
+        handle.teleport(x: point.x, y: point.y, stop: stop)
+    }
+
+    public func setVelocity(_ newVelocity: WorldVector) {
+        handle.setVelocity(dx: newVelocity.dx, dy: newVelocity.dy)
+    }
+
+    @discardableResult
+    public func update(deltaTime: TimeInterval) -> MovementUpdate {
+        let update = handle.update(deltaTime: deltaTime)
+        return MovementUpdate(
+            position: WorldPoint(x: update.x, y: update.y),
+            velocity: WorldVector(dx: update.dx, dy: update.dy),
+            reachedDestination: update.reachedDestination
+        )
+    }
+}
+
+/// `BehaviorController` with its state in Rust.
+public final class RustBehavior {
+    private let handle: Behavior
+
+    public init(state: BehaviorState = .idle, enteredAt: TimeInterval = 0) {
+        handle = Behavior(
+            state: UInt8(behaviorStateOrder.firstIndex(of: state) ?? 0),
+            enteredAt: enteredAt
+        )
+    }
+
+    public var state: BehaviorState { behaviorStateOrder[Int(handle.state())] }
+    public var enteredAt: TimeInterval { handle.enteredAt() }
+
+    @discardableResult
+    public func handle(_ input: BehaviorInput, at timestamp: TimeInterval) -> BehaviorTransition {
+        let code: UInt8
+        var argument: UInt8 = 0
+        switch input {
+        case .beginWander: code = 0
+        case .arrived: code = 1
+        case .beginRest: code = 2
+        case .seekSleepSpot: code = 3
+        case .sleepSpotReached: code = 4
+        case .beginStretch: code = 5
+        case .beginInterestTravel: code = 6
+        case let .pointer(proximity):
+            code = 7
+            argument = UInt8(pointerProximityOrder.firstIndex(of: proximity) ?? 0)
+        case .catchBegan: code = 8
+        case .dragMoved: code = 9
+        case .mouseReleased: code = 10
+        case let .reaction(reaction):
+            code = 11
+            argument = RustCore.reactionIndex(reaction)
+        case .meaningfulActivity: code = 12
+        case .tick: code = 13
+        }
+        let transition = handle.handle(input: code, argument: argument, timestamp: timestamp)
+        return BehaviorTransition(
+            from: behaviorStateOrder[Int(transition.from)],
+            to: behaviorStateOrder[Int(transition.to)],
+            changed: transition.changed
+        )
+    }
+}
+
+/// `PointerInteractionModel` with its state in Rust. The state is one previous
+/// sample, and it is the whole point: a cursor resting beside the pet and a
+/// cursor grabbing for it are the same coordinate.
+public final class RustPointerModel {
+    private let handle = Pointer()
+
+    public init(configuration: PointerInteractionConfiguration) {
+        self.configuration = configuration
+        // Explicit, because `didSet` does not fire for an assignment made
+        // inside `init`. Leaving it implicit left the handle on its own
+        // defaults until the first tuning change, and the pet watched the
+        // cursor at the wrong rate until then.
+        push(configuration)
+    }
+
+    public var configuration: PointerInteractionConfiguration = .init() {
+        didSet { push(configuration) }
+    }
+
+    private func push(_ configuration: PointerInteractionConfiguration) {
+        handle.setConfiguration(
+            awarenessDistance: configuration.awarenessDistance,
+            slowEvadeDistance: configuration.slowEvadeDistance,
+            fastEvadeDistance: configuration.fastEvadeDistance,
+            catchDistance: configuration.catchDistance,
+            slowEvadeSpeed: configuration.slowEvadeSpeed,
+            fastEvadeSpeed: configuration.fastEvadeSpeed,
+            catchPointerSpeed: configuration.catchPointerSpeed,
+            catchClosingSpeed: configuration.catchClosingSpeed
+        )
+    }
+
+    public func reset() { handle.reset() }
+
+    public func evaluate(
+        pointer: WorldPoint,
+        pet: WorldPoint,
+        timestamp: TimeInterval
+    ) -> PointerDecision {
+        let decision = handle.evaluate(
+            pointerX: pointer.x,
+            pointerY: pointer.y,
+            petX: pet.x,
+            petY: pet.y,
+            timestamp: timestamp
+        )
+        return PointerDecision(
+            proximity: pointerProximityOrder[Int(decision.proximity)],
+            kinematics: PointerKinematics(
+                velocity: WorldVector(dx: decision.velocityDx, dy: decision.velocityDy),
+                speed: decision.speed,
+                distanceToPet: decision.distanceToPet,
+                closingSpeed: decision.closingSpeed
+            ),
+            escapeVelocity: WorldVector(dx: decision.escapeDx, dy: decision.escapeDy),
+            lookDirectionDegrees: decision.lookDirectionDegrees,
+            attentionRate: decision.attentionRate
+        )
     }
 }

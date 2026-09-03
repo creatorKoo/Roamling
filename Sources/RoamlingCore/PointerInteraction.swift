@@ -63,6 +63,19 @@ public struct PointerKinematics: Equatable, Sendable {
     public let speed: Double
     public let distanceToPet: Double
     public let closingSpeed: Double
+
+    /// Public so the Rust core can report one.
+    public init(
+        velocity: WorldVector,
+        speed: Double,
+        distanceToPet: Double,
+        closingSpeed: Double
+    ) {
+        self.velocity = velocity
+        self.speed = speed
+        self.distanceToPet = distanceToPet
+        self.closingSpeed = closingSpeed
+    }
 }
 
 public struct PointerDecision: Equatable, Sendable {
@@ -79,6 +92,21 @@ public struct PointerDecision: Equatable, Sendable {
     /// resolution instead of throwing it away: the pet quickens as the pointer
     /// closes rather than snapping between two states at a threshold.
     public let attentionRate: Double
+
+    /// Public so the Rust core can report one.
+    public init(
+        proximity: PointerProximity,
+        kinematics: PointerKinematics,
+        escapeVelocity: WorldVector,
+        lookDirectionDegrees: Double?,
+        attentionRate: Double
+    ) {
+        self.proximity = proximity
+        self.kinematics = kinematics
+        self.escapeVelocity = escapeVelocity
+        self.lookDirectionDegrees = lookDirectionDegrees
+        self.attentionRate = attentionRate
+    }
 
     public var shouldArmCatch: Bool { proximity == .catchable }
 }
