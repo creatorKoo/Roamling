@@ -33,10 +33,81 @@ public struct SeatEvaluation: Equatable, Sendable {
     /// which is how a focus change unsticks a held seat.
     public let watchesRegion: Bool
 
+    public init(
+        point: WorldPoint,
+        displayID: String,
+        score: Double,
+        emptiness: Double?,
+        coversCaret: Bool,
+        watchesRegion: Bool
+    ) {
+        self.point = point
+        self.displayID = displayID
+        self.score = score
+        self.emptiness = emptiness
+        self.coversCaret = coversCaret
+        self.watchesRegion = watchesRegion
+    }
+
     public var isHoldable: Bool {
         watchesRegion
             && !coversCaret
             && (emptiness ?? 1) >= BasicInterestPositionPlanner.holdEmptiness
+    }
+}
+
+/// Where the pet should sit to watch a window, and how good a given seat is.
+///
+/// A protocol so the decision can be answered by the Rust core while the port
+/// is under way -- the director asks, and does not care which side answers.
+public protocol InterestPlacing: Sendable {
+    func destination(
+        for hint: LocationHint,
+        in world: DesktopWorldSnapshot,
+        currentPosition: WorldPoint,
+        pointerPosition: WorldPoint?,
+        objectSize: WorldSize
+    ) -> InterestDestination?
+
+    func evaluateSeat(
+        at point: WorldPoint,
+        for hint: LocationHint,
+        in world: DesktopWorldSnapshot,
+        currentPosition: WorldPoint,
+        pointerPosition: WorldPoint?,
+        objectSize: WorldSize
+    ) -> SeatEvaluation?
+}
+
+/// The Swift implementation, kept as the control the port is measured against.
+public struct SwiftInterestPlanner: InterestPlacing {
+    public init() {}
+
+    public func destination(
+        for hint: LocationHint,
+        in world: DesktopWorldSnapshot,
+        currentPosition: WorldPoint,
+        pointerPosition: WorldPoint?,
+        objectSize: WorldSize
+    ) -> InterestDestination? {
+        BasicInterestPositionPlanner.destination(
+            for: hint, in: world, currentPosition: currentPosition,
+            pointerPosition: pointerPosition, objectSize: objectSize
+        )
+    }
+
+    public func evaluateSeat(
+        at point: WorldPoint,
+        for hint: LocationHint,
+        in world: DesktopWorldSnapshot,
+        currentPosition: WorldPoint,
+        pointerPosition: WorldPoint?,
+        objectSize: WorldSize
+    ) -> SeatEvaluation? {
+        BasicInterestPositionPlanner.evaluateSeat(
+            at: point, for: hint, in: world, currentPosition: currentPosition,
+            pointerPosition: pointerPosition, objectSize: objectSize
+        )
     }
 }
 

@@ -10,6 +10,7 @@ uniffi::setup_scaffolding!();
 pub mod coordinate_space;
 pub mod emptiness;
 pub mod ffi;
+pub mod interest;
 pub mod geometry;
 pub mod safe_zone;
 pub mod topology;
@@ -20,6 +21,7 @@ pub use geometry::{clamped, swift_max, swift_min, WorldPoint, WorldRect, WorldSi
 pub use emptiness::{
     CandidatePositionScorer, LuminanceField, PositionCandidate, VisualEmptiness,
 };
+pub use interest::{BasicInterestPositionPlanner, InterestDestination, SeatEvaluation};
 pub use safe_zone::{BasicSafeZonePlanner, RestDestination};
 pub use topology::{DisplayPortal, DisplayRoute, DisplayTopology};
-pub use world::{DesktopWorldSnapshot, DisplaySnapshot, SafeZone};
+pub use world::{DesktopWorldSnapshot, DisplaySnapshot, FocusSnapshot, LocationHint, SafeZone};

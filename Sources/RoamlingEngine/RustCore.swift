@@ -48,6 +48,97 @@ enum RustCore {
         RoamlingCoreRs.safeZones(displays: displays(world)).map(zone)
     }
 
+    private static func luminance(_ value: LuminanceField?) -> FfiLuminanceField? {
+        value.map {
+            FfiLuminanceField(
+                bounds: rect($0.bounds),
+                columns: UInt32($0.columns),
+                rows: UInt32($0.rows),
+                samples: $0.samples
+            )
+        }
+    }
+
+    /// Everything interest placement reads, in one value. The crossing is free
+    /// and the serialization is not, so it is carried once rather than asked
+    /// for piece by piece.
+    private static func scene(
+        for hint: LocationHint,
+        in world: DesktopWorldSnapshot
+    ) -> FfiInterestScene? {
+        guard let region = hint.approximateRegion else { return nil }
+        return FfiInterestScene(
+            displays: displays(world),
+            region: rect(region),
+            hintConfidence: hint.confidence,
+            focus: world.focus.map { focus in
+                FfiFocus(
+                    windowFrame: focus.windowFrame.map(rect),
+                    focusedElementFrame: focus.focusedElementFrame.map(rect),
+                    caretFrame: focus.caretFrame.map(rect),
+                    confidence: focus.confidence
+                )
+            },
+            field: luminance(world.luminance)
+        )
+    }
+
+    static func interestDestination(
+        for hint: LocationHint,
+        in world: DesktopWorldSnapshot,
+        currentPosition: WorldPoint,
+        pointerPosition: WorldPoint?,
+        objectSize: WorldSize
+    ) -> InterestDestination? {
+        // A hint with no region cannot be placed against, and the Swift planner
+        // returned nil for it too.
+        guard let scene = scene(for: hint, in: world) else { return nil }
+        return RoamlingCoreRs.interestDestination(
+            scene: scene,
+            currentX: currentPosition.x,
+            currentY: currentPosition.y,
+            pointer: pointerPosition.map { [$0.x, $0.y] },
+            objectWidth: objectSize.width,
+            objectHeight: objectSize.height
+        ).map {
+            InterestDestination(
+                point: WorldPoint(x: $0.x, y: $0.y),
+                displayID: $0.displayId,
+                score: $0.score
+            )
+        }
+    }
+
+    static func evaluateSeat(
+        at point: WorldPoint,
+        for hint: LocationHint,
+        in world: DesktopWorldSnapshot,
+        currentPosition: WorldPoint,
+        pointerPosition: WorldPoint?,
+        objectSize: WorldSize
+    ) -> SeatEvaluation? {
+        guard let scene = scene(for: hint, in: world) else { return nil }
+        return RoamlingCoreRs.evaluateSeat(
+            scene: scene,
+            seatX: point.x,
+            seatY: point.y,
+            currentX: currentPosition.x,
+            currentY: currentPosition.y,
+            pointer: pointerPosition.map { [$0.x, $0.y] },
+            objectWidth: objectSize.width,
+            objectHeight: objectSize.height
+        ).map {
+            SeatEvaluation(
+                point: WorldPoint(x: $0.x, y: $0.y),
+                displayID: $0.displayId,
+                score: $0.score,
+                emptiness: $0.emptiness,
+                coversCaret: $0.coversCaret,
+                watchesRegion: $0.watchesRegion
+            )
+        }
+    }
+
     static func napsInPlace(
         at position: WorldPoint,
         objectSize: WorldSize,
@@ -59,14 +150,7 @@ enum RustCore {
             y: position.y,
             objectWidth: objectSize.width,
             objectHeight: objectSize.height,
-            field: field.map {
-                FfiLuminanceField(
-                    bounds: rect($0.bounds),
-                    columns: UInt32($0.columns),
-                    rows: UInt32($0.rows),
-                    samples: $0.samples
-                )
-            },
+            field: luminance(field),
             threshold: threshold
         )
     }
@@ -135,4 +219,40 @@ public enum RustCoreTestBridge {
             objectSize: objectSize
         )
     }
+}
+
+/// The Rust core answering the interest questions, so the director asks it
+/// without knowing which side of the boundary the answer came from.
+struct RustInterestPlanner: InterestPlacing {
+    func destination(
+        for hint: LocationHint,
+        in world: DesktopWorldSnapshot,
+        currentPosition: WorldPoint,
+        pointerPosition: WorldPoint?,
+        objectSize: WorldSize
+    ) -> InterestDestination? {
+        RustCore.interestDestination(
+            for: hint, in: world, currentPosition: currentPosition,
+            pointerPosition: pointerPosition, objectSize: objectSize
+        )
+    }
+
+    func evaluateSeat(
+        at point: WorldPoint,
+        for hint: LocationHint,
+        in world: DesktopWorldSnapshot,
+        currentPosition: WorldPoint,
+        pointerPosition: WorldPoint?,
+        objectSize: WorldSize
+    ) -> SeatEvaluation? {
+        RustCore.evaluateSeat(
+            at: point, for: hint, in: world, currentPosition: currentPosition,
+            pointerPosition: pointerPosition, objectSize: objectSize
+        )
+    }
+}
+
+public extension RustCoreTestBridge {
+    /// The Rust planner, for the test that runs it beside the Swift one.
+    static var interestPlanner: any InterestPlacing { RustInterestPlanner() }
 }

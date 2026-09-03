@@ -183,7 +183,8 @@ macOS에서 실제로 문제를 일으키기 시작하거나, `RoamlingMac`이 �
 | 1 | Geometry + CoordinateSpace ✅ 2026-09-02 | 175 | Rust 내부용 |
 | 2 | BasicSafeZone + DesktopWorld + DisplayTopology ✅ 2026-09-03 | 499 | A |
 | 3a | VisualEmptiness + CandidateScoring ✅ 2026-09-03 | 207 | A |
-| 3b | PlacementDirector + InterestPlacement | 595 | A |
+| 3b | InterestPlacement ✅ 2026-09-03 | 229 | A |
+| 5 | + PlacementDirector, 상태를 들고 있어 B로 옮김 | 366 | **B** |
 | 4 | AttentionModel + ReactionPolicy + Activity | 289 | A |
 | 5 | Movement + Pointer + Behavior + Timing + Tuning | 603 | **B** |
 | 6 | `RoamlingEngine` | 1,453 | **B**, tick 1회 |

@@ -161,6 +161,103 @@ func coreLogicTests() -> [LogicTest] {
             }
             try expect(compared > 400, "only \(compared) zones compared")
         },
+        LogicTest(name: "the Rust interest planner agrees with the Swift one the app replaced") {
+            var seed: UInt64 = 0x77C1_5A0E_2B93_D486
+            func next(_ scale: Double = 1) -> Double {
+                seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17
+                return (Double(seed % 300_001) / 100.0 - 1500.0) * scale
+            }
+            func unit() -> Double {
+                seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17
+                return seed % 7 == 0 ? Double(seed % 1001) / 1000.0 : Double(seed % 61) / 1000.0
+            }
+            func flag() -> Bool {
+                seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17
+                return seed % 3 == 0
+            }
+
+            let swiftPlanner = SwiftInterestPlanner()
+            let rustPlanner = RustCoreTestBridge.interestPlanner
+            var compared = 0
+            for _ in 0..<200 {
+                let frame = WorldRect(
+                    x: next(0.2), y: next(0.2),
+                    width: 900 + abs(next(0.4)), height: 700 + abs(next(0.3))
+                )
+                let inset = abs(next(0.01))
+                let visible = WorldRect(
+                    x: frame.minX + inset, y: frame.minY + inset,
+                    width: max(0, frame.size.width - inset * 2),
+                    height: max(0, frame.size.height - inset * 2)
+                )
+                let display = DisplaySnapshot(
+                    id: "d0", name: "d0", frame: frame, visibleFrame: visible, scale: 1
+                )
+                let region = WorldRect(
+                    x: visible.minX + abs(next(0.1)), y: visible.minY + abs(next(0.1)),
+                    width: 200 + abs(next(0.3)), height: 150 + abs(next(0.3))
+                )
+                // Every combination of what the user granted: no permissions,
+                // accessibility only, capture only, both.
+                let focus: FocusSnapshot? = flag() ? FocusSnapshot(
+                    windowFrame: flag() ? region : nil,
+                    focusedElementFrame: flag() ? WorldRect(
+                        x: region.minX + abs(next(0.05)), y: region.minY + abs(next(0.05)),
+                        width: abs(next(0.1)), height: abs(next(0.1))
+                    ) : nil,
+                    caretFrame: flag() ? WorldRect(
+                        x: region.minX + abs(next(0.08)), y: region.minY + abs(next(0.08)),
+                        width: abs(next(0.005)), height: 16
+                    ) : nil,
+                    confidence: unit()
+                ) : nil
+                let field: LuminanceField? = flag()
+                    ? LuminanceField(
+                        bounds: visible, columns: 16, rows: 12,
+                        samples: (0..<192).map { _ in unit() }
+                    )
+                    : nil
+                let world = DesktopWorldSnapshot(
+                    displays: [display], focus: focus, luminance: field
+                )
+                let hint = LocationHint(approximateRegion: region, confidence: unit())
+                let position = WorldPoint(x: next(0.3), y: next(0.3))
+                let pointer: WorldPoint? = flag()
+                    ? WorldPoint(x: next(0.3), y: next(0.3)) : nil
+                let size = WorldSize(
+                    width: 60 + abs(next(0.05)), height: 60 + abs(next(0.05))
+                )
+
+                let swiftSeat = swiftPlanner.destination(
+                    for: hint, in: world, currentPosition: position,
+                    pointerPosition: pointer, objectSize: size
+                )
+                let rustSeat = rustPlanner.destination(
+                    for: hint, in: world, currentPosition: position,
+                    pointerPosition: pointer, objectSize: size
+                )
+                try expect(
+                    swiftSeat == rustSeat,
+                    "destination differs: \(String(describing: swiftSeat)) vs \(String(describing: rustSeat))"
+                )
+
+                let seat = WorldPoint(x: next(0.3), y: next(0.3))
+                let swiftEvaluation = swiftPlanner.evaluateSeat(
+                    at: seat, for: hint, in: world, currentPosition: position,
+                    pointerPosition: pointer, objectSize: size
+                )
+                let rustEvaluation = rustPlanner.evaluateSeat(
+                    at: seat, for: hint, in: world, currentPosition: position,
+                    pointerPosition: pointer, objectSize: size
+                )
+                try expect(
+                    swiftEvaluation == rustEvaluation,
+                    "seat evaluation differs: \(String(describing: swiftEvaluation)) vs \(String(describing: rustEvaluation))"
+                )
+                compared += 1
+            }
+            try expect(compared == 200, "only \(compared) scenes compared")
+        },
         LogicTest(name: "the Rust nap check agrees with the Swift one the app replaced") {
             var seed: UInt64 = 0x1D87_2B4C_66E9_A031
             func next(_ scale: Double = 1) -> Double {

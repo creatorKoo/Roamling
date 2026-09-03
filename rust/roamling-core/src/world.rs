@@ -6,7 +6,7 @@
 //! Only what the ported units read is here. Windows, focus and luminance stay
 //! on the Swift side until the units that use them come across.
 
-use crate::geometry::{WorldPoint, WorldRect, WorldSize};
+use crate::geometry::{clamped, swift_max, WorldPoint, WorldRect, WorldSize};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct DisplaySnapshot {
@@ -37,15 +37,77 @@ impl SafeZone {
     }
 }
 
+/// Where a source says the user's work is, at whatever confidence the platform
+/// could manage. Coarser than a focus snapshot and available without any
+/// permission, which is what the pet falls back to when accessibility is off.
+#[derive(Debug, Clone, PartialEq)]
+pub struct LocationHint {
+    pub approximate_region: Option<WorldRect>,
+    pub confidence: f64,
+}
+
+impl LocationHint {
+    pub fn new(approximate_region: Option<WorldRect>, confidence: f64) -> Self {
+        Self { approximate_region, confidence: clamped(confidence, 0.0, 1.0) }
+    }
+}
+
+/// What accessibility can say about the focused window, when the user granted
+/// it. Empty rects are dropped on the way in, so a `Some` here means something
+/// real was measured.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FocusSnapshot {
+    pub window_frame: Option<WorldRect>,
+    pub focused_element_frame: Option<WorldRect>,
+    pub caret_frame: Option<WorldRect>,
+    pub confidence: f64,
+}
+
+impl FocusSnapshot {
+    pub fn new(
+        window_frame: Option<WorldRect>,
+        focused_element_frame: Option<WorldRect>,
+        caret_frame: Option<WorldRect>,
+        confidence: f64,
+    ) -> Self {
+        Self {
+            window_frame: window_frame.filter(|rect| !rect.is_empty()),
+            focused_element_frame: focused_element_frame.filter(|rect| !rect.is_empty()),
+            caret_frame: Self::usable_caret(caret_frame),
+            confidence: clamped(confidence, 0.0, 1.0),
+        }
+    }
+
+    /// An insertion point legitimately reports zero width, so dropping empty
+    /// rects would discard exactly the one placement cares about most. Widen it
+    /// into a usable obstacle instead.
+    fn usable_caret(rect: Option<WorldRect>) -> Option<WorldRect> {
+        let rect = rect?;
+        if !(rect.size.width > 0.0 || rect.size.height > 0.0) {
+            return None;
+        }
+        Some(WorldRect::new(
+            rect.min_x(),
+            rect.min_y(),
+            swift_max(rect.size.width, 2.0),
+            swift_max(rect.size.height, 2.0),
+        ))
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct DesktopWorldSnapshot {
     pub displays: Vec<DisplaySnapshot>,
     pub safe_zones: Vec<SafeZone>,
+    pub focus: Option<FocusSnapshot>,
+    /// Downsampled luminance for the display being placed on, when the user
+    /// turned visual placement on.
+    pub luminance: Option<crate::emptiness::LuminanceField>,
 }
 
 impl DesktopWorldSnapshot {
     pub fn new(displays: Vec<DisplaySnapshot>, safe_zones: Vec<SafeZone>) -> Self {
-        Self { displays, safe_zones }
+        Self { displays, safe_zones, focus: None, luminance: None }
     }
 
     pub fn display_containing(&self, point: WorldPoint) -> Option<&DisplaySnapshot> {

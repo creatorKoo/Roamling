@@ -207,6 +207,7 @@ public struct PlacementDirector: Sendable {
     }
 
     public let configuration: Configuration
+    private let planner: any InterestPlacing
     private var seat: Seat?
     private var travel: Travel?
     private var parkedSince: TimeInterval?
@@ -215,8 +216,12 @@ public struct PlacementDirector: Sendable {
     /// progress keeps its destination instead of restarting every frame.
     private var carried: PlacementIntent = .hold
 
-    public init(configuration: Configuration = .standard) {
+    public init(
+        configuration: Configuration = .standard,
+        planner: any InterestPlacing = SwiftInterestPlanner()
+    ) {
         self.configuration = configuration
+        self.planner = planner
     }
 
     /// True while the pet is parked on a seat it picked for the current source.
@@ -302,7 +307,7 @@ public struct PlacementDirector: Sendable {
         lastReviewAt = situation.timestamp
 
         let judged = travel?.destination.point ?? situation.position
-        let evaluation = BasicInterestPositionPlanner.evaluateSeat(
+        let evaluation = planner.evaluateSeat(
             at: judged,
             for: hint,
             in: situation.world,
@@ -317,7 +322,7 @@ public struct PlacementDirector: Sendable {
             isNew: isNew,
             in: situation
         ),
-           let destination = BasicInterestPositionPlanner.destination(
+           let destination = planner.destination(
             for: hint,
             in: situation.world,
             currentPosition: situation.position,
@@ -420,7 +425,7 @@ public struct PlacementDirector: Sendable {
             // A seat that is genuinely empty ends this in one move: measured on
             // a real desktop a clear seat scores around 0.97, nowhere near the
             // bar it would have to fall back under to move the pet again.
-            let replacement = BasicInterestPositionPlanner.evaluateSeat(
+            let replacement = planner.evaluateSeat(
                 at: destination.point,
                 for: hint,
                 in: situation.world,
