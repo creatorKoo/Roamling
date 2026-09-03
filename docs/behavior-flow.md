@@ -286,7 +286,8 @@ steady로 분류한다. 이전에는 1.2초 만에 `observe`로 넘어가서, �
 4. **row 6 `waiting`** — 승인 대기(응답까지)와 끌림. 앉기·잠·잡힘은 확장 행으로 나갔다.
 5. **row 8 `review`** — 파일을 읽거나 검색할 때 1.03초씩.
 6. **row 3 `waving`** — 턴 완료 0.70초.
-7. **row 4 `jumping`** — 턴 시작과 착지 각 0.84초.
+7. **row 4 `jumping`** — 턴 시작 0.84초. **착지는 0.84초여야 하는데 실제로는 0초다 —
+   아래 참조.**
 8. **row 5 `failed`** — 실패 1.22초.
 
 이전과 비교하면 순위가 뒤집혔다. `review`는 1위에서 5위로 내려갔고(커서 응시가 빠지고
@@ -294,6 +295,57 @@ steady로 분류한다. 이전에는 1.2초 만에 `observe`로 넘어가서, �
 
 **오래 도는 그림은 이제 `running` 하나다.** 나머지는 전부 짧게 스친다. 작화 기준도 그렇게
 갈린다 — `running`은 "수십 초 반복해도 안 거슬리는가", 나머지는 "1~2초 안에 읽히는가".
+
+### 착지는 아무도 못 본다 — 미해결, 맥에서 고친다 (발견 2026-09-03)
+
+**펫을 놓으면 착지 동작 없이 곧장 커서 회피로 들어간다.** Windows에서 처음 눈에 띄었지만
+공유 코어의 동작이므로 **macOS도 똑같다.**
+
+```text
+놓음 -> finish_drop -> MouseReleased -> BehaviorState::Dropped
+                                        timing::DROPPED = 0.840초 유지되도록 되어 있고
+                                        landing 트랙은 0.50초짜리로 authored돼 있다
+
+그런데 매 tick이 BehaviorInput::Pointer(근접도)를 넣는다 (pet_runtime.rs)
+handle_pointer는 is_held()일 때만 거부한다 -- Dropped는 held가 아니다
+-> 다음 tick에 LookAtPointer / EvadePointer 로 전이
+```
+
+**놓은 직후에는 커서가 펫 위에 있을 수밖에 없다** — 방금 거기에 놓았기 때문이다. 그래서
+근접도가 `Far`일 수가 없고 `Dropped`는 한 tick도 버티지 못한다. 0.84초짜리 상태와 0.5초짜리
+authored 트랙이 **구조적으로 도달 불가능**하다.
+
+이것이 의도가 아니라는 증거는 `MascotPetFactory`의 주석이다 — *"Without this, `landing`
+falls through to jumping and the pet throws a full celebration every time it is dropped."*
+누군가 "떨어뜨릴 때마다 축하 동작이 나온다"를 보고 landing을 따로 그렸다. 그 수정이 의미가
+있으려면 landing이 보여야 한다.
+
+**핵심은 이것이다: 놓은 직후의 커서 근접은 신호가 아니라 그 조작의 부산물이다.** 사용자가
+다가간 것이 아니라 거기에 놓은 것뿐이다. `is_held()`가 잡는 중에 포인터를 무시하는 것과 같은
+이유가 놓은 직후에도 잠깐 서야 한다.
+
+#### 고치는 자리에 따라 파장이 다르다
+
+| 위치 | 다시 만들어야 하는 것 |
+|---|---|
+| `behavior.rs`의 `handle_pointer` | `behave` fixture 3,654 케이스까지 |
+| **`pet_runtime.rs` — 착지 중에는 Pointer를 먹이지 않는다** | **녹화 트레이스만** |
+
+후자가 훨씬 작다. 런타임에 이미 `caught_animation_until` · `click_reaction_until` 같은
+"until" 타이머가 있고 `finish_drop`이 그것들을 비우므로, 같은 모양으로 하나 더 두면 된다.
+
+#### 정한 것
+
+- **드롭만 보호한다.** `Spark` · `Celebrate` · `Sad`도 같은 구조지만 그쪽은 커서가 우연히
+  온 것이라 반응하는 편이 맞다. 드롭만 커서 위치가 조작의 부산물이다.
+- **`timing::DROPPED`(0.84초) 전체를 보호한다.** 착지하고 한 박자 뒤에 사용자를 알아채는
+  편이 자연스럽고, 이미 있는 숫자라 새 상수가 생기지 않는다.
+
+#### 왜 맥에서 하는가
+
+공유 코어라 macOS도 같이 바뀌고 `RuntimeTrace.txt`(40초 녹화)가 달라진다. `CLAUDE.md`는
+"통과시키려고 다시 만들지 않는다"고 못박아 두었는데, **의도한 동작 변경은 정당하게 다시 만드는
+경우**다 — 다만 그 재생성과 실사용 확인이 맥에서만 된다.
 
 
 ## 8. 이 흐름을 보고 알 수 있는 것

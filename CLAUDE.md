@@ -102,6 +102,12 @@ world · topology · emptiness · 배치 · attention · 반응 · 튜닝 · 활
 **현재 게이트는 W4(Windows 최소 루프)이고, 착수 순서와 호출 예시는 `docs/windows.md`의
 W4 절에 있다.**
 
+**맥에서 할 일이 하나 밀려 있다 — 착지 동작이 아무에게도 안 보인다.** 펫을 놓으면
+`Dropped`(0.84초)가 한 tick도 버티지 못하고 커서 회피로 넘어간다. 놓은 직후에는 커서가
+펫 위에 있을 수밖에 없는데 `handle_pointer`가 `is_held()`만 거부하기 때문이다. 공유
+코어라 **macOS도 같다.** 원인·처방·왜 맥에서 해야 하는지는 `docs/behavior-flow.md` 7절
+"착지는 아무도 못 본다"에 있다. Windows에서 발견됐지만 Windows 문제가 아니다.
+
 포팅 규칙은 그대로다: **살아 있는 구현은 항상 1벌.** Swift 원본은 대조군으로 Core에
 남아 있고(`MovementController` · `PlacementDirector` · `AttentionModel` 등), 단위마다
 게이트가 둘이다 — `cargo test`의 differential fixture 10개(14 MB, 6만+ 케이스)와 Swift
