@@ -645,6 +645,60 @@ tray + layered window + Display/Pointer/Idle provider.
 **exit 조건: MVP 0 수준(배회 · 포인터 회피 · 잡기 · 드래그)이 Windows에서 돌고 사용자가
 실사용으로 확인한다.**
 
+#### 착수 시점의 상태 (2026-09-03)
+
+**펫이 무엇을 할지 결정하는 코드는 전부 Rust에 있다.** 단위 1~7이 끝났고
+`rust/roamling-core`가 geometry · world · topology · emptiness · 배치 · attention ·
+반응 · 튜닝 · 활동 지휘 · tick 본체 · 애니메이션 해석까지 들고 있다. macOS 앱이 그것을
+쓰고 있고, `RoamlingRuntime`은 1,664줄에서 667줄로 줄어 결정이 아닌 것만 남았다.
+
+**Windows 셸이 부를 대상은 `PetRuntime`(FFI 이름 `PetLoop`) 하나다.** FFI를 거치지 않고
+crate를 직접 링크하면 된다 — `crate-type`에 `rlib`이 이미 있다.
+
+```rust
+let mut pet = PetRuntime::new(position, RuntimeTuning::default(), seed);
+pet.set_displays(displays);          // 데스크가 바뀔 때만
+pet.set_object_size(size);
+loop {
+    let wants_focus = pet.begin_tick(now);        // AX 왕복이 값어치 있나
+    let focus = if wants_focus { platform.focus() } else { None };
+    let out = pet.finish_tick(&TickInput { .. });
+    // out.position / out.capability / out.look_direction_degrees / out.locomotion_rate
+    // out.luminance_requests / out.diagnostics / out.persist_position
+}
+```
+
+MVP 0에는 focus도 capture도 필요 없다 — `focus_authorized: false`,
+`capture_authorized: false`로 두면 배회 · 회피 · 잡기 · 드래그가 전부 돈다.
+
+#### 첫 번째로 할 일 — fixture가 Windows에서도 통과하는지
+
+**차등 fixture 10개(14 MB, 6만+ 케이스)는 전부 macOS/arm64에서 생성됐고, Windows에서는
+한 번도 돌려본 적이 없다.**
+
+```sh
+cd rust && cargo test --release
+```
+
+`sqrt`는 IEEE가 정확값을 요구하지만 **`hypot` · `atan2` · `round`는 아니다.** 이 셋은
+`geometry.rs`(거리), `pointer.rs`(시선 각도), `animation.rs`(방향 16분할)에 있고, x86_64
+MSVC의 libm이 1 ulp라도 다르면 fixture가 그 자리에서 깨진다. **깨지면 그것이 포팅 실패가
+아니라 발견이다** — 어느 함수인지 fixture가 줄 단위로 짚어 준다. 대응은 두 갈래다:
+(1) 해당 연산을 자체 구현으로 바꾸거나, (2) fixture를 플랫폼별로 나눈다. 어느 쪽이든
+**Windows 코드를 쓰기 전에 알아야 한다.**
+
+#### 그 다음 — 아직 Swift에 남은 것
+
+| 남은 것 | 줄 | W4에 필요한가 |
+|---|---:|---|
+| `MascotPetFactory` (내장 마스코트 트랙 구성) | 621 | **필요** — 그릴 것이 있어야 한다 |
+| `PetLoader` + `PetManifest` + `PetCatalog` | 516 | 아니오 — 내장 펫만 쓰면 된다 |
+| 아틀라스 디코딩 (W2b) | — | **필요** — D에서는 `image` crate |
+| `RoamlingSources` (agent 연동) | 1,010 | 아니오 — MVP 0 밖 |
+
+가장 짧은 경로는 **`MascotPetFactory`를 옮기고 `image` crate로 WebP를 읽는 것**이다.
+그러면 Windows 셸에 필요한 것은 창 · 트레이 · 포인터 · 디스플레이 열거뿐이다.
+
 ### W5 — 나머지 provider
 
 Window / Focus / Capture. 5절 참조.
