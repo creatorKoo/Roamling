@@ -4,6 +4,7 @@
 import Foundation
 import RoamlingCore
 import RoamlingCoreRs
+import RoamlingPet
 
 /// The seam the port crosses on macOS.
 ///
@@ -29,6 +30,43 @@ enum RustCore {
     /// Shared with `RustPlacement`, which builds the same records.
     static func ffiRect(_ value: WorldRect) -> FfiRect { rect(value) }
     static func ffiLuminance(_ value: LuminanceField?) -> FfiLuminanceField? { luminance(value) }
+
+    static func ffiDisplay(_ display: DisplaySnapshot) -> FfiDisplay {
+        FfiDisplay(
+            id: display.id,
+            frame: rect(display.frame),
+            visibleFrame: rect(display.visibleFrame)
+        )
+    }
+
+    static func ffiFocus(_ focus: FocusSnapshot) -> FfiFocus {
+        FfiFocus(
+            windowFrame: focus.windowFrame.map(rect),
+            focusedElementFrame: focus.focusedElementFrame.map(rect),
+            caretFrame: focus.caretFrame.map(rect),
+            confidence: focus.confidence
+        )
+    }
+
+    static func ffiTuning(_ tuning: RuntimeTuning) -> FfiTuning {
+        FfiTuning(
+            walkingSpeed: tuning.walkingSpeed,
+            wanderPause: tuning.wanderPause,
+            crossDisplayWanderChance: tuning.crossDisplayWanderChance,
+            pointerAwarenessDistance: tuning.pointerAwarenessDistance,
+            catchArmDistance: tuning.catchArmDistance,
+            catchApproachSpeed: tuning.catchApproachSpeed,
+            catchWindow: tuning.catchWindow,
+            hitRegionScale: tuning.hitRegionScale,
+            gaitCadence: tuning.gaitCadence,
+            evadeSpeedScale: tuning.evadeSpeedScale,
+            idleBeforeRest: tuning.idleBeforeRest
+        )
+    }
+
+    static func worldRect(_ value: FfiRect) -> WorldRect {
+        WorldRect(x: value.x, y: value.y, width: value.width, height: value.height)
+    }
 
     private static func rect(_ value: WorldRect) -> FfiRect {
         FfiRect(x: value.minX, y: value.minY, width: value.size.width, height: value.size.height)
@@ -398,6 +436,10 @@ public extension RustCoreTestBridge {
     static func wantsWindowHint(_ kind: CompanionEventKind) -> Bool {
         RustCore.wantsWindowHint(kind)
     }
+
+    /// The order capabilities cross as indices, so a test can pin it against
+    /// `PetCapability.allCases`.
+    static var capabilityWireOrder: [PetCapability] { petCapabilityOrder }
 
     /// A fresh pair of the stateful models, so the switch-over test can drive
     /// them through the same script it drives the Swift ones through.
@@ -808,3 +850,221 @@ public final class RustActivityDirector: ActivityDirecting {
             .map(RustCore.activityEffect)
     }
 }
+
+/// The tick body, with every decision on the Rust side.
+///
+/// The shell around it keeps only what is not a decision: the timer, the
+/// defaults, the diagnostics file, the agent subscriptions and the sprite
+/// sheet. `docs/windows.md` unit 6c.
+public final class RustPetLoop {
+    private let handle: PetLoop
+
+    public struct Tick {
+        public let deltaTime: TimeInterval
+        public let position: WorldPoint
+        public let state: BehaviorState
+        public let capability: PetCapability
+        public let lookDirectionDegrees: Double?
+        public let locomotionRate: Double
+        public let interactionEnabled: Bool
+        public let luminanceRequests: [(region: WorldRect, interval: TimeInterval)]
+        public let diagnostics: [(category: String, message: String)]
+        public let persistPosition: Bool
+    }
+
+    public struct Interaction {
+        public let position: WorldPoint
+        public let capability: PetCapability
+        public let lookDirectionDegrees: Double?
+        public let setInteractionEnabled: Bool?
+        public let render: Bool
+        public let rescheduleAfter: TimeInterval?
+        public let persistPosition: Bool
+    }
+
+    public init(position: WorldPoint, tuning: RuntimeTuning, seed: UInt64) {
+        handle = PetLoop(
+            x: position.x,
+            y: position.y,
+            tuning: RustCore.ffiTuning(tuning),
+            seed: seed
+        )
+    }
+
+    public var position: WorldPoint {
+        let point = handle.position()
+        return WorldPoint(x: point.x, y: point.y)
+    }
+
+    public var state: BehaviorState { behaviorStateOrder[Int(handle.state())] }
+    public var isPlacementTravelling: Bool { handle.isPlacementTravelling() }
+    public var isWatchingWindow: Bool { handle.isWatchingWindow() }
+    public var activeSourceID: String? { handle.activeSourceId() }
+    public var randomDraws: UInt64 { handle.draws() }
+
+    public func preferredTickInterval(at now: TimeInterval) -> TimeInterval {
+        handle.preferredTickInterval(now: now)
+    }
+
+    public func setDisplays(_ displays: [DisplaySnapshot]) {
+        handle.setDisplays(displays: displays.map(RustCore.ffiDisplay))
+    }
+
+    public func setLuminance(_ field: LuminanceField?) {
+        handle.setLuminance(field: RustCore.ffiLuminance(field))
+    }
+
+    public func setObjectSize(_ size: WorldSize) {
+        handle.setObjectSize(width: size.width, height: size.height)
+    }
+
+    public func setFlags(roaming: Bool, avoidance: Bool, interactions: Bool) {
+        handle.setFlags(roaming: roaming, avoidance: avoidance, interactions: interactions)
+    }
+
+    public func setRoamingEnabled(_ enabled: Bool, at now: TimeInterval) {
+        handle.setRoamingEnabled(enabled: enabled, now: now)
+    }
+
+    public func setPointerAvoidanceEnabled(_ enabled: Bool) {
+        handle.setPointerAvoidanceEnabled(enabled: enabled)
+    }
+
+    /// Returns whether the caller should release the panel.
+    public func setInteractionsEnabled(_ enabled: Bool) -> Bool {
+        handle.setInteractionsEnabled(enabled: enabled)
+    }
+
+    public func setAnimationDurations(caught: TimeInterval, dragged: TimeInterval) {
+        handle.setAnimationDurations(caught: caught, dragged: dragged)
+    }
+
+    public func setPosition(_ position: WorldPoint) {
+        handle.setPosition(x: position.x, y: position.y)
+    }
+
+    public func clearClickReaction(clearCaughtTransition: Bool) {
+        handle.clearClickReaction(clearCaughtTransition: clearCaughtTransition)
+    }
+
+    public func setNextWanderAt(_ timestamp: TimeInterval) {
+        handle.setNextWanderAt(timestamp: timestamp)
+    }
+
+    public func applyTuning(_ tuning: RuntimeTuning, at now: TimeInterval) {
+        handle.applyTuning(tuning: RustCore.ffiTuning(tuning), now: now)
+    }
+
+    public func handleDisplayChange(
+        displays: [DisplaySnapshot],
+        carrying position: WorldPoint,
+        at now: TimeInterval
+    ) -> WorldPoint {
+        let point = handle.handleDisplayChange(
+            displays: displays.map(RustCore.ffiDisplay),
+            carriedX: position.x,
+            carriedY: position.y,
+            now: now
+        )
+        return WorldPoint(x: point.x, y: point.y)
+    }
+
+    public func setScale(objectSize: WorldSize) -> WorldPoint {
+        let point = handle.setScale(width: objectSize.width, height: objectSize.height)
+        return WorldPoint(x: point.x, y: point.y)
+    }
+
+    /// True when an accessibility query is worth paying for this tick.
+    public func beginTick(at now: TimeInterval) -> Bool {
+        handle.beginTick(now: now)
+    }
+
+    public func finishTick(
+        at now: TimeInterval,
+        pointer: WorldPoint,
+        primaryButtonDown: Bool,
+        userIdleDuration: TimeInterval,
+        captureAuthorized: Bool,
+        focusAuthorized: Bool,
+        didQueryFocus: Bool,
+        queriedFocus: FocusSnapshot?,
+        pointerIsOverPet: Bool
+    ) -> Tick {
+        let output = handle.finishTick(input: FfiTickInput(
+            now: now,
+            pointerX: pointer.x,
+            pointerY: pointer.y,
+            primaryButtonDown: primaryButtonDown,
+            userIdleDuration: userIdleDuration,
+            captureAuthorized: captureAuthorized,
+            focusAuthorized: focusAuthorized,
+            didQueryFocus: didQueryFocus,
+            queriedFocus: queriedFocus.map(RustCore.ffiFocus),
+            pointerIsOverPet: pointerIsOverPet
+        ))
+        return Tick(
+            deltaTime: output.deltaTime,
+            position: WorldPoint(x: output.x, y: output.y),
+            state: behaviorStateOrder[Int(output.state)],
+            capability: petCapabilityOrder[Int(output.capability)],
+            lookDirectionDegrees: output.lookDirectionDegrees,
+            locomotionRate: output.locomotionRate,
+            interactionEnabled: output.interactionEnabled,
+            luminanceRequests: output.luminanceRequests.map {
+                (RustCore.worldRect($0.region), $0.interval)
+            },
+            diagnostics: output.diagnostics.map { ($0.category, $0.message) },
+            persistPosition: output.persistPosition
+        )
+    }
+
+    public func pointerDown(at pointer: WorldPoint, now: TimeInterval) -> Interaction {
+        interaction(handle.pointerDown(x: pointer.x, y: pointer.y, now: now))
+    }
+
+    public func pointerDragged(
+        to pointer: WorldPoint,
+        distance: Double,
+        now: TimeInterval
+    ) -> Interaction {
+        interaction(handle.pointerDragged(
+            x: pointer.x, y: pointer.y, distance: distance, now: now
+        ))
+    }
+
+    public func pointerUp(
+        at pointer: WorldPoint,
+        wasDragged: Bool,
+        now: TimeInterval
+    ) -> Interaction {
+        interaction(handle.pointerUp(
+            x: pointer.x, y: pointer.y, wasDragged: wasDragged, now: now
+        ))
+    }
+
+    public func handleActivityEvent(
+        _ event: CompanionEvent,
+        at now: TimeInterval
+    ) -> [(region: WorldRect, interval: TimeInterval)] {
+        handle.handleActivityEvent(event: RustCore.activityEvent(event), now: now)
+            .map { (RustCore.worldRect($0.region), $0.interval) }
+    }
+
+    private func interaction(_ output: FfiInteractionOutput) -> Interaction {
+        Interaction(
+            position: WorldPoint(x: output.x, y: output.y),
+            capability: petCapabilityOrder[Int(output.capability)],
+            lookDirectionDegrees: output.lookDirectionDegrees,
+            setInteractionEnabled: output.setInteractionEnabled,
+            render: output.render,
+            rescheduleAfter: output.rescheduleAfter,
+            persistPosition: output.persistPosition
+        )
+    }
+}
+
+/// The wire order for `PetCapability`, pinned by a test against `allCases`.
+let petCapabilityOrder: [PetCapability] = [
+    .idle, .moveLeft, .moveRight, .sit, .sleep, .work, .observe, .gaze,
+    .paw, .spark, .celebrate, .fail, .stretch, .caught, .dragged, .landing
+]

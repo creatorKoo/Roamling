@@ -11,12 +11,14 @@ pub mod activity;
 pub mod activity_director;
 pub mod attention;
 pub mod behavior;
+pub mod capability;
 pub mod coordinate_space;
 pub mod emptiness;
 pub mod ffi;
 pub mod interest;
 pub mod geometry;
 pub mod movement;
+pub mod pet_runtime;
 pub mod placement;
 pub mod pointer;
 pub mod safe_zone;
@@ -36,11 +38,15 @@ pub use activity_director::{
 pub use attention::{
     AttentionConfiguration, AttentionModel, ReactionConfiguration, ReactionPolicy,
 };
+pub use capability::{capability_for, PetCapability, PET_CAPABILITIES};
 pub use behavior::{
     timing, BehaviorController, BehaviorInput, BehaviorState, BehaviorTransition,
     BEHAVIOR_STATES,
 };
 pub use movement::{MovementConfiguration, MovementController, MovementUpdate};
+pub use pet_runtime::{
+    Aimlessness, InteractionOutput, LuminanceRequest, PetRuntime, TickInput, TickOutput,
+};
 pub use placement::{
     PetSituation, PlacementConfiguration, PlacementDirector, PlacementIntent,
     PlacementTravelReason,

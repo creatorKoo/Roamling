@@ -24,30 +24,21 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     public var isRoamingEnabled: Bool {
         didSet {
             defaults.set(isRoamingEnabled, forKey: DefaultsKey.roaming)
-            if !isRoamingEnabled {
-                movement.cancelRoute(stop: false)
-                nextWanderAt = .infinity
-            } else if oldValue != isRoamingEnabled {
-                nextWanderAt = now() + 0.8
-            }
+            core.setRoamingEnabled(isRoamingEnabled, at: now())
         }
     }
 
     public var isPointerAvoidanceEnabled: Bool {
         didSet {
             defaults.set(isPointerAvoidanceEnabled, forKey: DefaultsKey.avoidPointer)
-            if !isPointerAvoidanceEnabled, isEvadeTransitioning {
-                isEvadeTransitioning = false
-                movement.cancelRoute(stop: false)
-            }
+            core.setPointerAvoidanceEnabled(isPointerAvoidanceEnabled)
         }
     }
 
     public var areInteractionsEnabled: Bool {
         didSet {
             defaults.set(areInteractionsEnabled, forKey: DefaultsKey.interactions)
-            if !areInteractionsEnabled {
-                catchArmedUntil = 0
+            if core.setInteractionsEnabled(areInteractionsEnabled) {
                 overlay.setInteractionEnabled(false)
             }
         }
@@ -65,11 +56,14 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
 
     /// What the pet is doing and where it is standing. Read-only, and read by
     /// tests -- the app watches the pet through the overlay instead.
-    public var behaviorState: BehaviorState { behavior.state }
-    public var position: WorldPoint { movement.position }
+    public var behaviorState: BehaviorState { core.state }
+    public var position: WorldPoint { core.position }
+    /// How many random numbers the pet has spent. Read only by the recorded
+    /// session, where it is the fastest way to see two runs part company.
+    public var randomDraws: UInt64 { core.randomDraws }
     /// Whether the director still has a walk in progress. Read by the test
     /// that pins arrival, which has to know when settling happened.
-    public var isPlacementTravelling: Bool { placement.isTravelling }
+    public var isPlacementTravelling: Bool { core.isPlacementTravelling }
     /// In the order they were handed over, which is the order they are shown.
     public var agentIntegrations: [any AgentIntegration] { agents }
 
@@ -80,13 +74,6 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     private let services: PlatformServices
     private let defaults: UserDefaults
     private let now: @Sendable () -> TimeInterval
-    /// Where the pet's aimlessness comes from.
-    ///
-    /// Injected rather than called inline so a session can be replayed exactly.
-    /// The port needs that: the only way to prove the Rust runtime behaves like
-    /// this one is to record what this one does and require the answer back,
-    /// and `Double.random` makes every run a different session.
-    private let randomUnit: @Sendable () -> Double
 
     private var displayProvider: any DisplayProviding { services.display }
     private var displayChanges: any DisplayChangeObserving { services.displayChanges }
@@ -109,69 +96,19 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         set { services.coordinateSpace.current = newValue }
     }
     private var world: DesktopWorldSnapshot
-    // The three models the tick loop steps every frame, each with its state in
-    // Rust and a handle on this side. `docs/windows.md` unit 5a.
-    private let movement: RustMovement
-    private let behavior: RustBehavior
-    private let pointerModel: RustPointerModel
     private var animationPlayer: PetAnimationPlayer
+
+    /// Everything the pet decides. What is left on this side is the timer, the
+    /// defaults, the diagnostics file, the agent subscriptions and the sprite
+    /// sheet -- none of which is a decision. `docs/windows.md` unit 6c.
+    private let core: RustPetLoop
 
     private var tickTimer: Timer?
     private var activityTasks: [Task<Void, Never>] = []
     private var screenObserver: DisplayChangeSubscription?
-    private var lastTickAt: TimeInterval?
-    private var nextWanderAt: TimeInterval
-    private var catchArmedUntil: TimeInterval = 0
-    private var caughtAnimationUntil: TimeInterval = 0
-    private var clickReactionUntil: TimeInterval = 0
-    private var isClickReactionPending = false
-    private var isDragging = false
-    private var dragOffset = WorldVector.zero
-    private var lastPointerDecision: PointerDecision?
-    private var isEvadeTransitioning = false
-    /// The current walk is one the pet owes the user: it is standing on their
-    /// work and leaving. Cleared by the tick as soon as the route is gone,
-    /// however it went, so no cancel path has to remember to reset it.
-    private var escapeRouteActive = false
-    private var restDestination: RestDestination?
-    /// The window the pet is watching. It outlives any one walk: a parked pet
-    /// still has to know which window to judge its seat against.
-    // The director, with its seat, its trip and its last review held in Rust.
-    // `docs/windows.md` unit 5b.
-    private let placement = RustPlacement()
-    private var cachedFocus: FocusSnapshot?
-    private var focusQueriedAt: TimeInterval = -.infinity
     private var cachedLuminance: LuminanceField?
     private var luminanceCapturedAt: TimeInterval = -.infinity
     private var luminanceTask: Task<Void, Never>?
-    /// A screen capture is far heavier than an accessibility query and the
-    /// desktop rarely changes shape between seats, so it refreshes slowly.
-    private static let luminanceRefreshInterval: TimeInterval = 3
-    /// A sleeping pet still has to notice text arriving underneath it, because
-    /// the screen keeps changing while the user is away. It just does not need
-    /// to spend a capture as often to find out.
-    private static let restingLuminanceRefreshInterval: TimeInterval = 6
-    /// A parked pet between walks has to notice the user scrolling text under
-    /// it, which is most of its life. Half the rate of an agent seat: nothing
-    /// here is urgent, and one capture measures about 60 ms.
-    private static let roamingLuminanceRefreshInterval: TimeInterval = 6
-    /// The accessibility query is synchronous, so it runs on a slow beat rather
-    /// than per frame. `PlacementDirector` reviews a seat on a beat of its own,
-    /// and asking more often than it looks buys nothing.
-    private static let focusRefreshInterval: TimeInterval = 0.5
-    /// States where the pointer, not placement, decides where the pet goes.
-    private static let pointerOwnedStates: Set<BehaviorState> = [
-        .caught, .dragged, .evadePointer
-    ]
-    /// Destinations offered to the emptiness score before a stroll. Enough to
-    /// usually find a clear one, few enough that roaming stays aimless.
-    private static let wanderCandidateCount = 6
-    /// Which agent the pet is watching, what it wears, and what it still owes
-    /// the user when it arrives. Seven fields lived here and each was written
-    /// by more than one code path; they are one object now, in Rust.
-    /// `docs/windows.md` unit 6b.
-    private let activity: any ActivityDirecting = RustActivityDirector()
-
     private var running = false
 
     /// - Parameters:
@@ -189,11 +126,10 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         defaults: UserDefaults = .standard,
         catalog: PetCatalog = PetCatalog(),
         clock: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
-        randomUnit: @escaping @Sendable () -> Double = { Double.random(in: 0..<1) }
+        randomSeed: UInt64 = UInt64.random(in: 1...UInt64.max)
     ) {
         self.defaults = defaults
         now = clock
-        self.randomUnit = randomUnit
         diagnosticsPath = ProcessInfo.processInfo.environment["ROAMLING_REST_LOG"]
             ?? defaults.string(forKey: "roamling.diagnosticsLog")
         defaults.register(defaults: [
@@ -240,22 +176,28 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         displays = displaySet.displays
         world = initialWorld
         tuning = runtimeTuning
-        movement = RustMovement(
-            position: initialPosition,
-            velocity: .zero,
-            configuration: MovementConfiguration(
-                maximumSpeed: runtimeTuning.walkingSpeed,
-                acceleration: 90,
-                deceleration: 115
-            )
-        )
-        behavior = RustBehavior(enteredAt: now())
-        pointerModel = RustPointerModel(configuration: runtimeTuning.pointerConfiguration)
         animationPlayer = PetAnimationPlayer(asset: initialAsset)
+        core = RustPetLoop(
+            position: initialPosition,
+            tuning: runtimeTuning,
+            seed: randomSeed
+        )
         isRoamingEnabled = defaults.bool(forKey: DefaultsKey.roaming)
         isPointerAvoidanceEnabled = defaults.bool(forKey: DefaultsKey.avoidPointer)
         areInteractionsEnabled = defaults.bool(forKey: DefaultsKey.interactions)
-        nextWanderAt = now() + 2.2
+
+        core.setDisplays(displaySet.displays)
+        core.setObjectSize(services.overlay.objectSize)
+        core.setFlags(
+            roaming: isRoamingEnabled,
+            avoidance: isPointerAvoidanceEnabled,
+            interactions: areInteractionsEnabled
+        )
+        core.setAnimationDurations(
+            caught: Self.caughtTransitionDuration(of: initialAsset),
+            dragged: Self.draggedCycleDuration(of: initialAsset)
+        )
+        core.setNextWanderAt(now() + 2.2)
     }
 
     /// Brings the pet up. `drivingTicks` is false for a caller that owns the
@@ -267,7 +209,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         guard !running else { return }
         running = true
         overlay.inputHandler = self
-        overlay.setPosition(movement.position)
+        overlay.setPosition(core.position)
         renderCurrentFrame()
         overlay.setVisible(true)
 
@@ -291,8 +233,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         agents.forEach { $0.stopReceiving() }
         screenObserver?.cancel()
         screenObserver = nil
-        clickReactionUntil = 0
-        isClickReactionPending = false
+        core.clearClickReaction(clearCaughtTransition: false)
         overlay.setInteractionEnabled(false)
         persistPosition()
         overlay.setVisible(false)
@@ -325,9 +266,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     public func setScale(_ newScale: Double) {
         overlay.setScale(newScale)
         defaults.set(overlay.scale, forKey: DefaultsKey.scale)
-        let clamped = world.clamp(movement.position, objectSize: overlay.objectSize)
-        movement.teleport(to: clamped, stop: false)
-        overlay.setPosition(clamped)
+        overlay.setPosition(core.setScale(objectSize: overlay.objectSize))
     }
 
     /// Applies only the values currently exposed for MVP 0/0.5 validation.
@@ -335,17 +274,9 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     /// configuration so this validated interaction preset remains stable.
     public func applyTuning(_ proposed: RuntimeTuning) {
         let normalized = proposed.normalized
-        let pauseChanged = abs(normalized.wanderPause - tuning.wanderPause) > 0.001
         tuning = normalized
-        pointerModel.configuration = normalized.pointerConfiguration
-        pointerModel.reset()
-        movement.maximumSpeed = normalized.walkingSpeed
+        core.applyTuning(normalized, at: now())
         overlay.setHitRegionScale(normalized.hitRegionScale)
-        if pauseChanged, !movement.hasRoute,
-           behavior.state != .caught, behavior.state != .dragged {
-            nextWanderAt = now()
-                + normalized.wanderDelay(randomUnit: 0.5)
-        }
         persistRuntimeTuning()
     }
 
@@ -388,277 +319,90 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     }
 
     public func petOverlayPointerDown(at pointer: WorldPoint) {
-        let now = self.now()
-        guard areInteractionsEnabled, now <= catchArmedUntil else {
-            overlay.setInteractionEnabled(false)
-            return
-        }
-        dragOffset = movement.position - pointer
-        clickReactionUntil = 0
-        isClickReactionPending = false
-        isDragging = false
-        isEvadeTransitioning = false
-        movement.cancelRoute(stop: true)
-        behavior.handle(.catchBegan, at: now)
-        caughtAnimationUntil = now + caughtTransitionDuration
-        updateAnimation(pointerDegrees: lastPointerDecision?.lookDirectionDegrees)
+        apply(core.pointerDown(at: pointer, now: now()))
     }
 
     public func petOverlayPointerDragged(to pointer: WorldPoint, distance: Double) {
-        guard behavior.state == .caught || behavior.state == .dragged else { return }
-        let now = self.now()
-        if distance > 4 {
-            isDragging = true
-            behavior.handle(.dragMoved, at: now)
-        }
-        movement.teleport(to: pointer + dragOffset)
-        overlay.setPosition(movement.position)
-        updateAnimation(pointerDegrees: nil)
-        renderCurrentFrame()
+        apply(core.pointerDragged(to: pointer, distance: distance, now: now()))
     }
 
     public func petOverlayPointerUp(at pointer: WorldPoint, wasDragged: Bool) {
-        guard behavior.state == .caught || behavior.state == .dragged else {
-            overlay.setInteractionEnabled(false)
-            return
-        }
-        let now = self.now()
-        if wasDragged || isDragging {
-            movement.teleport(to: pointer + dragOffset)
-            finishDrop(at: now)
-            return
-        }
+        apply(core.pointerUp(at: pointer, wasDragged: wasDragged, now: now()))
+    }
 
-        // A click has the same caught -> four-paw scramble response as a drag.
-        // Release panel ownership immediately so the reaction never blocks the
-        // underlying app, then finish with the normal landing after one loop.
-        behavior.handle(.dragMoved, at: now)
-        isClickReactionPending = true
-        clickReactionUntil = max(now, caughtAnimationUntil) + draggedCycleDuration
-        let clamped = world.clamp(movement.position, objectSize: overlay.objectSize)
-        movement.teleport(to: clamped)
-        overlay.setPosition(clamped)
-        overlay.setInteractionEnabled(false)
-        catchArmedUntil = 0
-        updateAnimation(pointerDegrees: nil)
-        renderCurrentFrame()
-        if running { scheduleNextTick(after: 1 / 30) }
+    /// Carries out what a click or a drag decided. Nothing here re-decides.
+    private func apply(_ interaction: RustPetLoop.Interaction) {
+        if let enabled = interaction.setInteractionEnabled {
+            overlay.setInteractionEnabled(enabled)
+        }
+        updateAnimation(
+            capability: interaction.capability,
+            pointerDegrees: interaction.lookDirectionDegrees
+        )
+        overlay.setPosition(interaction.position)
+        if interaction.render { renderCurrentFrame() }
+        if interaction.persistPosition { persistPosition() }
+        if let interval = interaction.rescheduleAfter, running {
+            scheduleNextTick(after: interval)
+        }
     }
 
     private func tickTimerFired() {
         guard running else { return }
         autoreleasepool { tick() }
-        scheduleNextTick(after: preferredTickInterval)
+        scheduleNextTick(after: core.preferredTickInterval(at: now()))
     }
 
     /// Advances the pet by one step and returns, without arming the next one.
     /// The app never calls this directly -- its timer does -- but it is what
     /// lets a test drive the whole loop against a clock it controls.
+    ///
+    /// Gather, decide, apply. Only the gathering and the applying are here now:
+    /// what the pet does about any of it is `pet_runtime.rs`.
     public func tick() {
         let now = self.now()
-        let deltaTime = min(max(now - (lastTickAt ?? now), 0), 0.1)
-        lastTickAt = now
-        behavior.handle(.tick, at: now)
-        apply(activity.expireSilent(isResting: behavior.state.isResting, at: now), at: now)
-        apply(
-            activity.resumePendingIfReady(
-                isIdle: behavior.state == .idle,
-                isHeldByPointer: behavior.state == .caught || behavior.state == .dragged,
-                isResting: behavior.state.isResting,
-                randomUnit: randomUnit(),
-                at: now
-            ),
-            at: now
-        )
+        // Two questions have to go back out mid-tick. This is the first: an
+        // accessibility query is a synchronous round trip, so it only runs
+        // while there is a window whose caret the answer would move the pet
+        // away from -- and only the core knows whether there is one.
+        let wantsFocus = core.beginTick(at: now)
+        let focusAuthorized = focusProvider.isAuthorized
+        let didQueryFocus = wantsFocus && focusAuthorized
+        let queriedFocus = didQueryFocus ? focusProvider.currentFocus() : nil
 
         let pointer = pointerProvider.currentPointer(at: now)
-        let userIdleDuration = userIdleProvider.idleDuration(at: now)
-        if userIdleDuration < 0.8, behavior.state.isResting {
-            cancelRestForActivity(at: now)
-        }
-        if (behavior.state == .caught || behavior.state == .dragged), !pointer.primaryButtonDown {
-            if !isClickReactionPending || now >= clickReactionUntil {
-                finishDrop(at: now)
-            }
-        }
-
-        if !movement.hasRoute { escapeRouteActive = false }
-
-        let decision = pointerModel.evaluate(
+        core.setLuminance(judgeableLuminance)
+        let output = core.finishTick(
+            at: now,
             pointer: pointer.position,
-            pet: movement.position,
-            timestamp: now
+            primaryButtonDown: pointer.primaryButtonDown,
+            userIdleDuration: userIdleProvider.idleDuration(at: now),
+            captureAuthorized: captureProvider.isAuthorized,
+            focusAuthorized: focusAuthorized,
+            didQueryFocus: didQueryFocus,
+            queriedFocus: queriedFocus,
+            pointerIsOverPet: overlay.containsPet(atWorldPoint: pointer.position)
         )
-        lastPointerDecision = decision
 
-        if !isClickReactionPending, decision.shouldArmCatch, areInteractionsEnabled {
-            catchArmedUntil = max(catchArmedUntil, now + tuning.catchWindow)
+        for line in output.diagnostics {
+            record(line.category, line.message, at: now)
         }
-        let catchIsArmed = !isClickReactionPending
-            && areInteractionsEnabled
-            && now <= catchArmedUntil
-
-        if behavior.state != .caught && behavior.state != .dragged {
-            // Gather, decide, apply. The decision runs every tick even when
-            // something else owns the pet, so the seat verdict is never stale by
-            // the time placement is allowed to act on it. Gating the judging
-            // along with the moving is what froze placement next to the cursor.
-            let wasTravelling = placement.isTravelling
-            let intent = placement.decide(makeSituation(
-                at: now,
-                pointer: pointer.position,
-                proximity: decision.proximity,
-                catchIsArmed: catchIsArmed,
-                userIdleDuration: userIdleDuration
-            ))
-            // Arriving is an event, and this is where it happens: the director
-            // stops travelling on the tick it decides the walk is over, whether
-            // the pet reached the seat or the trip timed out.
-            //
-            // It used to be inferred from the mover instead, and the two do not
-            // agree -- the mover calls it arrived within 1.5 points and the
-            // director within 4, so the director settles first and the mover's
-            // own arrival never fires. When the reaction owed for that arrival
-            // had already been spent, nothing was left to move the pet out of
-            // `travelToInterest` and it walked on the spot until a passing
-            // cursor interrupted it.
-            //
-            // Guarded on still watching something: the director also drops a
-            // walk when the agent goes quiet, and that is the pet being let go
-            // rather than the pet arriving. Wearing `.observe` there would
-            // leave it staring at a window nobody is working in.
-            let didArrive = wasTravelling && !placement.isTravelling && isWatchingWindow
-
-            // Whether a seat was chosen with a capture in hand is the first
-            // question when the pet parks somewhere odd, and it is not
-            // answerable from outside the app.
-            record(
-                "capture",
-                captureProvider.isAuthorized
-                    ? (cachedLuminance == nil ? "authorised, none yet" : "available")
-                    : "not authorised",
-                at: now
-            )
-            record("pet", behavior.state.rawValue, at: now)
-            record("place", Self.describe(intent), at: now)
-            record(
-                "agent",
-                activity.activeSourceID.map {
-                    "\($0) window=\(activity.hint == nil ? "none" : "found")"
-                } ?? "none",
-                at: now
-            )
-
-            if catchIsArmed {
-                isEvadeTransitioning = false
-                movement.cancelRoute(stop: false)
-                behavior.handle(.pointer(.catchable), at: now)
-                movement.maximumSpeed = tuning.walkingSpeed
-                _ = movement.update(deltaTime: deltaTime)
-                nextWanderAt = max(nextWanderAt, now + 1.0)
-            } else if isEvadeTransitioning {
-                updateEvadeTransition(at: now, deltaTime: deltaTime)
-            } else if intent.travelReason != nil, behavior.state.isResting {
-                // Stepping out from under the user's text is the one thing that
-                // outranks a nap, and the only reason placement may end one.
-                cancelRestForActivity(at: now)
-                apply(intent, at: now, deltaTime: deltaTime)
-            } else if updateRestLifecycle(
-                userIdleDuration: userIdleDuration,
-                pointerProximity: decision.proximity,
-                pointerPosition: pointer.position,
-                mayNapOnSeat: intent == .sleepInPlace,
-                at: now,
-                deltaTime: deltaTime
-            ) {
-                // Rest owns movement until input wakes the creature.
-            } else if isPointerAvoidanceEnabled,
-                      !escapeOutranksPointer(intent, decision.proximity) {
-                behavior.handle(.pointer(decision.proximity), at: now)
-                switch decision.proximity {
-                case .slowEvade, .fastEvade:
-                    applyEvade(decision.escapeVelocity, deltaTime: deltaTime)
-                case .watching, .catchable:
-                    movement.cancelRoute(stop: false)
-                    movement.maximumSpeed = tuning.walkingSpeed
-                    _ = movement.update(deltaTime: deltaTime)
-                    nextWanderAt = max(nextWanderAt, now + 0.8)
-                case .far:
-                    apply(intent, at: now, deltaTime: deltaTime)
-                }
-            } else {
-                apply(intent, at: now, deltaTime: deltaTime)
-            }
-
-            // After the move, so a seat taken this tick is where the reaction
-            // is worn. `deliverArrivalReaction` falls back to `.observe` when
-            // nothing is owed, which is what ends the walk: a pet that has
-            // arrived is watching, not still walking.
-            if didArrive {
-                apply(
-                    activity.deliverArrivalReaction(
-                        isResting: behavior.state.isResting, at: now
-                    ),
-                    at: now
-                )
-                persistPosition()
-            }
+        // The second question: a capture is far heavier again, and the
+        // permission, the task and the throttle are all this side's.
+        for request in output.luminanceRequests {
+            requestLuminanceRefresh(at: now, near: request.region, every: request.interval)
         }
+        if output.persistPosition { persistPosition() }
 
-        let catchIsLive = catchIsArmed && overlay.containsPet(atWorldPoint: pointer.position)
-        let ownsPointer = (behavior.state == .caught || behavior.state == .dragged)
-            && !isClickReactionPending
-        overlay.setInteractionEnabled(ownsPointer || catchIsLive)
-
+        overlay.setInteractionEnabled(output.interactionEnabled)
         updateAnimation(
-            pointerDegrees: behavior.state == .lookAtPointer ? decision.lookDirectionDegrees : nil
+            capability: output.capability,
+            pointerDegrees: output.lookDirectionDegrees
         )
-        animationPlayer.update(deltaTime: deltaTime * locomotionAnimationRate)
-        overlay.setPosition(movement.position)
+        animationPlayer.update(deltaTime: output.deltaTime * output.locomotionRate)
+        overlay.setPosition(output.position)
         renderCurrentFrame()
     }
-
-    /// Whether leaving the user's work outranks the cursor on this tick, either
-    /// because the walk is under way or because this is the tick it starts.
-    ///
-    /// Stopping to look at the cursor is a moment; standing on the user's work
-    /// is a condition, and a moment must not cancel the remedy for a condition.
-    /// Letting it did more than delay the walk: the glance cancels the route,
-    /// so the pet stayed wherever the cursor happened to catch it -- which is
-    /// the middle of the paragraph it was in the act of leaving.
-    ///
-    /// Only the outer band gives way. A cursor close enough to evade or to
-    /// catch still owns the pet, and neither of those can strand it on the
-    /// text: one moves it, the other picks it up.
-    private func escapeOutranksPointer(
-        _ intent: PlacementIntent,
-        _ proximity: PointerProximity
-    ) -> Bool {
-        guard proximity == .watching else { return false }
-        if case .escape = intent { return true }
-        return escapeRouteActive && movement.hasRoute
-    }
-
-    /// Only the states that actually travel at the tuned walking speed scale
-    /// their cadence. Evade and catch run on their own speeds and keep the
-    /// authored timing.
-    ///
-    /// Watching the pointer scales too, but on distance rather than on tuning:
-    /// the closer the pointer, the faster the pet's tail goes.
-    private var locomotionAnimationRate: Double {
-        switch behavior.state {
-        case .wander, .findSleepSpot, .travelToInterest:
-            tuning.locomotionAnimationRate
-        case .lookAtPointer:
-            lastPointerDecision?.attentionRate ?? 1
-        default:
-            1
-        }
-    }
-
-    /// Rest timing follows the tuning panel, so changing the idle threshold
-    /// takes effect on the next tick rather than at the next launch.
-    private var restConfiguration: RestConfiguration { tuning.restConfiguration }
 
     /// Whether the pet is on duty, which takes a window and not merely a source.
     ///
@@ -667,7 +411,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     /// window to watch: nothing to sit beside, nowhere to stroll, and no seat
     /// for the decision table to call worth sleeping on. An agent it cannot
     /// locate is not a reason for the pet to stand still.
-    private var isWatchingWindow: Bool { activity.isWatchingWindow }
+    private var isWatchingWindow: Bool { core.isWatchingWindow }
 
     /// Why the pet is doing what it is doing, kept in memory and copyable from
     /// the menu. Standing and sitting look identical from outside the app, so
@@ -697,54 +441,6 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             try? handle.close()
         } else {
             try? data.write(to: URL(fileURLWithPath: path))
-        }
-    }
-
-    private func recordRestGate(
-        userIdleDuration: TimeInterval,
-        pointerProximity: PointerProximity,
-        mayNapOnSeat: Bool,
-        at timestamp: TimeInterval
-    ) {
-        let blocked =
-            userIdleDuration < restConfiguration.idleBeforeRest ? "waiting for user idle"
-            : placement.isTravelling ? "travelling"
-            : (isWatchingWindow && !mayNapOnSeat) ? "on duty, seat not nappable"
-            : pointerProximity != .far ? "pointer \(pointerProximity)"
-            : !BehaviorController.restEntryStates.contains(behavior.state)
-                ? "state \(behavior.state.rawValue)"
-            : "clear to rest"
-        record("rest", blocked, at: timestamp)
-    }
-
-    private var preferredTickInterval: TimeInterval {
-        if now() <= catchArmedUntil { return 1 / 60 }
-        return switch behavior.state {
-        case .wander, .evadePointer, .findSleepSpot, .travelToInterest:
-            1 / 60
-        case .caught, .dragged, .dropped, .wake, .stretch:
-            1 / 30
-        case .lookAtPointer:
-            1 / 16
-        case .sleep:
-            1 / 2
-        default:
-            1 / 12
-        }
-    }
-
-    private static func describe(_ intent: PlacementIntent) -> String {
-        switch intent {
-        case .none: "none, something else owns the pet"
-        case .hold: "hold"
-        case .sleepInPlace: "sleep in place"
-        case let .stroll(point): String(format: "stroll to %.0f,%.0f", point.x, point.y)
-        case let .escape(point): String(format: "escape to %.0f,%.0f", point.x, point.y)
-        case let .travel(destination, reason):
-            String(
-                format: "travel %@ to %.0f,%.0f",
-                reason.rawValue, destination.point.x, destination.point.y
-            )
         }
     }
 
@@ -806,41 +502,8 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             locationHint: hint,
             metadata: event.metadata
         )
-        apply(
-            activity.handle(
-                located,
-                isHeldByPointer: behavior.state == .caught || behavior.state == .dragged,
-                isResting: behavior.state.isResting,
-                randomUnit: randomUnit(),
-                at: now
-            ),
-            at: now
-        )
-    }
-
-    /// Carries out what the activity director decided, in the order it decided
-    /// them. It cannot move the pet itself: movement, behaviour and placement
-    /// are the runtime's, and this is the seam between them.
-    private func apply(_ effects: [ActivityEffect], at timestamp: TimeInterval) {
-        for effect in effects {
-            switch effect {
-            case .cancelRest:
-                cancelRestForActivity(at: timestamp)
-            case let .settleInPlace(sourceID):
-                placement.settleInPlace(sourceID: sourceID, at: timestamp)
-            case .cancelRoute:
-                movement.cancelRoute(stop: false)
-            case let .setNextWanderAt(value):
-                nextWanderAt = value
-            case let .applyReaction(reaction):
-                behavior.handle(.reaction(reaction), at: timestamp)
-            case let .requestLuminance(region):
-                requestLuminanceRefresh(
-                    at: timestamp,
-                    near: region,
-                    every: Self.luminanceRefreshInterval
-                )
-            }
+        for request in core.handleActivityEvent(located, at: now) {
+            requestLuminanceRefresh(at: now, near: request.region, every: request.interval)
         }
     }
 
@@ -861,51 +524,18 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         captureProvider.requestAuthorization()
     }
 
-    private func refreshedFocus(at timestamp: TimeInterval, force: Bool) -> FocusSnapshot? {
-        guard focusProvider.isAuthorized else {
-            // Revoking the permission has to take effect on the next event, not
-            // leave a stale caret behind.
-            cachedFocus = nil
-            return nil
-        }
-        guard force || timestamp - focusQueriedAt >= Self.focusRefreshInterval else {
-            return cachedFocus
-        }
-        focusQueriedAt = timestamp
-        cachedFocus = focusProvider.currentFocus()
-        return cachedFocus
-    }
-
-    /// The capture the pet is allowed to judge with right now.
-    ///
-    /// Revoking screen recording has to take effect on the next decision rather
-    /// than leave the pet trusting an old capture, and both callers -- seat
-    /// planning and the nap check -- have to read that the same way.
     private var judgeableLuminance: LuminanceField? {
         captureProvider.isAuthorized ? cachedLuminance : nil
     }
 
-    private func planningWorld(focus: FocusSnapshot?) -> DesktopWorldSnapshot {
-        let luminance = judgeableLuminance
-        guard focus != nil || luminance != nil else { return world }
-        return DesktopWorldSnapshot(
-            displays: world.displays,
-            focus: focus,
-            luminance: luminance
-        )
-    }
-
-    /// Captures off the main thread and lets the travelling reseat check pick the
-    /// result up. Placement never waits on a snapshot, so a slow or failed
-    /// capture costs nothing but the visual term.
+    /// The interval already has the resting slow-down folded in: what is left
+    /// here is the permission, the task and the throttle, none of which is a
+    /// decision the pet makes.
     private func requestLuminanceRefresh(
         at timestamp: TimeInterval,
         near region: WorldRect,
-        every requested: TimeInterval
+        every interval: TimeInterval
     ) {
-        let interval = behavior.state.isResting
-            ? max(requested, Self.restingLuminanceRefreshInterval)
-            : requested
         guard captureProvider.isAuthorized,
               luminanceTask == nil,
               timestamp - luminanceCapturedAt >= interval,
@@ -920,483 +550,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         }
     }
 
-    /// Collects everything the placement decision is allowed to look at.
-    ///
-    /// Nothing here decides anything. Gathering is the adapter's whole job on
-    /// this path, which is why the fields it fills are inputs to one function
-    /// rather than state four code paths write to and read from each other.
-    private func makeSituation(
-        at timestamp: TimeInterval,
-        pointer: WorldPoint,
-        proximity: PointerProximity,
-        catchIsArmed: Bool,
-        userIdleDuration: TimeInterval
-    ) -> PetSituation {
-        let isWatching = isWatchingWindow
-        let isRoaming = isRoamingEnabled && !isWatching
-        let isStrollDue = isRoaming && !movement.hasRoute && timestamp >= nextWanderAt
-
-        if isWatching, let region = activity.hint?.approximateRegion {
-            requestLuminanceRefresh(
-                at: timestamp,
-                near: region,
-                every: Self.luminanceRefreshInterval
-            )
-        } else if !isWatching, !movement.hasRoute {
-            requestLuminanceRefreshForRoaming(at: timestamp)
-        }
-
-        // The accessibility query costs a synchronous round trip, so it only
-        // runs while there is a window whose caret the answer would move the pet
-        // away from.
-        let focus = isWatching ? refreshedFocus(at: timestamp, force: false) : nil
-        return PetSituation(
-            timestamp: timestamp,
-            world: planningWorld(focus: focus),
-            position: movement.position,
-            objectSize: overlay.objectSize,
-            pointerPosition: pointer,
-            walkingSpeed: tuning.walkingSpeed,
-            isPointerOwned: catchIsArmed
-                || Self.pointerOwnedStates.contains(behavior.state)
-                || (isPointerAvoidanceEnabled && proximity != .far && proximity != .watching),
-            isPointerWatching: isPointerAvoidanceEnabled
-                && (proximity == .watching || behavior.state == .lookAtPointer),
-            isEvading: isEvadeTransitioning,
-            isWalking: movement.hasRoute,
-            isResting: behavior.state.isResting,
-            activitySourceID: activity.activeSourceID,
-            activityHint: activity.hint,
-            userIdleDuration: userIdleDuration,
-            idleBeforeRest: restConfiguration.idleBeforeRest,
-            isRoamingEnabled: isRoamingEnabled,
-            isStrollDue: isStrollDue,
-            strollCandidates: isRoaming && !movement.hasRoute ? strollCandidates() : []
-        )
-    }
-
-    /// Carries out the director's decision. Nothing here re-decides.
-    private func apply(
-        _ intent: PlacementIntent,
-        at timestamp: TimeInterval,
-        deltaTime: TimeInterval
-    ) {
-        switch intent {
-        case let .travel(destination, _):
-            travelToSeat(destination, at: timestamp, deltaTime: deltaTime)
-        case let .stroll(point):
-            beginStroll(to: point, at: timestamp, deltaTime: deltaTime)
-        case let .escape(point):
-            beginStroll(to: point, at: timestamp, deltaTime: deltaTime)
-            escapeRouteActive = movement.hasRoute
-        case .hold, .sleepInPlace, .none:
-            // `.sleepInPlace` lands here when rest declined to start — the
-            // pointer came close, or the state machine was mid-transition. The
-            // seat is kept either way.
-            if isWatchingWindow {
-                holdSeat(at: timestamp, deltaTime: deltaTime)
-            } else {
-                updateRoaming(at: timestamp, deltaTime: deltaTime)
-            }
-        }
-    }
-
-    private func travelToSeat(
-        _ destination: InterestDestination,
-        at timestamp: TimeInterval,
-        deltaTime: TimeInterval
-    ) {
-        if !movement.hasRoute || movement.destination != destination.point {
-            let route = DisplayTopology(displays: displays).route(
-                from: movement.position,
-                to: destination.point
-            )
-            guard !route.waypoints.isEmpty else {
-                // Nowhere to walk is not a reason to keep trying. The pet
-                // watches from where it stands and the seat is judged there.
-                placement.settleInPlace(
-                    sourceID: activity.activeSourceID,
-                    at: timestamp
-                )
-                holdSeat(at: timestamp, deltaTime: deltaTime)
-                return
-            }
-            movement.setRoute(route.waypoints)
-        }
-        isEvadeTransitioning = false
-        restDestination = nil
-        behavior.handle(.beginInterestTravel, at: timestamp)
-        movement.maximumSpeed = tuning.walkingSpeed
-        nextWanderAt = .infinity
-        _ = movement.update(deltaTime: deltaTime)
-    }
-
-    /// A parked pet keeps its seat. All that is left is wearing the reaction the
-    /// current event asked for.
-    private func holdSeat(at timestamp: TimeInterval, deltaTime: TimeInterval) {
-        movement.cancelRoute(stop: false)
-        movement.maximumSpeed = tuning.walkingSpeed
-        _ = movement.update(deltaTime: deltaTime)
-        if activity.hasArrivalReaction {
-            apply(
-                activity.deliverArrivalReaction(
-                    isResting: behavior.state.isResting, at: timestamp
-                ),
-                at: timestamp
-            )
-            return
-        }
-        switch behavior.state {
-        case .observe, .work, .waitingForUser, .celebrate, .sad, .spark:
-            break
-        case .wake, .stretch, .caught, .dragged:
-            break
-        default:
-            // Only a lasting condition is worn continuously. A moment -- the
-            // start hop, a glance at a file being read -- is delivered once and
-            // then the pet is simply present, which is what a companion beside a
-            // busy agent should look like.
-            apply(
-                activity.sustainOnSeat(isResting: behavior.state.isResting, at: timestamp),
-                at: timestamp
-            )
-        }
-    }
-
-    private func updateRestLifecycle(
-        userIdleDuration: TimeInterval,
-        pointerProximity: PointerProximity,
-        pointerPosition: WorldPoint,
-        mayNapOnSeat: Bool,
-        at timestamp: TimeInterval,
-        deltaTime: TimeInterval
-    ) -> Bool {
-        if behavior.state.isResting, pointerProximity != .far {
-            cancelRestForActivity(at: timestamp)
-            return false
-        }
-
-        switch behavior.state {
-        case .sit:
-            movement.cancelRoute(stop: false)
-            _ = movement.update(deltaTime: deltaTime)
-            if timestamp - behavior.enteredAt >= restConfiguration.sittingDuration {
-                behavior.handle(.seekSleepSpot, at: timestamp)
-                beginRestTravel(
-                    pointerPosition: pointerPosition,
-                    napInPlace: mayNapOnSeat,
-                    at: timestamp
-                )
-            }
-            return true
-
-        case .findSleepSpot:
-            movement.maximumSpeed = max(24, tuning.walkingSpeed * 0.75)
-            if movement.hasRoute {
-                let update = movement.update(deltaTime: deltaTime)
-                if update.reachedDestination { enterSleep(at: timestamp) }
-            } else {
-                enterSleep(at: timestamp)
-            }
-            return true
-
-        case .sleep:
-            movement.cancelRoute(stop: false)
-            _ = movement.update(deltaTime: deltaTime)
-            return true
-
-        default:
-            break
-        }
-
-        // Watching an agent used to block rest outright, which meant the pet
-        // could never sleep during the long unattended run that is exactly when
-        // nobody is looking at it. Priority 7 of the decision table answers
-        // whether the seat it is parked on is worth dozing on.
-        recordRestGate(
-            userIdleDuration: userIdleDuration,
-            pointerProximity: pointerProximity,
-            mayNapOnSeat: mayNapOnSeat,
-            at: timestamp
-        )
-        guard userIdleDuration >= restConfiguration.idleBeforeRest,
-              !placement.isTravelling,
-              !isWatchingWindow || mayNapOnSeat,
-              pointerProximity == .far,
-              BehaviorController.restEntryStates.contains(behavior.state) else {
-            return false
-        }
-        isEvadeTransitioning = false
-        restDestination = nil
-        movement.cancelRoute(stop: false)
-        behavior.handle(.beginRest, at: timestamp)
-        nextWanderAt = .infinity
-        _ = movement.update(deltaTime: deltaTime)
-        return true
-    }
-
-    private func beginRestTravel(
-        pointerPosition: WorldPoint,
-        napInPlace: Bool,
-        at timestamp: TimeInterval
-    ) {
-        // A pet that dozed off beside a working agent is already on a vetted
-        // seat. Walking it to a display corner to sleep would throw that away
-        // and put the trip back that this gate exists to remove.
-        if napInPlace {
-            record("rest", "sleeping in place, on a vetted seat", at: timestamp)
-            enterSleep(at: timestamp)
-            return
-        }
-
-        // Away from an agent, the spot has to answer for itself. Standing on a
-        // clear patch of desktop is the ordinary case, and getting up to walk
-        // to a corner from it is the trip the user actually sees: a pet that
-        // was nodding off suddenly striding across the screen.
-        if RustCore.napsInPlace(
-            at: movement.position,
-            objectSize: overlay.objectSize,
-            in: judgeableLuminance,
-            atLeast: BasicInterestPositionPlanner.holdEmptiness
-        ) {
-            record("rest", "sleeping in place, spot reads clear", at: timestamp)
-            enterSleep(at: timestamp)
-            return
-        }
-        record("rest", "tucking into a safe zone, spot unvetted", at: timestamp)
-
-        let zones = safeZoneProvider.safeZones(in: world)
-        let restWorld = DesktopWorldSnapshot(
-            displays: world.displays,
-            windows: world.windows,
-            pointer: PointerSnapshot(
-                position: pointerPosition,
-                timestamp: timestamp,
-                primaryButtonDown: false
-            ),
-            focus: world.focus,
-            safeZones: zones
-        )
-        restDestination = RustCore.restDestination(
-            in: restWorld,
-            currentPosition: movement.position,
-            pointerPosition: pointerPosition,
-            objectSize: overlay.objectSize
-        )
-
-        guard isRoamingEnabled, let restDestination else {
-            enterSleep(at: timestamp)
-            return
-        }
-        let route = DisplayTopology(displays: displays).route(
-            from: movement.position,
-            to: restDestination.point
-        )
-        movement.maximumSpeed = max(24, tuning.walkingSpeed * 0.75)
-        movement.setRoute(route.waypoints)
-        if !movement.hasRoute { enterSleep(at: timestamp) }
-    }
-
-    private func enterSleep(at timestamp: TimeInterval) {
-        movement.cancelRoute(stop: true)
-        behavior.handle(.sleepSpotReached, at: timestamp)
-        nextWanderAt = .infinity
-        persistPosition()
-    }
-
-    private func cancelRestForActivity(at timestamp: TimeInterval) {
-        guard behavior.state.isResting else { return }
-        restDestination = nil
-        movement.cancelRoute(stop: false)
-        behavior.handle(.meaningfulActivity, at: timestamp)
-        nextWanderAt = timestamp + restConfiguration.wakeWanderDelay
-    }
-
-    /// Walks whatever route roaming already has and paces the next pause.
-    /// Choosing where to stroll is priority 9 of the decision table, not this.
-    private func updateRoaming(at timestamp: TimeInterval, deltaTime: TimeInterval) {
-        movement.maximumSpeed = tuning.walkingSpeed
-        guard isRoamingEnabled else {
-            movement.cancelRoute(stop: false)
-            _ = movement.update(deltaTime: deltaTime)
-            return
-        }
-        guard movement.hasRoute else {
-            _ = movement.update(deltaTime: deltaTime)
-            return
-        }
-        if movement.update(deltaTime: deltaTime).reachedDestination {
-            behavior.handle(.arrived, at: timestamp)
-            nextWanderAt = timestamp + tuning.wanderDelay(randomUnit: randomUnit())
-            persistPosition()
-        }
-    }
-
-    private func requestLuminanceRefreshForRoaming(at timestamp: TimeInterval) {
-        guard let display = world.display(containing: movement.position)
-            ?? world.nearestDisplay(to: movement.position) else { return }
-        requestLuminanceRefresh(
-            at: timestamp,
-            near: display.visibleFrame,
-            every: Self.roamingLuminanceRefreshInterval
-        )
-    }
-
-    private func beginStroll(
-        to point: WorldPoint,
-        at timestamp: TimeInterval,
-        deltaTime: TimeInterval
-    ) {
-        isEvadeTransitioning = false
-        // Claim the walking state before laying a route. Setting the route
-        // first left it in place when the state machine refused the
-        // transition, so the pet walked the whole leg animated as whatever it
-        // had been doing -- observe frames, which are the idle frames.
-        guard behavior.handle(.beginWander, at: timestamp).to == .wander else {
-            nextWanderAt = timestamp + 2
-            return
-        }
-        let route = DisplayTopology(displays: displays).route(
-            from: movement.position,
-            to: point
-        )
-        movement.maximumSpeed = tuning.walkingSpeed
-        movement.setRoute(route.waypoints)
-        if !movement.hasRoute { nextWanderAt = timestamp + 2 }
-        _ = movement.update(deltaTime: deltaTime)
-    }
-
-    /// Wandering is where the pet spends most of its life: an agent turn ends,
-    /// the activity clears, and two seconds later it strolls off. That walk
-    /// never looked at the screen, so it parked on the user's text far more
-    /// often than any interest seat ever did. Offering the director a handful
-    /// of destinations to reject is the cheapest way to fix that without making
-    /// roaming look calculated.
-    private func strollCandidates() -> [WorldPoint] {
-        (0..<Self.wanderCandidateCount).compactMap { _ in randomWanderPoint() }
-    }
-
-    /// A draw turned into an index. `randomUnit` is `0..<1`, but the clamp is
-    /// spelled out because a 1.0 would step off the end of the array.
-    private func pickIndex(_ count: Int) -> Int {
-        min(count - 1, max(0, Int(randomUnit() * Double(count))))
-    }
-
-    private func randomWanderPoint() -> WorldPoint? {
-        guard !displays.isEmpty else { return nil }
-        let current = world.display(containing: movement.position) ?? world.nearestDisplay(to: movement.position)
-        let target: DisplaySnapshot
-        let shouldExploreAnotherDisplay = displays.count > 1
-            && randomUnit() < tuning.crossDisplayWanderChance
-        if shouldExploreAnotherDisplay {
-            let alternatives = displays.filter { $0.id != current?.id }
-            target = alternatives.isEmpty ? displays[0] : alternatives[pickIndex(alternatives.count)]
-        } else {
-            target = current ?? displays[pickIndex(displays.count)]
-        }
-
-        let safe = target.visibleFrame.insetBy(
-            dx: overlay.objectSize.width / 2 + 18,
-            dy: overlay.objectSize.height / 2 + 12
-        )
-        guard !safe.isEmpty else { return target.visibleFrame.center }
-
-        // A cross-display trip ends shortly inside the destination display.
-        // Crossing the seam reads clearly, while avoiding another full-screen
-        // trek before Roamling finally pauses.
-        if target.id != current?.id {
-            let boundary = target.visibleFrame.closestPoint(to: movement.position)
-            let inward = (target.visibleFrame.center - boundary).normalized
-            let depth = 140 + randomUnit() * 220
-            return safe.closestPoint(to: boundary + inward * depth)
-        }
-
-        let x = safe.minX + randomUnit() * safe.size.width
-        let y: Double
-        if randomUnit() < 0.72 {
-            let upper = max(safe.minY, safe.maxY - min(170, safe.size.height * 0.32))
-            y = upper + randomUnit() * (safe.maxY - upper)
-        } else {
-            y = safe.minY + randomUnit() * safe.size.height
-        }
-        let sampled = WorldPoint(x: x, y: y)
-        let offset = sampled - movement.position
-        guard offset.length > 520 else { return sampled }
-        let legLength = 280 + randomUnit() * 240
-        return safe.closestPoint(to: movement.position + offset.normalized * legLength)
-    }
-
-    private func applyEvade(_ desiredVelocity: WorldVector, deltaTime: TimeInterval) {
-        let topology = DisplayTopology(displays: displays)
-        if let transition = topology.evadeTransition(
-            from: movement.position,
-            direction: desiredVelocity,
-            objectSize: overlay.objectSize
-        ) {
-            isEvadeTransitioning = true
-            movement.maximumSpeed = max(
-                tuning.walkingSpeed,
-                desiredVelocity.length
-            )
-            movement.setRoute(transition.waypoints)
-            _ = movement.update(deltaTime: deltaTime)
-            nextWanderAt = now() + 1.5
-            return
-        }
-
-        movement.cancelRoute(stop: false)
-        var velocity = desiredVelocity
-        let currentDisplay = world.display(containing: movement.position)
-            ?? world.nearestDisplay(to: movement.position)
-        if let currentDisplay {
-            let safe = currentDisplay.visibleFrame.insetBy(
-                dx: overlay.objectSize.width / 2,
-                dy: overlay.objectSize.height / 2
-            )
-            let proposed = movement.position + velocity * deltaTime
-            if proposed.x < safe.minX || proposed.x > safe.maxX { velocity.dx = 0 }
-            if proposed.y < safe.minY || proposed.y > safe.maxY { velocity.dy = 0 }
-            if velocity.length < 1 {
-                let pointerY = lastPointerDecision?.kinematics.velocity.dy ?? 0
-                velocity = WorldVector(dx: 0, dy: pointerY >= 0 ? -desiredVelocity.length : desiredVelocity.length)
-            }
-            let constrained = safe.closestPoint(to: movement.position + velocity * deltaTime)
-            movement.teleport(to: constrained, stop: false)
-        } else {
-            movement.teleport(to: movement.position + velocity * deltaTime, stop: false)
-        }
-        movement.maximumSpeed = max(tuning.walkingSpeed, desiredVelocity.length)
-        movement.setVelocity(velocity)
-        nextWanderAt = now() + 1.0
-    }
-
-    private func updateEvadeTransition(at timestamp: TimeInterval, deltaTime: TimeInterval) {
-        guard movement.hasRoute else {
-            isEvadeTransitioning = false
-            behavior.handle(.pointer(.far), at: timestamp)
-            return
-        }
-        movement.maximumSpeed = max(
-            tuning.walkingSpeed,
-            tuning.pointerConfiguration.fastEvadeSpeed
-        )
-        let update = movement.update(deltaTime: deltaTime)
-        guard update.reachedDestination else { return }
-        isEvadeTransitioning = false
-        behavior.handle(.pointer(.far), at: timestamp)
-        nextWanderAt = timestamp + max(
-            1.5,
-            tuning.wanderDelay(randomUnit: randomUnit()) * 0.35
-        )
-        persistPosition()
-    }
-
-    private func updateAnimation(pointerDegrees: Double?) {
-        let capability = PetCapabilityMapping.capability(
-            for: behavior.state,
-            velocityDX: movement.velocity.dx,
-            isCaughtTransitionActive: now() < caughtAnimationUntil
-        )
+    private func updateAnimation(capability: PetCapability, pointerDegrees: Double?) {
         animationPlayer.setCapability(capability)
         animationPlayer.setLookDirection(degrees: pointerDegrees)
     }
@@ -1405,63 +559,59 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         overlay.setFrameImage(asset.frameImage(at: animationPlayer.currentFrameIndex))
     }
 
-    private func finishDrop(at timestamp: TimeInterval) {
-        isDragging = false
-        isClickReactionPending = false
-        isEvadeTransitioning = false
-        caughtAnimationUntil = 0
-        clickReactionUntil = 0
-        behavior.handle(.mouseReleased, at: timestamp)
-        let clamped = world.clamp(movement.position, objectSize: overlay.objectSize)
-        movement.teleport(to: clamped)
-        overlay.setPosition(clamped)
-        overlay.setInteractionEnabled(false)
-        catchArmedUntil = 0
-        nextWanderAt = timestamp + 1.4
-        persistPosition()
-    }
-
-    private var caughtTransitionDuration: TimeInterval {
-        guard let track = asset.resolver.resolve(.caught), !track.loops else { return 0 }
-        return min(track.frames.reduce(0) { $0 + $1.duration }, 0.8)
-    }
-
-    private var draggedCycleDuration: TimeInterval {
-        guard let track = asset.resolver.resolve(.dragged) else { return 0.4 }
-        let duration = track.frames.reduce(0) { $0 + $1.duration }
-        return min(max(duration, 0.3), 0.8)
-    }
-
     private func handleDisplayChange() {
-        let oldAppKitPoint = coordinateSpace.pointToAppKit(movement.position)
+        // Converted through the old space before the new one replaces it: the
+        // pet is where it looked, not where its coordinates happen to land.
+        let oldAppKitPoint = coordinateSpace.pointToAppKit(core.position)
         let displaySet = displayProvider.currentDisplaySet()
         guard !displaySet.displays.isEmpty else { return }
         displays = displaySet.displays
         coordinateSpace = displaySet.coordinateSpace
         world = DesktopWorldSnapshot(displays: displays)
-        let newWorldPoint = coordinateSpace.pointFromAppKit(oldAppKitPoint)
-        let clamped = world.clamp(newWorldPoint, objectSize: overlay.objectSize)
-        isEvadeTransitioning = false
-        movement.cancelRoute(stop: true)
-        movement.teleport(to: clamped)
+        let clamped = core.handleDisplayChange(
+            displays: displays,
+            carrying: coordinateSpace.pointFromAppKit(oldAppKitPoint),
+            at: now()
+        )
         overlay.setPosition(clamped)
-        nextWanderAt = now() + 1
         persistPosition()
     }
 
     private func install(asset newAsset: PetAsset) {
         asset = newAsset
-        caughtAnimationUntil = 0
-        clickReactionUntil = 0
-        isClickReactionPending = false
+        core.clearClickReaction(clearCaughtTransition: true)
         animationPlayer = PetAnimationPlayer(asset: newAsset)
-        updateAnimation(pointerDegrees: nil)
+        core.setAnimationDurations(
+            caught: Self.caughtTransitionDuration(of: newAsset),
+            dragged: Self.draggedCycleDuration(of: newAsset)
+        )
+        updateAnimation(
+            capability: PetCapabilityMapping.capability(
+                for: core.state,
+                velocityDX: 0,
+                isCaughtTransitionActive: false
+            ),
+            pointerDegrees: nil
+        )
         renderCurrentFrame()
     }
 
+    /// How long the pet stays in the caught pose before it starts scrabbling.
+    /// Capped because a pet held still for a whole second reads as stuck.
+    private static func caughtTransitionDuration(of asset: PetAsset) -> TimeInterval {
+        guard let track = asset.resolver.resolve(.caught), !track.loops else { return 0 }
+        return min(track.frames.reduce(0) { $0 + $1.duration }, 0.8)
+    }
+
+    private static func draggedCycleDuration(of asset: PetAsset) -> TimeInterval {
+        guard let track = asset.resolver.resolve(.dragged) else { return 0.4 }
+        let duration = track.frames.reduce(0) { $0 + $1.duration }
+        return min(max(duration, 0.3), 0.8)
+    }
+
     private func persistPosition() {
-        defaults.set(movement.position.x, forKey: DefaultsKey.positionX)
-        defaults.set(movement.position.y, forKey: DefaultsKey.positionY)
+        defaults.set(core.position.x, forKey: DefaultsKey.positionX)
+        defaults.set(core.position.y, forKey: DefaultsKey.positionY)
         defaults.set(true, forKey: DefaultsKey.hasPosition)
     }
 

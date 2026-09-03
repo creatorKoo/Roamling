@@ -4,6 +4,7 @@
 import Foundation
 import RoamlingCore
 import RoamlingEngine
+import RoamlingPet
 
 func coreLogicTests() -> [LogicTest] {
     [
@@ -504,6 +505,16 @@ func coreLogicTests() -> [LogicTest] {
                 }
                 try expect(compared == 800, "only \(compared) calls compared")
             }
+        },
+        LogicTest(name: "the capability wire order matches the capability list") {
+            // The tick answers with an index, so this list and
+            // `PET_CAPABILITIES` in `capability.rs` are one contract. Adding a
+            // capability in the middle would draw the wrong picture rather
+            // than fail to compile.
+            try expect(
+                RustCoreTestBridge.capabilityWireOrder == PetCapability.allCases,
+                "the wire order and the capability list have drifted apart"
+            )
         },
         LogicTest(name: "the tuning wire order matches the key list") {
             // Swift sends the index, so this list and `TUNING_KEYS` in

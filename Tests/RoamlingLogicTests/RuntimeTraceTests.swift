@@ -72,28 +72,6 @@ private func traceFixtureURL() -> URL {
         .appendingPathComponent("RuntimeTrace.txt")
 }
 
-/// Deliberately not the system generator. A session that cannot be replayed
-/// cannot be a fixture, and the runtime takes its aimlessness as an argument
-/// for exactly this reason.
-private final class TraceRandom: @unchecked Sendable {
-    private let lock = NSLock()
-    private var seed: UInt64 = 0x51D3_7A0C_B84E_2F69
-    private var draws = 0
-    var count: Int { lock.lock(); defer { lock.unlock() }; return draws }
-
-    var draw: @Sendable () -> Double {
-        { [self] in
-            lock.lock()
-            defer { lock.unlock() }
-            seed ^= seed << 13
-            seed ^= seed >> 7
-            seed ^= seed << 17
-            draws += 1
-            return Double(seed % 1_000_000) / 1_000_000
-        }
-    }
-}
-
 @MainActor
 private func recordTraceSession() throws -> String {
     let display = DisplaySnapshot(
@@ -117,14 +95,16 @@ private func recordTraceSession() throws -> String {
 
     let clock = TestClock(startingAt: 1_000)
     let agent = FakeAgent()
-    let dice = TraceRandom()
     let runtime = RoamlingRuntime(
         services: platform.services,
         agents: [agent],
         defaults: suite.defaults,
         catalog: PetCatalog(roots: []),
         clock: clock.read,
-        randomUnit: dice.draw
+        // Deliberately a fixed seed. A session that cannot be replayed cannot
+        // be a fixture, and the runtime takes its aimlessness as an argument
+        // for exactly this reason.
+        randomSeed: 0x51D3_7A0C_B84E_2F69
     )
     runtime.start(drivingTicks: false)
     defer { runtime.stop() }
@@ -145,7 +125,7 @@ private func recordTraceSession() throws -> String {
             // almost always diverge because one of them consumed a random
             // number the other did not, and without this the first visible
             // symptom is a coordinate three decimals out, forty ticks later.
-            ) + String(format: " d%d", dice.count)
+            ) + String(format: " d%d", runtime.randomDraws)
         )
     }
 

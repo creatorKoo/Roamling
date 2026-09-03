@@ -189,7 +189,7 @@ macOS에서 실제로 문제를 일으키기 시작하거나, `RoamlingMac`이 �
 | 5b | **PlacementDirector** ✅ 2026-09-03 | 551 | **B** |
 | 6a | RuntimeTuning ✅ 2026-09-03 | 244 | A |
 | 6b | 활동 오케스트레이션 ✅ 2026-09-03 | 244 | **B** |
-| 6c | tick 본체 (rest · roaming · evade · 배치 적용) | ~600 | **B**, tick 1회 |
+| 6c | tick 본체 (rest · roaming · evade · 배치 적용) ✅ 2026-09-03 | ~800 | **B**, tick 2회 |
 
 단위 4도 B가 됐다 — `AttentionModel`은 어느 소스를 보고 있었는지와 언제 떠났는지를,
 `ReactionPolicy`는 마지막 반응 시각을 tick 사이에 들고 있다. Swift가 핸들만 쥐고 이벤트만
@@ -228,11 +228,36 @@ Codable과 11개 저장 필드는 그대로라 읽는 쪽은 아무것도 안 �
 (`catchArmDistance`는 **이미 clamp된** awareness에 걸린다) fixture 13,701 케이스 중 대부분이
 범위 밖 값이다 — clamp가 실제로 걸릴 때만 순서가 보인다.
 
-**남은 것은 6c, tick 본체다.** rest lifecycle · roaming · evade · 배치 적용(`apply` ·
-`travelToSeat` · `holdSeat`)이고, 이것들은 전부 플랫폼 provider와 `PetAnimationPlayer`를
-직접 부른다. 즉 6c는 **Rust가 Swift를 콜백으로 부르는 방향 전환**이 필요하고, 그게 W4의
-`PlatformServices` 작업과 같은 자리다. 런타임 1,664줄 중 순수 결정 로직은 ~600줄이고
-나머지는 타이머 · UserDefaults · 진단 · 소스 구독 · 펫 로딩이라 이식 대상이 아니다.
+**6c에서 방법이 또 한 번 바뀌었다 — 대조군을 쓰지 않는다.** 런타임 위에는 스위치를 쥔
+호출자가 없고, 6b처럼 들어올려 대조군을 만들면 600줄짜리 전사(轉寫)를 하나 더 만들어 그
+전사가 맞다는 것만 증명하게 된다. 그래서 **실물을 녹화했다**: fake provider 위에서 진짜
+런타임을 40초 돌린 것 — 배회 · 커서 접근 · 낚아채기 · 드래그 · agent 턴 한 바퀴 · 낮잠 ·
+디스플레이 추가 — 을 tick 단위로 적어 `Tests/RoamlingLogicTests/RuntimeTrace.txt`에 커밋하고,
+포팅 후 **바이트 단위로 같은 답**을 요구한다. behavior state 19종 중 18종이 그 안에 나온다.
+
+녹화가 가능하려면 세 가지를 먼저 고쳐야 했다. (1) **무작위성을 인자로 받는다** — 시스템
+생성기를 5곳에서 직접 불러서 매 실행이 다른 세션이었다. (2) **`start(drivingTicks:)`** —
+tick 타이머와 agent 이벤트 배달이 같은 run loop에 있어서, 배달을 위해 loop를 돌리면 그
+사이에 tick이 몇 번 도는지 예측할 수 없었다. (3) `drainActivityEvents`가 실제 시간을
+진행시키지 않게. 셋 다 Windows 셸에도 필요한 것들이다 — 프레임 루프를 이미 가진 플랫폼은
+런타임의 타이머를 쓰지 않는다.
+
+**tick이 2회 호출로 갈라졌다.** 중간에 플랫폼에 물어봐야 하는 것이 있기 때문이다:
+`begin_tick`이 "이번 tick에 accessibility 왕복 비용을 낼 가치가 있는가"를 답하고(창을 보고
+있을 때만, 0.5초에 한 번), 셸이 물어본 뒤 `finish_tick`에 넘긴다. 캡처 요청도 같은 이유로
+출력으로 나간다 — 권한 · Task · 스로틀은 결정이 아니라 플랫폼의 몫이다.
+
+**런타임은 1,664줄에서 667줄로 줄었다.** 남은 것은 결정이 아닌 것들뿐이다 — 타이머,
+UserDefaults, 진단 파일, agent 구독, 스프라이트 시트.
+
+**남았던 6c 정의는 아래와 같았다.** rest lifecycle · roaming · evade · 배치 적용(`apply` ·
+`travelToSeat` · `holdSeat`). 콜백으로 방향을 뒤집을 필요는 없었다 — 플랫폼에 물어볼 것이
+두 개뿐이라 tick을 2회로 가르는 것으로 충분했다.
+
+**W4에 남은 것은 `RoamlingPet` 1,587줄이다.** Windows 셸이 그릴 것을 고르려면 resolver와
+player가 필요하다. capability 16종과 state→capability 매핑은 6c에서 같이 넘어갔으므로
+(`capability.rs`), 남은 것은 트랙 해석 · 프레임 타이밍 · 아틀라스다. 디코더는 W2b이고
+D에서는 `image` crate 한 줄이다.
 
 **5a가 A 대 B 비용 주장을 실제로 검증한 자리다.** tick당 크로싱 8회로 재보니 Rust 경로가
 4.706 µs/tick, Swift 원본이 0.099 µs/tick(둘 다 release) — 차액 4.6 µs는 60 Hz 프레임 예산의
