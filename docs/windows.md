@@ -1054,15 +1054,47 @@ GPL-3.0이므로 배포하는 각 버전에 대응하는 소스를 계속 제공
 
 | provider | 표의 경로 | 실제로 먼저 시도할 것 |
 |---|---|---|
-| Capture | Windows Graphics Capture | **BitBlt + StretchBlt → 작은 DIB** |
+| Capture | Windows Graphics Capture | ~~BitBlt~~ — **W5에서 실측으로 뒤집혔다.** 아래 참조 |
 | Focus | UI Automation | **`GetGUIThreadInfo`** |
 | Window | HWND/Win32 | `DWMWA_EXTENDED_FRAME_BOUNDS` |
 | SafeZone | work area candidates | `MONITORINFO.rcWork` |
 
-- **Capture**: Windows Graphics Capture는 WinRT라 Swift에서 아프다. 64컬럼 다운샘플을 수 초
-  주기로 뜨는 용도(현재 예산 capture 1회 62ms)에는 BitBlt가 충분하다. 그리고 "펫이 자기
-  자리를 바빠 보이게 만들면 안 된다"는 `MacCaptureProvider`의 `excludingApplications` 로직이
-  Windows에서는 **`SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` 한 줄**로 끝난다.
+- **Capture** — **이 항목의 권고는 틀렸다. 2026-09-04에 실측으로 뒤집혔다.**
+
+  원래 근거는 "64컬럼 다운샘플을 수 초 주기로 뜨는 데 BitBlt면 충분하다"였다. W5에서
+  실제로 만들어 재보니 아니었다:
+
+  ```text
+  read   (화면 -> 메모리, BitBlt)     256 ~ 1117 ms
+  shrink (메모리에서 HALFTONE 평균)      9 ~   21 ms
+  ```
+
+  **프레임버퍼 읽기 자체가 비싸고 최대 1.1초다.** macOS의 ScreenCaptureKit이 같은 답에
+  62 ms를 쓰는 것과 비교하면 10배 이상이고, 메시지 루프에서 동기로 돌면 펫이 몇 초마다
+  1초씩 언다.
+
+  **면적에 비례하지도 않아서 요청 영역만 읽는 것으로도 해결되지 않는다:**
+
+  ```text
+  2560x1600   579 ms       640x400   739 ms   <- 더 작은데 더 느리다
+  1280x800    247 ms       200x200   250 ms
+  ```
+
+  픽셀 복사 비용이 아니라 **합성 데스크톱에서 GPU->CPU 동기화를 강제하는 고정 비용**이다.
+  Windows Graphics Capture와 DXGI Desktop Duplication이 존재하는 이유가 정확히 이것이고,
+  "WinRT가 아프니 피하자"는 회피가 성립하지 않는다. **DXGI Desktop Duplication으로 간다** —
+  WinRT가 아닌 Win32/COM이라 `windows` 크레이트로 닿고, GPU 쪽에서 끝난다.
+
+  살아남은 것도 있다. "펫이 자기 자리를 바빠 보이게 만들면 안 된다"는
+  `MacCaptureProvider`의 `excludingApplications` 로직이 Windows에서는
+  **`SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` 한 줄**로 끝나고, 이는 W0에서 대조
+  실험으로 확인됐다.
+
+  **잠금화면도 여기서 걸린다.** 잠기면 입력 데스크톱이 Winlogon의 보안 데스크톱으로 바뀌는데,
+  화면 읽기는 **실패하지 않고 검은 화면을 돌려준다.** 그 모양이 위험하다 — 펫이 "화면 전체가
+  비었다"고 읽고 아무 근거 없는 자리를 골라 다음 캡처까지 그대로 있는다. 사용자가 잠금화면을
+  자주 쓰므로 예외가 아니라 평상시다. `OpenInputDesktop`이 실패하는 것으로 판정해 그때는
+  아예 읽지 않는다. UAC 프롬프트가 데스크톱을 잡고 있을 때도 같다.
   다만 **BitBlt는 하드웨어 오버레이(MPO)로 그려지는 영상과 DRM 보호 창을 검게 읽는다.**
   우리는 어두운 곳을 "비어 있다"로 점수화하므로 펫이 재생 중인 영상 위에 앉을 수 있다 —
   MVP 4가 막으려던 바로 그 실패다. W5 착수 시 유튜브 전체화면과 넷플릭스로 먼저 확인하고,

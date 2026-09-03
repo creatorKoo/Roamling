@@ -21,6 +21,10 @@ pub const INTERACTIONS: &str = "roamling.interactions";
 pub const POSITION_X: &str = "roamling.position.x";
 pub const POSITION_Y: &str = "roamling.position.y";
 pub const HAS_POSITION: &str = "roamling.position.exists";
+/// Windows-only. macOS gates these on TCC permission; there is no equivalent
+/// here, so the setting *is* the consent. Both default off.
+pub const VISUAL_PLACEMENT: &str = "roamling.visualPlacement";
+pub const CURSOR_AWARENESS: &str = "roamling.cursorAwareness";
 
 pub struct Settings {
     values: BTreeMap<String, String>,

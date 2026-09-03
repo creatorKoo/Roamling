@@ -17,6 +17,8 @@
 //! established on real hardware that Windows can do the seven things the
 //! overlay needs. See `docs/windows.md`, section 9.
 
+mod capture;
+mod focus;
 mod platform;
 mod settings;
 mod sprite;
@@ -68,6 +70,12 @@ struct App {
     roaming: bool,
     avoiding: bool,
     interactive: bool,
+    /// Windows has no permission prompt for either of these, so consent is a
+    /// setting instead -- and both start off. `docs/windows.md` section 6.
+    visual: bool,
+    cursor_aware: bool,
+    /// When the last luminance readback happened, for the interval the core asks for.
+    luminance_at: f64,
     settings: Settings,
     /// Last reported state, so the log says what changed rather than repeating.
     last_state: BehaviorState,
@@ -133,6 +141,8 @@ fn main() -> Result<()> {
     let roaming = stored.bool(settings::ROAMING, true);
     let avoiding = stored.bool(settings::AVOID_POINTER, true);
     let interactive = stored.bool(settings::INTERACTIONS, true);
+    let visual = stored.bool(settings::VISUAL_PLACEMENT, false);
+    let cursor_aware = stored.bool(settings::CURSOR_AWARENESS, false);
 
     let mut pet = PetRuntime::new(start, RuntimeTuning::default(), seed);
     pet.set_displays(displays.clone());
@@ -160,6 +170,9 @@ fn main() -> Result<()> {
             roaming,
             avoiding,
             interactive,
+            visual,
+            cursor_aware,
+            luminance_at: f64::NEG_INFINITY,
             settings: stored,
             last_state: BehaviorState::Idle,
         })
@@ -232,7 +245,10 @@ fn tick(hwnd: HWND, app: &mut App) {
 
     // The core decides whether an accessibility round trip is worth paying
     // for. MVP 0 has no focus provider, so the answer is thrown away.
-    let _wants_focus = app.pet.begin_tick(now);
+    // The core decides whether the round trip is worth paying for; the shell
+    // decides whether the user allowed it at all.
+    let wants_focus = app.pet.begin_tick(now) && app.cursor_aware;
+    let queried = if wants_focus { focus::focus() } else { None };
 
     let pointer = platform::pointer();
     let position = app.pet.position();
@@ -246,10 +262,10 @@ fn tick(hwnd: HWND, app: &mut App) {
         primary_button_down: platform::primary_button_down(),
         user_idle_duration: platform::user_idle_duration(),
         // Neither provider exists yet; the core stays on the MVP 3 path.
-        capture_authorized: false,
-        focus_authorized: false,
-        did_query_focus: false,
-        queried_focus: None,
+        capture_authorized: app.visual,
+        focus_authorized: app.cursor_aware,
+        did_query_focus: wants_focus,
+        queried_focus: queried,
         // Only the shell knows how big the pet is once the panel has scaled it.
         pointer_is_over_pet: (pointer.x - position.x).abs() <= half_width
             && (pointer.y - position.y).abs() <= half_height,
@@ -277,6 +293,8 @@ fn tick(hwnd: HWND, app: &mut App) {
     app.player.set_look_frame(look);
     app.player.update(output.delta_time * output.locomotion_rate);
 
+    refresh_luminance(app, &output.luminance_requests, now);
+
     if output.persist_position {
         remember(app, output.position);
     }
@@ -293,8 +311,46 @@ fn tick(hwnd: HWND, app: &mut App) {
     }
 }
 
-/// The scale of whichever display the pet is standing on, so it stays the same
-/// physical size as it crosses a mixed-DPI seam.
+/// Service whatever the core asked to look at, if the user allowed it and the
+/// interval it named has passed. The core sets that interval by situation --
+/// three seconds while watching a window, six while wandering -- because on
+/// macOS one capture costs 62 ms and the period is the latency. See
+/// `docs/battery.md`: this is the most expensive thing the app does.
+fn refresh_luminance(app: &mut App, requests: &[roamling_core::LuminanceRequest], now: f64) {
+    if !app.visual || !capture::screen_is_readable() {
+        return;
+    }
+    let Some(request) = requests.first() else {
+        return;
+    };
+    if now - app.luminance_at < request.interval {
+        return;
+    }
+    let centre = request.region.center();
+    let display = app
+        .displays
+        .iter()
+        .find(|display| display.frame.contains(centre))
+        .or_else(|| app.displays.first());
+    if let Some(display) = display {
+        app.luminance_at = now;
+        let capture = capture::luminance(display);
+        // The cost that decides the interval, and the thing docs/battery.md
+        // calls the dominant term. macOS pays 62 ms for the same answer, so
+        // the split is worth printing while this is being tuned.
+        println!(
+            "   capture  read {:.1} ms + shrink {:.1} ms  -> {}",
+            capture.read_ms,
+            capture.shrink_ms,
+            capture
+                .field
+                .as_ref()
+                .map_or("nothing".to_string(), |f| format!("{}x{}", f.columns, f.rows))
+        );
+        app.pet.set_luminance(capture.field);
+    }
+}
+
 /// The pet came to rest somewhere worth keeping. Same three keys the macOS
 /// runtime writes, so the two platforms describe a seat the same way.
 fn remember(app: &mut App, position: WorldPoint) {
@@ -303,6 +359,8 @@ fn remember(app: &mut App, position: WorldPoint) {
     app.settings.set(settings::HAS_POSITION, true);
 }
 
+/// The scale of whichever display the pet is standing on, so it stays the same
+/// physical size as it crosses a mixed-DPI seam.
 fn scale_under(app: &App, position: WorldPoint) -> f64 {
     let mut fallback = 1.0;
     for display in &app.displays {
@@ -461,7 +519,14 @@ unsafe fn dispatch(hwnd: HWND, msg: u32, lp: LPARAM, app: &mut App) -> bool {
             tray::WM_TRAY
                 if matches!(lp.0 as u32, WM_RBUTTONUP | WM_LBUTTONUP | WM_CONTEXTMENU) =>
             {
-                match tray::show_menu(hwnd, app.roaming, app.avoiding, app.interactive) {
+                let state = tray::MenuState {
+                    roaming: app.roaming,
+                    avoiding: app.avoiding,
+                    interactive: app.interactive,
+                    visual: app.visual,
+                    cursor_aware: app.cursor_aware,
+                };
+                match tray::show_menu(hwnd, state) {
                     tray::CMD_ROAMING => {
                         app.roaming = !app.roaming;
                         app.pet.set_roaming_enabled(app.roaming, now);
@@ -476,6 +541,18 @@ unsafe fn dispatch(hwnd: HWND, msg: u32, lp: LPARAM, app: &mut App) -> bool {
                         app.interactive = !app.interactive;
                         app.pet.set_interactions_enabled(app.interactive);
                         app.settings.set(settings::INTERACTIONS, app.interactive);
+                    }
+                    tray::CMD_VISUAL => {
+                        app.visual = !app.visual;
+                        app.settings.set(settings::VISUAL_PLACEMENT, app.visual);
+                        if !app.visual {
+                            // Drop what was captured the moment consent ends.
+                            app.pet.set_luminance(None);
+                        }
+                    }
+                    tray::CMD_CURSOR_AWARE => {
+                        app.cursor_aware = !app.cursor_aware;
+                        app.settings.set(settings::CURSOR_AWARENESS, app.cursor_aware);
                     }
                     tray::CMD_QUIT => {
                         tray::remove(hwnd);

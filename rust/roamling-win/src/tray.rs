@@ -30,7 +30,9 @@ pub const WM_TRAY: u32 = WM_APP + 1;
 pub const CMD_ROAMING: usize = 1;
 pub const CMD_AVOID_POINTER: usize = 2;
 pub const CMD_INTERACTIONS: usize = 3;
-pub const CMD_QUIT: usize = 4;
+pub const CMD_VISUAL: usize = 4;
+pub const CMD_CURSOR_AWARE: usize = 5;
+pub const CMD_QUIT: usize = 6;
 
 fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
@@ -133,21 +135,34 @@ pub fn remove(hwnd: HWND) {
     }
 }
 
+/// What the checkmarks show. A struct rather than five bools in a row, which
+/// is the shape that eventually gets one of them silently swapped.
+#[derive(Clone, Copy)]
+pub struct MenuState {
+    pub roaming: bool,
+    pub avoiding: bool,
+    pub interactive: bool,
+    pub visual: bool,
+    pub cursor_aware: bool,
+}
+
 /// Show the menu and return the chosen command, or 0.
 ///
 /// `TPM_RETURNCMD` keeps the answer here instead of routing a `WM_COMMAND`
 /// back through the window procedure, which matters because that procedure is
 /// re-entrancy-sensitive -- see the note on `wndproc`.
-pub fn show_menu(hwnd: HWND, roaming: bool, avoiding: bool, interactive: bool) -> usize {
+pub fn show_menu(hwnd: HWND, state: MenuState) -> usize {
     unsafe {
         let Ok(menu) = CreatePopupMenu() else {
             return 0;
         };
         let checked = |on: bool| if on { MF_CHECKED } else { MF_UNCHECKED };
         for (flag, id, key) in [
-            (checked(roaming), CMD_ROAMING, "menu.roaming"),
-            (checked(avoiding), CMD_AVOID_POINTER, "menu.avoidPointer"),
-            (checked(interactive), CMD_INTERACTIONS, "menu.catchDrag"),
+            (checked(state.roaming), CMD_ROAMING, "menu.roaming"),
+            (checked(state.avoiding), CMD_AVOID_POINTER, "menu.avoidPointer"),
+            (checked(state.interactive), CMD_INTERACTIONS, "menu.catchDrag"),
+            (checked(state.visual), CMD_VISUAL, "menu.visualPlacement"),
+            (checked(state.cursor_aware), CMD_CURSOR_AWARE, "menu.accessibility"),
         ] {
             let label = wide(localized(key));
             let _ = AppendMenuW(menu, MF_STRING | flag, id, PCWSTR(label.as_ptr()));
