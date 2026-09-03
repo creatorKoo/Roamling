@@ -324,12 +324,39 @@ fn apply(hwnd: HWND, app: &mut App, output: InteractionOutput) {
     }
 }
 
+/// Windows re-enters this procedure from inside its own calls.
+///
+/// `SetWindowLongPtrW` on the ex-style sends a message straight back here,
+/// synchronously, while the tick that called it is still running. Holding a
+/// `RefCell` borrow across that panics -- and a panic cannot unwind out of an
+/// `extern "system"` function, so it aborts the process rather than failing
+/// something small. That is what "the pet crashes when the cursor comes near"
+/// was: the cursor arriving is what flips `interaction_enabled` and makes the
+/// call happen at all.
+///
+/// So the state is moved out for the duration instead of borrowed. A re-entrant
+/// message finds nothing there and falls through to `DefWindowProc`, which for
+/// the style-change notification is exactly right.
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
-    let handled = APP.with(|slot| {
-        let mut borrow = slot.borrow_mut();
-        let Some(app) = borrow.as_mut() else {
-            return false;
-        };
+    if msg == WM_DESTROY {
+        PostQuitMessage(0);
+        return LRESULT(0);
+    }
+    let taken = APP.with(|slot| slot.borrow_mut().take());
+    let Some(mut app) = taken else {
+        return DefWindowProcW(hwnd, msg, wp, lp);
+    };
+    let handled = dispatch(hwnd, msg, &mut app);
+    APP.with(|slot| *slot.borrow_mut() = Some(app));
+    if handled {
+        LRESULT(0)
+    } else {
+        DefWindowProcW(hwnd, msg, wp, lp)
+    }
+}
+
+unsafe fn dispatch(hwnd: HWND, msg: u32, app: &mut App) -> bool {
+    {
         let now = app.started.elapsed().as_secs_f64();
         match msg {
             WM_TIMER => {
@@ -380,15 +407,5 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
             }
             _ => false,
         }
-    });
-    if handled {
-        return LRESULT(0);
-    }
-    match msg {
-        WM_DESTROY => {
-            PostQuitMessage(0);
-            LRESULT(0)
-        }
-        _ => DefWindowProcW(hwnd, msg, wp, lp),
     }
 }
