@@ -16,6 +16,14 @@ swift run Roamling
 ./scripts/build-app.sh release # build/Roamling.app (ad-hoc codesign)
 ```
 
+Windows에는 Swift가 없다 — 그쪽 빌드는 전부 Rust다.
+
+```powershell
+.\scripts\test.ps1                  # core + pet + 셸, 실패 시 non-zero
+cargo run -p roamling-win           # debug. 콘솔이 남아 상태 로그가 보인다
+.\rust\target\release\roamling.exe  # release. 콘솔 없이 트레이만
+```
+
 **Rust 툴체인이 필수다** (rustup, `~/.cargo/bin`이 PATH에). `rust/roamling-core`가 Swift
 Core를 한 단위씩 넘겨받는 중이고, **앱이 이미 그걸 링크한다** — `scripts/test.sh`와
 `build-app.sh`가 `scripts/build-rust-core.sh`를 먼저 부르므로 cargo 없이는 빌드가 안 된다.
