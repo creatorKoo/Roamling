@@ -295,3 +295,144 @@ pub fn evaluate_seat(
         is_holdable: evaluation.is_holdable(),
     })
 }
+
+// ------------------------------------------------------- attention and reactions
+
+use crate::activity::{
+    CompanionEvent, CompanionEventKind, CompanionReaction, ReactingBehavior, UserContext,
+};
+use crate::attention::{AttentionModel, ReactionPolicy};
+use std::sync::Mutex;
+
+/// Enums cross as indices rather than as uniffi enums: the Swift side already
+/// has its own spellings of these, and mapping two names is cheaper than
+/// keeping three in step.
+const KINDS: [CompanionEventKind; 11] = [
+    CompanionEventKind::ActivityStarted,
+    CompanionEventKind::ActivityEnded,
+    CompanionEventKind::Positive,
+    CompanionEventKind::Negative,
+    CompanionEventKind::Achievement,
+    CompanionEventKind::Setback,
+    CompanionEventKind::AttentionRequired,
+    CompanionEventKind::Inspecting,
+    CompanionEventKind::HighIntensity,
+    CompanionEventKind::Calm,
+    CompanionEventKind::Idle,
+];
+
+const CONTEXTS: [UserContext; 5] = [
+    UserContext::Working,
+    UserContext::Gaming,
+    UserContext::WatchingMedia,
+    UserContext::Browsing,
+    UserContext::Idle,
+];
+
+#[derive(uniffi::Record)]
+pub struct FfiActivityEvent {
+    pub id: String,
+    pub source_id: String,
+    pub timestamp: f64,
+    pub kind: u8,
+    pub intensity: f64,
+    pub hint_confidence: Option<f64>,
+}
+
+impl From<&FfiActivityEvent> for CompanionEvent {
+    fn from(value: &FfiActivityEvent) -> Self {
+        CompanionEvent::new(
+            value.id.clone(),
+            value.source_id.clone(),
+            value.timestamp,
+            KINDS[value.kind as usize],
+            value.intensity,
+            value.hint_confidence.map(|confidence| LocationHint::new(None, confidence)),
+        )
+    }
+}
+
+/// Which source the pet is watching. Held across calls, so Swift keeps a handle
+/// rather than shipping the state back and forth.
+#[derive(uniffi::Object)]
+pub struct Attention {
+    model: Mutex<AttentionModel>,
+}
+
+#[uniffi::export]
+impl Attention {
+    #[uniffi::constructor]
+    pub fn new() -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self { model: Mutex::new(AttentionModel::default()) })
+    }
+
+    /// The id of the event to act on, or nil. Swift looks the event back up in
+    /// its own table rather than having it marshalled home.
+    pub fn select(&self, events: Vec<FfiActivityEvent>, timestamp: f64) -> Option<String> {
+        let events: Vec<CompanionEvent> = events.iter().map(CompanionEvent::from).collect();
+        self.model
+            .lock()
+            .unwrap()
+            .select(&events, timestamp)
+            .map(|event| event.id)
+    }
+
+    pub fn clear(&self, timestamp: f64) {
+        self.model.lock().unwrap().clear(timestamp);
+    }
+
+    pub fn current_source_id(&self) -> Option<String> {
+        self.model.lock().unwrap().current_source_id().map(str::to_owned)
+    }
+}
+
+/// How often the pet is allowed to react, and with what.
+#[derive(uniffi::Object)]
+pub struct Reactions {
+    policy: Mutex<ReactionPolicy>,
+}
+
+#[uniffi::export]
+impl Reactions {
+    #[uniffi::constructor]
+    pub fn new() -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self { policy: Mutex::new(ReactionPolicy::default()) })
+    }
+
+    /// The reaction's index, or nil for none.
+    pub fn reaction(
+        &self,
+        event: FfiActivityEvent,
+        context: u8,
+        is_held_by_pointer: bool,
+        random_unit: f64,
+        timestamp: f64,
+    ) -> Option<u8> {
+        let behavior = if is_held_by_pointer {
+            ReactingBehavior::Caught
+        } else {
+            ReactingBehavior::Other
+        };
+        self.policy
+            .lock()
+            .unwrap()
+            .reaction(
+                &CompanionEvent::from(&event),
+                CONTEXTS[context as usize],
+                behavior,
+                random_unit,
+                timestamp,
+            )
+            .map(|reaction| match reaction {
+                CompanionReaction::Glance => 0,
+                CompanionReaction::Observe => 1,
+                CompanionReaction::Spark => 2,
+                CompanionReaction::Work => 3,
+                CompanionReaction::Paw => 4,
+                CompanionReaction::SmallCelebrate => 5,
+                CompanionReaction::LargeCelebrate => 6,
+                CompanionReaction::Sad => 7,
+                CompanionReaction::Calm => 8,
+            })
+    }
+}

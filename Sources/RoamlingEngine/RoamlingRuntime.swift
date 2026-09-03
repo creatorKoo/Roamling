@@ -3,6 +3,7 @@
 
 import Foundation
 import RoamlingCore
+import RoamlingCoreRs
 import RoamlingPet
 
 @MainActor
@@ -157,8 +158,17 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     private static let wanderCandidateCount = 6
     private var pendingActivityEvent: CompanionEvent?
     private var recentActivityEvents: [String: CompanionEvent] = [:]
-    private var attentionModel = AttentionModel()
-    private var reactionPolicy = ReactionPolicy()
+    /// Ordered by source, because attention breaks a tied score by taking the
+    /// last it saw -- and a dictionary's order is whatever the hash seed chose
+    /// this launch. Two agents that scored alike would have been picked between
+    /// by coin flip, differently each time the app started.
+    private var liveActivityEvents: [CompanionEvent] {
+        recentActivityEvents.keys.sorted().compactMap { recentActivityEvents[$0] }
+    }
+    /// Both hold state between calls, so the Rust side owns it and this keeps
+    /// a handle. Nothing is shipped back and forth but the events themselves.
+    private let attention = Attention()
+    private let reactions = Reactions()
     private var lastDispatchedActivityEventID: String?
     private var activeActivitySourceID: String?
     /// When the active source last said anything, so a watch that will never
@@ -785,8 +795,8 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
 
         if located.kind == .activityEnded || located.kind == .idle {
             recentActivityEvents.removeValue(forKey: located.sourceID)
-            if attentionModel.currentSourceID == located.sourceID {
-                attentionModel.clear(at: now)
+            if attention.currentSourceId() == located.sourceID {
+                attention.clear(timestamp: now)
                 lastDispatchedActivityEventID = nil
             }
             if activeActivitySourceID == located.sourceID {
@@ -798,10 +808,11 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         }
 
         recentActivityEvents[located.sourceID] = located
-        guard let selected = attentionModel.select(
-            from: Array(recentActivityEvents.values),
-            at: now
-        ), selected.id != lastDispatchedActivityEventID else { return }
+        guard let selectedID = attention.select(
+            events: liveActivityEvents.map(RustCore.activityEvent),
+            timestamp: now
+        ), let selected = recentActivityEvents.values.first(where: { $0.id == selectedID }),
+            selected.id != lastDispatchedActivityEventID else { return }
 
         if behavior.state == .caught || behavior.state == .dragged {
             pendingActivityEvent = selected
@@ -841,13 +852,13 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         if activeActivitySourceID == nil || activeActivitySourceID == event.sourceID {
             activityHeardAt = timestamp
         }
-        let reaction = reactionPolicy.reaction(
-            for: event,
-            context: event.context ?? .idle,
-            currentBehavior: behavior.state,
+        let reaction = reactions.reaction(
+            event: RustCore.activityEvent(event),
+            context: RustCore.contextIndex(event.context ?? .idle),
+            isHeldByPointer: behavior.state == .caught || behavior.state == .dragged,
             randomUnit: Double.random(in: 0..<1),
-            at: timestamp
-        )
+            timestamp: timestamp
+        ).flatMap(RustCore.reaction(at:))
 
         switch event.kind {
         case .activityStarted:
@@ -904,7 +915,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         at timestamp: TimeInterval
     ) {
         recentActivityEvents.removeValue(forKey: event.sourceID)
-        attentionModel.clear(at: timestamp)
+        attention.clear(timestamp: timestamp)
         queueNextAttentionCandidate(at: timestamp)
     }
 
@@ -985,10 +996,10 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     }
 
     private func queueNextAttentionCandidate(at timestamp: TimeInterval) {
-        guard let next = attentionModel.select(
-            from: Array(recentActivityEvents.values),
-            at: timestamp
-        ) else {
+        guard let nextID = attention.select(
+            events: liveActivityEvents.map(RustCore.activityEvent),
+            timestamp: timestamp
+        ), let next = recentActivityEvents.values.first(where: { $0.id == nextID }) else {
             pendingActivityEvent = nil
             return
         }

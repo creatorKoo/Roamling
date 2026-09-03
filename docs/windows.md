@@ -184,9 +184,14 @@ macOS에서 실제로 문제를 일으키기 시작하거나, `RoamlingMac`이 �
 | 2 | BasicSafeZone + DesktopWorld + DisplayTopology ✅ 2026-09-03 | 499 | A |
 | 3a | VisualEmptiness + CandidateScoring ✅ 2026-09-03 | 207 | A |
 | 3b | InterestPlacement ✅ 2026-09-03 | 229 | A |
-| 4 | AttentionModel + ReactionPolicy + Activity | 289 | A |
+| 4 | AttentionModel + ReactionPolicy + Activity ✅ 2026-09-03 | 289 | **B** |
 | 5 | Movement + Pointer + Behavior + Timing + Tuning + **PlacementDirector** | 969 | **B** |
 | 6 | `RoamlingEngine` | 1,453 | **B**, tick 1회 |
+
+단위 4도 B가 됐다 — `AttentionModel`은 어느 소스를 보고 있었는지와 언제 떠났는지를,
+`ReactionPolicy`는 마지막 반응 시각을 tick 사이에 들고 있다. Swift가 핸들만 쥐고 이벤트만
+넘긴다. 선택된 이벤트는 **id만 돌려받는다** — Swift가 자기 표에서 되찾으므로 이벤트 전체를
+마샬링해 돌려보낼 이유가 없다.
 
 `PlacementDirector` 366줄은 원래 단위 3에 있었는데 5로 옮겼다 — tick 사이에 상태(자리, 여정,
 마지막 리뷰)를 들고 있어서 호출마다 변환하는 A가 아니라 상태를 Rust가 들고 핸들로 부르는

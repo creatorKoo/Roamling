@@ -139,6 +139,40 @@ enum RustCore {
         }
     }
 
+    /// Kinds and reactions cross as indices. Two spellings kept in step is
+    /// cheaper than three, and the vocabulary is closed on both sides.
+    private static let kindOrder: [CompanionEventKind] = [
+        .activityStarted, .activityEnded, .positive, .negative, .achievement,
+        .setback, .attentionRequired, .inspecting, .highIntensity, .calm, .idle
+    ]
+    private static let contextOrder: [UserContext] = [
+        .working, .gaming, .watchingMedia, .browsing, .idle
+    ]
+    private static let reactionOrder: [CompanionReaction] = [
+        .glance, .observe, .spark, .work, .paw,
+        .smallCelebrate, .largeCelebrate, .sad, .calm
+    ]
+
+    static func activityEvent(_ event: CompanionEvent) -> FfiActivityEvent {
+        FfiActivityEvent(
+            id: event.id,
+            sourceId: event.sourceID,
+            timestamp: event.timestamp,
+            kind: UInt8(kindOrder.firstIndex(of: event.kind) ?? 0),
+            intensity: event.intensity,
+            hintConfidence: event.locationHint?.confidence
+        )
+    }
+
+    static func reaction(at index: UInt8) -> CompanionReaction? {
+        let position = Int(index)
+        return position < reactionOrder.count ? reactionOrder[position] : nil
+    }
+
+    static func contextIndex(_ context: UserContext) -> UInt8 {
+        UInt8(contextOrder.firstIndex(of: context) ?? 4)
+    }
+
     static func napsInPlace(
         at position: WorldPoint,
         objectSize: WorldSize,
@@ -255,4 +289,39 @@ struct RustInterestPlanner: InterestPlacing {
 public extension RustCoreTestBridge {
     /// The Rust planner, for the test that runs it beside the Swift one.
     static var interestPlanner: any InterestPlacing { RustInterestPlanner() }
+
+    /// A fresh pair of the stateful models, so the switch-over test can drive
+    /// them through the same script it drives the Swift ones through.
+    static func makeAttention() -> (
+        select: ([CompanionEvent], TimeInterval) -> String?,
+        clear: (TimeInterval) -> Void,
+        currentSourceID: () -> String?
+    ) {
+        let handle = Attention()
+        return (
+            select: { events, timestamp in
+                handle.select(
+                    events: events.map(RustCore.activityEvent),
+                    timestamp: timestamp
+                )
+            },
+            clear: { handle.clear(timestamp: $0) },
+            currentSourceID: { handle.currentSourceId() }
+        )
+    }
+
+    static func makeReactions() -> (
+        CompanionEvent, UserContext, Bool, Double, TimeInterval
+    ) -> CompanionReaction? {
+        let handle = Reactions()
+        return { event, context, heldByPointer, roll, timestamp in
+            handle.reaction(
+                event: RustCore.activityEvent(event),
+                context: RustCore.contextIndex(context),
+                isHeldByPointer: heldByPointer,
+                randomUnit: roll,
+                timestamp: timestamp
+            ).flatMap(RustCore.reaction(at:))
+        }
+    }
 }

@@ -161,6 +161,90 @@ func coreLogicTests() -> [LogicTest] {
             }
             try expect(compared > 400, "only \(compared) zones compared")
         },
+        LogicTest(name: "the Rust attention and reactions agree with the Swift ones") {
+            // Both carry state, so this is a script rather than a set of
+            // independent comparisons: the dwell, the hysteresis, the revisit
+            // cooldown and the reaction interval only exist across calls.
+            var seed: UInt64 = 0x5D2C_913F_08A4_E7B1
+            func step() -> UInt64 {
+                seed ^= seed << 13; seed ^= seed >> 7; seed ^= seed << 17
+                return seed
+            }
+            func unit() -> Double { Double(step() % 1_000_001) / 1_000_000 }
+            // `Int(someUInt64)` traps when it does not fit, so reduce first.
+            func pick(_ count: Int) -> Int { Int(step() % UInt64(count)) }
+
+            let kinds: [CompanionEventKind] = [
+                .activityStarted, .activityEnded, .positive, .negative, .achievement,
+                .setback, .attentionRequired, .inspecting, .highIntensity, .calm, .idle
+            ]
+            let contexts: [UserContext] = [.working, .gaming, .watchingMedia, .browsing, .idle]
+
+            var compared = 0
+            for run in 0..<60 {
+                var swiftAttention = AttentionModel()
+                var swiftPolicy = ReactionPolicy()
+                let rustAttention = RustCoreTestBridge.makeAttention()
+                let rustReaction = RustCoreTestBridge.makeReactions()
+                var now = 100.0
+
+                for call in 0..<12 {
+                    now += unit() * 6
+                    let sources = 1 + pick(3)
+                    let events = (0..<(1 + pick(4))).map { index in
+                        CompanionEvent(
+                            id: "r\(run)c\(call)e\(index)",
+                            sourceID: "s\(pick(sources))",
+                            sourceType: .agent,
+                            timestamp: now - (unit() * 40 - 2),
+                            kind: kinds[pick(kinds.count)],
+                            intensity: unit(),
+                            locationHint: step() % 3 != 0
+                                ? LocationHint(confidence: unit()) : nil
+                        )
+                    }
+
+                    let swiftPick = swiftAttention.select(from: events, at: now)
+                    let rustPickID = rustAttention.select(events, now)
+                    try expect(
+                        swiftPick?.id == rustPickID,
+                        "attention differs: \(String(describing: swiftPick?.id)) vs \(String(describing: rustPickID))"
+                    )
+                    try expect(
+                        swiftAttention.currentSourceID == rustAttention.currentSourceID(),
+                        "watched source differs at run \(run) call \(call)"
+                    )
+
+                    if step() % 5 == 0 {
+                        swiftAttention.clear(at: now)
+                        rustAttention.clear(now)
+                        try expect(
+                            swiftAttention.currentSourceID == rustAttention.currentSourceID()
+                        )
+                    }
+
+                    if let chosen = swiftPick {
+                        let context = contexts[pick(contexts.count)]
+                        let roll = unit()
+                        let held = step() % 7 == 0
+                        let swiftReaction = swiftPolicy.reaction(
+                            for: chosen,
+                            context: context,
+                            currentBehavior: held ? .caught : .idle,
+                            randomUnit: roll,
+                            at: now
+                        )
+                        let rustAnswer = rustReaction(chosen, context, held, roll, now)
+                        try expect(
+                            swiftReaction == rustAnswer,
+                            "reaction differs: \(String(describing: swiftReaction)) vs \(String(describing: rustAnswer))"
+                        )
+                        compared += 1
+                    }
+                }
+            }
+            try expect(compared > 300, "only \(compared) reactions compared")
+        },
         LogicTest(name: "the Rust interest planner agrees with the Swift one the app replaced") {
             var seed: UInt64 = 0x77C1_5A0E_2B93_D486
             func next(_ scale: Double = 1) -> Double {
