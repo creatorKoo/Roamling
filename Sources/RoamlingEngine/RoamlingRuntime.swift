@@ -66,6 +66,9 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     /// tests -- the app watches the pet through the overlay instead.
     public var behaviorState: BehaviorState { behavior.state }
     public var position: WorldPoint { movement.position }
+    /// Whether the director still has a walk in progress. Read by the test
+    /// that pins arrival, which has to know when settling happened.
+    public var isPlacementTravelling: Bool { placement.isTravelling }
     /// In the order they were handed over, which is the order they are shown.
     public var agentIntegrations: [any AgentIntegration] { agents }
 
@@ -477,6 +480,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             // something else owns the pet, so the seat verdict is never stale by
             // the time placement is allowed to act on it. Gating the judging
             // along with the moving is what froze placement next to the cursor.
+            let wasTravelling = placement.isTravelling
             let intent = placement.decide(makeSituation(
                 at: now,
                 pointer: pointer.position,
@@ -484,6 +488,23 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
                 catchIsArmed: catchIsArmed,
                 userIdleDuration: userIdleDuration
             ))
+            // Arriving is an event, and this is where it happens: the director
+            // stops travelling on the tick it decides the walk is over, whether
+            // the pet reached the seat or the trip timed out.
+            //
+            // It used to be inferred from the mover instead, and the two do not
+            // agree -- the mover calls it arrived within 1.5 points and the
+            // director within 4, so the director settles first and the mover's
+            // own arrival never fires. When the reaction owed for that arrival
+            // had already been spent, nothing was left to move the pet out of
+            // `travelToInterest` and it walked on the spot until a passing
+            // cursor interrupted it.
+            //
+            // Guarded on still watching something: the director also drops a
+            // walk when the agent goes quiet, and that is the pet being let go
+            // rather than the pet arriving. Wearing `.observe` there would
+            // leave it staring at a window nobody is working in.
+            let didArrive = wasTravelling && !placement.isTravelling && isWatchingWindow
 
             // Whether a seat was chosen with a capture in hand is the first
             // question when the pet parks somewhere odd, and it is not
@@ -544,6 +565,15 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
                 }
             } else {
                 apply(intent, at: now, deltaTime: deltaTime)
+            }
+
+            // After the move, so a seat taken this tick is where the reaction
+            // is worn. `deliverArrivalReaction` falls back to `.observe` when
+            // nothing is owed, which is what ends the walk: a pet that has
+            // arrived is watching, not still walking.
+            if didArrive {
+                deliverArrivalReaction(at: now)
+                persistPosition()
             }
         }
 
@@ -1108,10 +1138,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         behavior.handle(.beginInterestTravel, at: timestamp)
         movement.configuration.maximumSpeed = tuning.walkingSpeed
         nextWanderAt = .infinity
-        if movement.update(deltaTime: deltaTime).reachedDestination {
-            deliverArrivalReaction(at: timestamp)
-            persistPosition()
-        }
+        _ = movement.update(deltaTime: deltaTime)
     }
 
     /// A parked pet keeps its seat. All that is left is wearing the reaction the
