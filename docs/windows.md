@@ -190,6 +190,7 @@ macOS에서 실제로 문제를 일으키기 시작하거나, `RoamlingMac`이 �
 | 6a | RuntimeTuning ✅ 2026-09-03 | 244 | A |
 | 6b | 활동 오케스트레이션 ✅ 2026-09-03 | 244 | **B** |
 | 6c | tick 본체 (rest · roaming · evade · 배치 적용) ✅ 2026-09-03 | ~800 | **B**, tick 2회 |
+| 7 | 애니메이션 해석·재생 (resolver · player · PetdexState) ✅ 2026-09-03 | 480 | A + 플레이어는 B |
 
 단위 4도 B가 됐다 — `AttentionModel`은 어느 소스를 보고 있었는지와 언제 떠났는지를,
 `ReactionPolicy`는 마지막 반응 시각을 tick 사이에 들고 있다. Swift가 핸들만 쥐고 이벤트만
@@ -254,10 +255,19 @@ UserDefaults, 진단 파일, agent 구독, 스프라이트 시트.
 `travelToSeat` · `holdSeat`). 콜백으로 방향을 뒤집을 필요는 없었다 — 플랫폼에 물어볼 것이
 두 개뿐이라 tick을 2회로 가르는 것으로 충분했다.
 
-**W4에 남은 것은 `RoamlingPet` 1,587줄이다.** Windows 셸이 그릴 것을 고르려면 resolver와
-player가 필요하다. capability 16종과 state→capability 매핑은 6c에서 같이 넘어갔으므로
-(`capability.rs`), 남은 것은 트랙 해석 · 프레임 타이밍 · 아틀라스다. 디코더는 W2b이고
-D에서는 `image` crate 한 줄이다.
+**단위 7에서 그리기까지 갔다.** capability → 트랙 → 프레임 인덱스를 잇는 resolver와
+player, 그리고 Petdex 9행의 어휘가 `animation.rs`에 있다. tick이 답한 capability를
+Windows 셸이 아틀라스 칸으로 바꾸는 데 필요한 것은 이제 전부 Rust에 있다.
+
+여기서도 **정렬 안 된 컬렉션이 결정을 하고 있었다 — 네 번째다.** 패키지가 `idle` 행을
+선언하지 않으면 resolver가 `tracks.values.first`로 대역을 골랐는데, Swift는 딕셔너리 순회
+순서를 프로세스마다 바꾼다. 두 행짜리 패키지가 **실행할 때마다 다른 행을 그렸다.** 이번엔
+포팅이 아니라 fixture가 첫 줄에서 잡았다.
+
+**W4에 남은 것은 매니페스트 로딩과 아틀라스다** — `PetLoader` 246줄, `PetManifest` 162줄,
+`PetCatalog` 108줄, `MascotPetFactory` 621줄. 마지막 것은 내장 마스코트의 트랙을 코드로
+짓는 것이라 MVP 0의 Windows가 실제로 쓸 물건이다. 디코더는 W2b이고 D에서는 `image` crate
+한 줄이다.
 
 **5a가 A 대 B 비용 주장을 실제로 검증한 자리다.** tick당 크로싱 8회로 재보니 Rust 경로가
 4.706 µs/tick, Swift 원본이 0.099 µs/tick(둘 다 release) — 차액 4.6 µs는 60 Hz 프레임 예산의

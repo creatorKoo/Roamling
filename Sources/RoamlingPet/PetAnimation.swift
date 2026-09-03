@@ -239,7 +239,14 @@ public struct AnimationResolver: Sendable {
         // A package with nothing recognisable still has to render something, or
         // the pet disappears. Callers are told, because a silent stand-in for
         // every state is exactly the failure this reports.
-        return (tracks["idle"] ?? tracks.values.first, .placeholder)
+        //
+        // Sorted, and that has to be said out loud: this used to read
+        // `tracks.values.first`, whose order Swift randomizes per process. A
+        // package that declares two rows and no `idle` drew a different one of
+        // them on every launch -- the fourth time an unordered collection has
+        // been found deciding something the user can see.
+        let anyTrack = tracks.keys.sorted().first.flatMap { tracks[$0] }
+        return (tracks["idle"] ?? anyTrack, .placeholder)
     }
 
     /// What a pet can and cannot show, for a caller that wants to say so.

@@ -9,6 +9,7 @@ uniffi::setup_scaffolding!();
 
 pub mod activity;
 pub mod activity_director;
+pub mod animation;
 pub mod attention;
 pub mod behavior;
 pub mod capability;
@@ -34,6 +35,11 @@ pub use activity::{
 };
 pub use activity_director::{
     wants_window_hint, ActivityDirector, ActivityEffect,
+};
+pub use animation::{
+    authored_names, look_frame_index, borrows, capability_name, petdex_state, standard_tracks, AnimationResolver,
+    Borrow, Coverage, PetAnimationFrame, PetAnimationPlayer, PetAnimationTrack, PetdexState,
+    Provenance,
 };
 pub use attention::{
     AttentionConfiguration, AttentionModel, ReactionConfiguration, ReactionPolicy,

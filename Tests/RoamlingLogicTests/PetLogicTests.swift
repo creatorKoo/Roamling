@@ -10,6 +10,27 @@ import UniformTypeIdentifiers
 
 func petLogicTests() -> [LogicTest] {
     [
+        LogicTest(name: "a package with no idle row picks the same stand-in every launch") {
+            // The placeholder used to be `tracks.values.first`, and Swift
+            // randomizes dictionary order per process -- so a package that
+            // declares two rows and no `idle` drew a different one of them on
+            // every launch. The fourth time an unordered collection was found
+            // deciding something the user can see.
+            let resolver = AnimationResolver(tracks: [
+                "zebra": PetAnimationTrack(
+                    name: "zebra", frames: [PetAnimationFrame(index: 7, duration: 0.1)]
+                ),
+                "aardvark": PetAnimationTrack(
+                    name: "aardvark", frames: [PetAnimationFrame(index: 3, duration: 0.1)]
+                )
+            ])
+            let (track, provenance) = resolver.resolution(.sleep)
+            try expect(provenance == .placeholder, "expected a placeholder, got \(provenance)")
+            try expect(
+                track?.name == "aardvark",
+                "the stand-in was \(track?.name ?? "none"), not the first by name"
+            )
+        },
         LogicTest(name: "only idle behavior maps to the idle capability") {
             for state in BehaviorState.allCases {
                 for velocityDX in [-12.0, 0.0, 12.0] {
