@@ -879,10 +879,32 @@ premultiplied인지.
   그리고 픽셀아트이므로 **nearest neighbour**로 샘플링한다 — macOS의
   `NSImageInterpolation.none`과 같다.
 
+#### 트레이 — 문자열은 공유하고, 메뉴는 아직 공유하지 않는다
+
+`Shell_NotifyIcon` 아이콘과 메뉴가 붙었다. **아이콘은 펫의 idle 프레임**이다 — 시트가 이미
+디코드돼 있고 그 칸이 캐릭터의 승인된 얼굴이라, 일반 앱 아이콘을 쓸 이유가 없다.
+
+**문자열은 `Sources/RoamlingShell/Resources/{en,ko}.lproj/Localizable.strings`에서 온다.**
+macOS는 `Bundle`이 알아서 하지만 Windows에는 대응물이 없으므로 두 파일을 컴파일에 넣고
+`CLAUDE.md`의 규칙을 손으로 지킨다 — **테이블을 한 번 고르고 그 뒤로는 키만 찾는다.**
+`GetUserDefaultUILanguage`가 한국어면 ko를 en 위에 덮으므로, ko에 없는 키도 사라지지 않고
+영어로 떨어진다. 번들이 하던 것과 같다.
+
+**테스트가 두 파일의 키가 같은지 강제한다.** `CLAUDE.md`가 "en이 base라 ko를 빠뜨리면
+조용히 영어로 나온다"고 경고만 하던 것을, 이제 Windows 쪽에서 실패로 만든다.
+
+**메뉴 트리 자체는 아직 공유하지 않는다.** `ShellMenu`(235줄, 액션 17종)는 Swift이고,
+그중 대부분은 Windows에 아직 없는 기능(펫 카탈로그 · agent · 접근성 · 진단)을 연다. 그래서
+이 셸은 **실제로 동작하는 넷만** 자기 트리로 들고 있다 — 돌아다니기 · 포인터 피하기 ·
+잡기·끌기 · 종료. 나머지는 그 기능이 올 때 같이 온다.
+
+**Windows 11은 새 트레이 아이콘을 기본으로 `^` 오버플로에 넣는다.** 등록 성공과 화면에
+보이는 것은 다른 이야기다. 사용자가 직접 고정해야 하고 이를 강제하는 지원 API는 없으므로,
+W6의 설치 관리자도 대신 해줄 수 없다 — 첫 실행 안내에 적을 일이다.
+
 ##### 아직 없는 것
 
-트레이(`Shell_NotifyIcon`) · 위치 저장 · agent 연동(`RoamlingSources`, MVP 0 밖).
-**로직도 그림도 붙었으므로 남은 것은 셸의 살림살이다.**
+위치 저장 · agent 연동(`RoamlingSources`, MVP 0 밖) · `ShellMenu`의 나머지.
 
 개발 중에는 `ROAMLING_ALLOW_CAPTURE=1`로 캡처 제외를 끌 수 있다. 켜져 있으면 펫이
 스크린샷에 안 찍혀서 무엇이 그려졌는지 눈으로 확인할 방법이 없다.

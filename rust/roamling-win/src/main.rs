@@ -14,6 +14,8 @@
 
 mod platform;
 mod sprite;
+mod strings;
+mod tray;
 
 use roamling_core::{
     look_frame_index, AnimationResolver, BehaviorState, DisplaySnapshot, InteractionOutput,
@@ -54,6 +56,11 @@ struct App {
     dragged: bool,
     /// What `SetTimer` is currently armed at, so it is only re-armed on change.
     tick_ms: u32,
+    /// The runtime takes these but does not hand them back, so the menu keeps
+    /// its own copy of what it last set.
+    roaming: bool,
+    avoiding: bool,
+    interactive: bool,
     /// Last reported state, so the log says what changed rather than repeating.
     last_state: BehaviorState,
 }
@@ -106,6 +113,7 @@ fn main() -> Result<()> {
     let player = PetAnimationPlayer::new(&resolver);
 
     let hwnd = create_window()?;
+    let tray_ok = tray::add(hwnd, &asset);
     APP.with(|slot| {
         *slot.borrow_mut() = Some(App {
             pet,
@@ -119,6 +127,9 @@ fn main() -> Result<()> {
             drag_from: None,
             dragged: false,
             tick_ms: 0,
+            roaming: true,
+            avoiding: true,
+            interactive: true,
             last_state: BehaviorState::Idle,
         })
     });
@@ -133,7 +144,8 @@ fn main() -> Result<()> {
         }
         SetTimer(hwnd, 1, 16, None);
     }
-    println!("\nroaming. close the window to stop.");
+    println!("\ntray icon registered: {tray_ok}   (Windows 11 files new ones behind the chevron)");
+    println!("roaming. right-click the tray icon for the menu.");
 
     let mut message = MSG::default();
     unsafe {
@@ -339,6 +351,7 @@ fn apply(hwnd: HWND, app: &mut App, output: InteractionOutput) {
 /// the style-change notification is exactly right.
 unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) -> LRESULT {
     if msg == WM_DESTROY {
+        tray::remove(hwnd);
         PostQuitMessage(0);
         return LRESULT(0);
     }
@@ -346,7 +359,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
     let Some(mut app) = taken else {
         return DefWindowProcW(hwnd, msg, wp, lp);
     };
-    let handled = dispatch(hwnd, msg, &mut app);
+    let handled = dispatch(hwnd, msg, lp, &mut app);
     APP.with(|slot| *slot.borrow_mut() = Some(app));
     if handled {
         LRESULT(0)
@@ -355,7 +368,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
     }
 }
 
-unsafe fn dispatch(hwnd: HWND, msg: u32, app: &mut App) -> bool {
+unsafe fn dispatch(hwnd: HWND, msg: u32, lp: LPARAM, app: &mut App) -> bool {
     {
         let now = app.started.elapsed().as_secs_f64();
         match msg {
@@ -396,6 +409,31 @@ unsafe fn dispatch(hwnd: HWND, msg: u32, app: &mut App) -> bool {
                 let _ = ReleaseCapture();
                 let out = app.pet.pointer_up(point, was_dragged, now);
                 apply(hwnd, app, out);
+                true
+            }
+            // The tray forwards the raw mouse message in lParam.
+            tray::WM_TRAY
+                if matches!(lp.0 as u32, WM_RBUTTONUP | WM_LBUTTONUP | WM_CONTEXTMENU) =>
+            {
+                match tray::show_menu(hwnd, app.roaming, app.avoiding, app.interactive) {
+                    tray::CMD_ROAMING => {
+                        app.roaming = !app.roaming;
+                        app.pet.set_roaming_enabled(app.roaming, now);
+                    }
+                    tray::CMD_AVOID_POINTER => {
+                        app.avoiding = !app.avoiding;
+                        app.pet.set_pointer_avoidance_enabled(app.avoiding);
+                    }
+                    tray::CMD_INTERACTIONS => {
+                        app.interactive = !app.interactive;
+                        app.pet.set_interactions_enabled(app.interactive);
+                    }
+                    tray::CMD_QUIT => {
+                        tray::remove(hwnd);
+                        PostQuitMessage(0);
+                    }
+                    _ => {}
+                }
                 true
             }
             WM_DISPLAYCHANGE | WM_DPICHANGED => {
