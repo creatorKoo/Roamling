@@ -20,6 +20,7 @@ pub mod placement;
 pub mod pointer;
 pub mod safe_zone;
 pub mod topology;
+pub mod tuning;
 pub mod world;
 
 pub use coordinate_space::DesktopCoordinateSpace;
@@ -49,5 +50,6 @@ pub use emptiness::{
 };
 pub use interest::{BasicInterestPositionPlanner, InterestDestination, SeatEvaluation};
 pub use safe_zone::{BasicSafeZonePlanner, RestDestination};
+pub use tuning::{RuntimeTuning, RuntimeTuningKey, TUNING_KEYS};
 pub use topology::{DisplayPortal, DisplayRoute, DisplayTopology};
 pub use world::{DesktopWorldSnapshot, DisplaySnapshot, FocusSnapshot, LocationHint, SafeZone};

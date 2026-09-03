@@ -386,6 +386,15 @@ func coreLogicTests() -> [LogicTest] {
             }
             try expect(judged > 100, "only \(judged) fields judged")
         },
+        LogicTest(name: "the tuning wire order matches the key list") {
+            // Swift sends the index, so this list and `TUNING_KEYS` in
+            // `tuning.rs` are one contract. Adding a knob in the middle would
+            // silently hand the panel another knob's range.
+            try expect(
+                RustCoreTestBridge.tuningWireOrder == RuntimeTuningKey.allCases,
+                "the wire order and the key list have drifted apart"
+            )
+        },
         LogicTest(name: "the behaviour wire order matches the state list") {
             // Swift sends the index, so this list and `BEHAVIOR_STATES` in
             // `behavior.rs` are one contract. Adding a state in the middle

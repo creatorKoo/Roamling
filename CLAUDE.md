@@ -62,6 +62,7 @@ RoamlingPet/      Petdex manifest, atlas runtime, built-in mascot, fallback
                   이미지는 PetImage(RGBA8)다. 디코딩은 PetImageSourcing 뒤에 있다
 RoamlingSources/  ClaudeCode / Codex activity adapter + BSD 소켓 loopback transport
 RoamlingEngine/   RoamlingRuntime — tick loop, placement, activity orchestration
+                  RuntimeTuning도 여기 산다 (규칙은 Rust에 있고 Core는 seam을 못 부른다)
 RoamlingShell/    메뉴 트리·알림 문구·Localizable.strings. 위젯은 없다
 RoamlingMac/      AppKit display, pointer, overlay, 메뉴 렌더러, app delegate
 RoamlingApp/      entry point

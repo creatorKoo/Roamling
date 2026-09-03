@@ -181,6 +181,74 @@ enum RustCore {
         UInt8(reactionOrder.firstIndex(of: reaction) ?? 0)
     }
 
+    // MARK: - Tuning
+
+    /// Spelled out rather than taken from `allCases`, because Swift sends the
+    /// index and this list is a contract with `TUNING_KEYS` in `tuning.rs`.
+    private static let tuningKeyOrder: [RuntimeTuningKey] = [
+        .walkingSpeed, .wanderPause, .crossDisplayWanderChance, .idleBeforeRest,
+        .pointerAwarenessDistance, .evadeSpeedScale, .catchArmDistance,
+        .catchApproachSpeed, .catchWindow, .hitRegionScale, .gaitCadence
+    ]
+
+    static var tuningWireOrder: [RuntimeTuningKey] { tuningKeyOrder }
+
+    @Sendable
+    static func normalizeTuning(
+        walkingSpeed: Double,
+        wanderPause: Double,
+        crossDisplayWanderChance: Double,
+        pointerAwarenessDistance: Double,
+        catchArmDistance: Double,
+        catchApproachSpeed: Double,
+        catchWindow: Double,
+        hitRegionScale: Double,
+        gaitCadence: Double,
+        evadeSpeedScale: Double,
+        idleBeforeRest: Double
+    ) -> FfiTuning {
+        RoamlingCoreRs.normalizeTuning(
+            walkingSpeed: walkingSpeed,
+            wanderPause: wanderPause,
+            crossDisplayWanderChance: crossDisplayWanderChance,
+            pointerAwarenessDistance: pointerAwarenessDistance,
+            catchArmDistance: catchArmDistance,
+            catchApproachSpeed: catchApproachSpeed,
+            catchWindow: catchWindow,
+            hitRegionScale: hitRegionScale,
+            gaitCadence: gaitCadence,
+            evadeSpeedScale: evadeSpeedScale,
+            idleBeforeRest: idleBeforeRest
+        )
+    }
+
+    static func tuningLimits(
+        for key: RuntimeTuningKey,
+        pointerAwareness: Double
+    ) -> ClosedRange<Double> {
+        let range = RoamlingCoreRs.tuningLimits(
+            key: UInt8(tuningKeyOrder.firstIndex(of: key) ?? 0),
+            pointerAwareness: pointerAwareness
+        )
+        return range.lower...range.upper
+    }
+
+    static func tuningFastEvadeSpeed(walkingSpeed: Double, evadeSpeedScale: Double) -> Double {
+        RoamlingCoreRs.tuningFastEvadeSpeed(
+            walkingSpeed: walkingSpeed, evadeSpeedScale: evadeSpeedScale
+        )
+    }
+
+    static func tuningSlowEvadeSpeed(walkingSpeed: Double, evadeSpeedScale: Double) -> Double {
+        RoamlingCoreRs.tuningSlowEvadeSpeed(
+            walkingSpeed: walkingSpeed, evadeSpeedScale: evadeSpeedScale
+        )
+    }
+
+    static func tuningWanderDelay(wanderPause: Double, randomUnit: Double) -> TimeInterval {
+        RoamlingCoreRs.tuningWanderDelay(wanderPause: wanderPause, randomUnit: randomUnit)
+    }
+
     static func napsInPlace(
         at position: WorldPoint,
         objectSize: WorldSize,
@@ -297,6 +365,10 @@ struct RustInterestPlanner: InterestPlacing {
 public extension RustCoreTestBridge {
     /// The Rust planner, for the test that runs it beside the Swift one.
     static var interestPlanner: any InterestPlacing { RustInterestPlanner() }
+
+    /// The order tuning keys cross as indices, so a test can pin it against
+    /// `RuntimeTuningKey.allCases`.
+    static var tuningWireOrder: [RuntimeTuningKey] { RustCore.tuningWireOrder }
 
     /// A fresh pair of the stateful models, so the switch-over test can drive
     /// them through the same script it drives the Swift ones through.
