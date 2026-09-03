@@ -1082,8 +1082,29 @@ GPL-3.0이므로 배포하는 각 버전에 대응하는 소스를 계속 제공
 
   픽셀 복사 비용이 아니라 **합성 데스크톱에서 GPU->CPU 동기화를 강제하는 고정 비용**이다.
   Windows Graphics Capture와 DXGI Desktop Duplication이 존재하는 이유가 정확히 이것이고,
-  "WinRT가 아프니 피하자"는 회피가 성립하지 않는다. **DXGI Desktop Duplication으로 간다** —
-  WinRT가 아닌 Win32/COM이라 `windows` 크레이트로 닿고, GPU 쪽에서 끝난다.
+  "WinRT가 아프니 피하자"는 회피가 성립하지 않는다.
+
+  **DXGI Desktop Duplication으로 바꿨고, macOS보다 빨라졌다.**
+
+  ```text
+                  화면이 바뀌었을 때        안 바뀌었을 때
+  BitBlt          256 ~ 1117 ms            같음 (구분하지 못한다)
+  Duplication     약 29 ms                 0.6 ms
+  macOS SCK       62 ms                    -
+  ```
+
+  WinRT가 아니라 Win32/COM이라 `windows` 크레이트로 닿는다. 그리고 **BitBlt에 없던 것이
+  둘 딸려 온다.** `AcquireNextFrame`은 마지막 호출 이후 아무것도 그려지지 않았으면 타임아웃하는데,
+  안 바뀐 화면은 여전히 같은 휘도이므로 **대부분의 호출이 0.6 ms에 끝난다.** 그리고 잠금화면에서
+  검은 화면을 조용히 돌려주는 대신 duplication을 잃었다고 정직하게 알려 준다.
+
+  평균 내는 쪽도 줄였다. 셀 하나가 40픽셀 남짓이라 전부 더할 필요가 없어 **축당 16표본으로
+  제한**했다 — 전부 더하면 51 ms, 제한하면 15~25 ms이고, 4K에서도 같은 비용이다.
+
+  **대가가 하나 있다.** 이 경로는 D3D11 디바이스와 duplication을 캡처 사이에 **열어 둔다** —
+  그게 빠른 이유다. 하루 종일 도는 프로세스가 GPU 리소스를 붙잡고 있으면 GPU가 완전히 idle로
+  내려가지 못할 수 있다. **실제로 그런지는 재지 않았다.** 사용자가 캡처를 끄는 순간 놓도록만
+  해 두었고, 다시 여는 비용은 다음 캡처 한 번뿐이다.
 
   살아남은 것도 있다. "펫이 자기 자리를 바빠 보이게 만들면 안 된다"는
   `MacCaptureProvider`의 `excludingApplications` 로직이 Windows에서는

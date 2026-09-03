@@ -9,19 +9,14 @@
 //! nowhere near enough to see what it says. No OCR, no image ever written
 //! anywhere. `docs/mvp.md` MVP 4.
 //!
-//! `docs/windows.md` section 5 picked `BitBlt` over Windows Graphics Capture:
-//! WinRT is painful from Rust and this is one small readback every few seconds.
-//! The pet is excluded from its own capture by `WDA_EXCLUDEFROMCAPTURE`, which
-//! W0 verified by control experiment -- it must not make its own seat look busy.
+//! The frame comes from Desktop Duplication rather than `BitBlt`. See
+//! `duplication.rs` for why, and `docs/windows.md` section 5 for the numbers
+//! that made the original plan wrong.
 
+use crate::duplication::Duplication;
 use roamling_core::{DisplaySnapshot, LuminanceField};
 use windows::Win32::System::StationsAndDesktops::{
-    CloseDesktop, OpenInputDesktop, DESKTOP_READOBJECTS, DESKTOP_CONTROL_FLAGS,
-};
-use windows::Win32::Graphics::Gdi::{
-    BitBlt, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, ReleaseDC,
-    SelectObject, SetStretchBltMode, StretchBlt, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS,
-    HALFTONE, HBITMAP, HDC, SRCCOPY,
+    CloseDesktop, OpenInputDesktop, DESKTOP_CONTROL_FLAGS, DESKTOP_READOBJECTS,
 };
 
 /// The macOS provider's number, so both platforms hand the scorer the same
@@ -30,135 +25,130 @@ const COLUMNS: usize = 64;
 
 pub struct Capture {
     pub field: Option<LuminanceField>,
-    /// Reading the framebuffer, which goes through the display driver.
     pub read_ms: f64,
-    /// Averaging it down, which is local memory.
     pub shrink_ms: f64,
+    /// The screen had not been drawn to since the last look, so the previous
+    /// answer still stands. Most calls end here and cost almost nothing.
+    pub unchanged: bool,
 }
 
-fn dib(dc: HDC, width: i32, height: i32) -> Option<(HBITMAP, *mut u8)> {
-    let info = BITMAPINFO {
-        bmiHeader: BITMAPINFOHEADER {
-            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-            biWidth: width,
-            // Negative is top-down, which is the order the field wants.
-            biHeight: -height,
-            biPlanes: 1,
-            biBitCount: 32,
-            biCompression: 0,
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
-    let bitmap = unsafe { CreateDIBSection(dc, &info, DIB_RGB_COLORS, &mut bits, None, 0) }.ok()?;
-    Some((bitmap, bits as *mut u8))
+/// Holds the duplication open between captures, because opening it is the
+/// expensive part and `AcquireNextFrame` only answers for one already held.
+#[derive(Default)]
+pub struct Capturer {
+    duplication: Option<Duplication>,
+    opened_for: String,
 }
 
-pub fn luminance(display: &DisplaySnapshot) -> Capture {
-    let mut result = Capture {
-        field: None,
-        read_ms: 0.0,
-        shrink_ms: 0.0,
-    };
-    let width = display.frame.size.width as i32;
-    let height = display.frame.size.height as i32;
-    if width < 1 || height < 1 {
-        return result;
-    }
-    let rows = ((COLUMNS as f64 * (height as f64 / width as f64)).round() as usize).max(2) as i32;
-
-    unsafe {
-        let screen = GetDC(None);
-        if screen.is_invalid() {
+impl Capturer {
+    pub fn luminance(&mut self, display: &DisplaySnapshot) -> Capture {
+        let mut result = Capture {
+            field: None,
+            read_ms: 0.0,
+            shrink_ms: 0.0,
+            unchanged: false,
+        };
+        if !screen_is_readable() {
             return result;
         }
-
-        // Two steps on purpose. Reading the framebuffer and averaging it down
-        // are different costs, and asking one `StretchBlt` from the screen to
-        // do both makes GDI average driver-side: that measured 300-800 ms,
-        // which is a visible stall because this runs on the message loop.
-        // Split, the average happens on local memory instead.
-        let full_dc = CreateCompatibleDC(screen);
-        let small_dc = CreateCompatibleDC(screen);
-        let full = dib(full_dc, width, height);
-        let small = dib(small_dc, COLUMNS as i32, rows);
-
-        if let (Some((full_bitmap, _)), Some((small_bitmap, small_bits))) = (full, small) {
-            SelectObject(full_dc, full_bitmap);
-            SelectObject(small_dc, small_bitmap);
-
-            let at = std::time::Instant::now();
-            let read = BitBlt(
-                full_dc,
-                0,
-                0,
-                width,
-                height,
-                screen,
-                display.frame.origin.x as i32,
-                display.frame.origin.y as i32,
-                SRCCOPY,
-            )
-            .is_ok();
-            result.read_ms = at.elapsed().as_secs_f64() * 1000.0;
-
-            if read {
-                let at = std::time::Instant::now();
-                // HALFTONE averages the pixels it is skipping. The default mode
-                // picks one pixel per destination cell, and a page of text
-                // sampled that way reads as blank -- the very thing this is
-                // here to notice.
-                SetStretchBltMode(small_dc, HALFTONE);
-                let shrunk = StretchBlt(
-                    small_dc, 0, 0, COLUMNS as i32, rows, full_dc, 0, 0, width, height, SRCCOPY,
-                )
-                .as_bool();
-                result.shrink_ms = at.elapsed().as_secs_f64() * 1000.0;
-
-                if shrunk {
-                    let pixels =
-                        std::slice::from_raw_parts(small_bits, COLUMNS * rows as usize * 4);
-                    result.field = Some(LuminanceField {
-                        bounds: display.frame,
-                        columns: COLUMNS,
-                        rows: rows as usize,
-                        samples: pixels.chunks_exact(4).map(sample).collect(),
-                    });
-                }
-            }
-            let _ = DeleteObject(full_bitmap);
-            let _ = DeleteObject(small_bitmap);
+        if self.opened_for != display.id || self.duplication.is_none() {
+            self.duplication = Duplication::open(&display.id);
+            self.opened_for = display.id.clone();
         }
+        let Some(duplication) = self.duplication.as_mut() else {
+            return result;
+        };
 
-        let _ = DeleteDC(full_dc);
-        let _ = DeleteDC(small_dc);
-        ReleaseDC(None, screen);
+        let rows = ((COLUMNS as f64 * (display.frame.size.height / display.frame.size.width))
+            .round() as usize)
+            .max(2);
+        let mut samples: Option<Vec<f64>> = None;
+        let mut shrink_ms = 0.0;
+
+        let at = std::time::Instant::now();
+        let outcome = duplication.next_frame(|pixels, frame| {
+            let started = std::time::Instant::now();
+            samples = Some(average(pixels, frame.width, frame.height, frame.stride, rows));
+            shrink_ms = started.elapsed().as_secs_f64() * 1000.0;
+        });
+        result.read_ms = (at.elapsed().as_secs_f64() * 1000.0 - shrink_ms).max(0.0);
+        result.shrink_ms = shrink_ms;
+
+        match outcome {
+            Ok(true) => {
+                result.field = samples.map(|samples| LuminanceField {
+                    bounds: display.frame,
+                    columns: COLUMNS,
+                    rows,
+                    samples,
+                });
+            }
+            Ok(false) => result.unchanged = true,
+            Err(()) => {
+                // Gone for good rather than merely lost; drop it so the next
+                // call opens a fresh one.
+                self.duplication = None;
+            }
+        }
+        result
     }
-    result
 }
 
-/// Rec. 709, because the screen is sRGB and that is its luminance. macOS
-/// reaches the same place through a `DeviceGray` context; the two will not
-/// agree bit for bit, and nothing requires them to -- the differential fixture
-/// takes a field as *input* and only pins the scoring done with it.
-fn sample(pixel: &[u8]) -> f64 {
-    let b = pixel[0] as f64;
-    let g = pixel[1] as f64;
-    let r = pixel[2] as f64;
-    (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255.0
+/// Box-average the frame down to the sample grid.
+///
+/// Averaging rather than picking one pixel per cell is the whole point: a page
+/// of text point-sampled reads as blank, which is exactly the thing this is
+/// here to notice.
+fn average(pixels: &[u8], width: usize, height: usize, stride: usize, rows: usize) -> Vec<f64> {
+    let mut samples = Vec::with_capacity(COLUMNS * rows);
+    for row in 0..rows {
+        let y0 = row * height / rows;
+        let y1 = (((row + 1) * height) / rows).max(y0 + 1).min(height);
+        for column in 0..COLUMNS {
+            let x0 = column * width / COLUMNS;
+            let x1 = (((column + 1) * width) / COLUMNS).max(x0 + 1).min(width);
+            // Sixteen samples per axis is plenty to tell dense from empty, and
+            // it stops the cost growing with the monitor: a cell on this screen
+            // is about forty pixels across, on a 4K one it is eighty, and both
+            // end up doing the same work. Averaging every pixel measured 51 ms.
+            let step = (x1 - x0).max(y1 - y0).div_ceil(16).max(1);
+            let mut total = 0u64;
+            let mut count = 0u64;
+            for y in (y0..y1).step_by(step) {
+                let line = y * stride;
+                for x in (x0..x1).step_by(step) {
+                    let at = line + x * 4;
+                    if at + 2 >= pixels.len() {
+                        continue;
+                    }
+                    // BGRA, and Rec. 709 because the screen is sRGB. macOS
+                    // reaches the same place through a DeviceGray context; the
+                    // two will not agree bit for bit and nothing requires them
+                    // to -- the differential fixture takes a field as *input*
+                    // and only pins the scoring done with it.
+                    total += (0.2126 * pixels[at + 2] as f64
+                        + 0.7152 * pixels[at + 1] as f64
+                        + 0.0722 * pixels[at] as f64) as u64;
+                    count += 1;
+                }
+            }
+            samples.push(if count == 0 {
+                0.0
+            } else {
+                total as f64 / count as f64 / 255.0
+            });
+        }
+    }
+    samples
 }
 
 /// Whether there is anything to look at.
 ///
-/// A locked workstation switches the input desktop to Winlogon's secure one,
-/// which this process cannot open. `BitBlt` against the screen there does not
-/// fail -- it succeeds and returns black. That is the dangerous shape: the pet
-/// would read a whole empty screen, take a seat chosen on nothing, and keep
-/// that field until the next capture. The user locks the screen often enough
-/// for this to be the normal case rather than an edge one.
-///
-/// Also true while the UAC prompt owns the desktop, which is the same story.
+/// A locked workstation switches the input desktop to Winlogon's secure one.
+/// Desktop Duplication reports that honestly by losing the duplication, but
+/// this is checked first anyway: it costs nothing and it keeps the pet from
+/// rebuilding a duplication it cannot use, over and over, while the machine
+/// sits locked. Also true while a UAC prompt owns the desktop.
 pub fn screen_is_readable() -> bool {
     unsafe {
         match OpenInputDesktop(DESKTOP_CONTROL_FLAGS(0), false, DESKTOP_READOBJECTS) {
@@ -171,3 +161,17 @@ pub fn screen_is_readable() -> bool {
     }
 }
 
+impl Capturer {
+    /// Let go of the duplication.
+    ///
+    /// Unlike `BitBlt`, this path holds a D3D11 device and an open duplication
+    /// between captures -- that is what makes it fast. The cost is a GPU
+    /// resource kept alive in a process that runs all day, which may be enough
+    /// to stop the GPU idling all the way down. Whether it actually is has not
+    /// been measured. Releasing it the moment the user turns capture off is
+    /// cheap either way, and reopening costs only the next capture.
+    pub fn release(&mut self) {
+        self.duplication = None;
+        self.opened_for.clear();
+    }
+}

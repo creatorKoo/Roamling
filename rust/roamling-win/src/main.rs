@@ -18,6 +18,7 @@
 //! overlay needs. See `docs/windows.md`, section 9.
 
 mod capture;
+mod duplication;
 mod focus;
 mod platform;
 mod settings;
@@ -74,6 +75,7 @@ struct App {
     /// setting instead -- and both start off. `docs/windows.md` section 6.
     visual: bool,
     cursor_aware: bool,
+    capturer: capture::Capturer,
     /// When the last luminance readback happened, for the interval the core asks for.
     luminance_at: f64,
     settings: Settings,
@@ -172,6 +174,7 @@ fn main() -> Result<()> {
             interactive,
             visual,
             cursor_aware,
+            capturer: capture::Capturer::default(),
             luminance_at: f64::NEG_INFINITY,
             settings: stored,
             last_state: BehaviorState::Idle,
@@ -332,21 +335,29 @@ fn refresh_luminance(app: &mut App, requests: &[roamling_core::LuminanceRequest]
         .iter()
         .find(|display| display.frame.contains(centre))
         .or_else(|| app.displays.first());
-    if let Some(display) = display {
-        app.luminance_at = now;
-        let capture = capture::luminance(display);
-        // The cost that decides the interval, and the thing docs/battery.md
-        // calls the dominant term. macOS pays 62 ms for the same answer, so
-        // the split is worth printing while this is being tuned.
-        println!(
-            "   capture  read {:.1} ms + shrink {:.1} ms  -> {}",
-            capture.read_ms,
-            capture.shrink_ms,
+    let Some(display) = display.cloned() else {
+        return;
+    };
+    app.luminance_at = now;
+    let capture = app.capturer.luminance(&display);
+    // The cost that decides the interval, and the thing docs/battery.md calls
+    // the dominant term. macOS pays 62 ms for the same answer.
+    println!(
+        "   capture  read {:.1} ms + shrink {:.1} ms  -> {}",
+        capture.read_ms,
+        capture.shrink_ms,
+        if capture.unchanged {
+            "unchanged".to_string()
+        } else {
             capture
                 .field
                 .as_ref()
                 .map_or("nothing".to_string(), |f| format!("{}x{}", f.columns, f.rows))
-        );
+        }
+    );
+    // An unchanged screen still has the luminance it had, so the previous
+    // field stays. Replacing it with `None` would throw away a good answer.
+    if !capture.unchanged {
         app.pet.set_luminance(capture.field);
     }
 }
@@ -546,7 +557,9 @@ unsafe fn dispatch(hwnd: HWND, msg: u32, lp: LPARAM, app: &mut App) -> bool {
                         app.visual = !app.visual;
                         app.settings.set(settings::VISUAL_PLACEMENT, app.visual);
                         if !app.visual {
-                            // Drop what was captured the moment consent ends.
+                            // Drop what was captured, and the GPU resource
+                            // that reads it, the moment consent ends.
+                            app.capturer.release();
                             app.pet.set_luminance(None);
                         }
                     }
