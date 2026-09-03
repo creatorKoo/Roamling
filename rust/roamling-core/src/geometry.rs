@@ -51,8 +51,15 @@ impl WorldPoint {
         Self { x, y }
     }
 
+    /// Deliberately not `hypot`. It exists to survive operands large enough
+    /// that squaring them overflows, which screen coordinates never are, and it
+    /// is not required to be correctly rounded -- macOS rounds it exactly,
+    /// MSVC's UCRT does not, and the differential fixtures caught the ULP.
+    /// `*`, `+` and `sqrt` are all specified exactly by IEEE 754.
     pub fn distance(self, other: WorldPoint) -> f64 {
-        (other.x - self.x).hypot(other.y - self.y)
+        let dx = other.x - self.x;
+        let dy = other.y - self.y;
+        (dx * dx + dy * dy).sqrt()
     }
 
     pub fn offset(self, by: WorldVector) -> WorldPoint {
@@ -82,8 +89,11 @@ impl WorldVector {
         Self { dx, dy }
     }
 
+    /// Same reasoning as `WorldPoint::distance`: not `hypot`, because the
+    /// overflow it guards against cannot happen on a desktop and platforms do
+    /// not agree on its last bit.
     pub fn length(self) -> f64 {
-        self.dx.hypot(self.dy)
+        (self.dx * self.dx + self.dy * self.dy).sqrt()
     }
 
     /// Zero below a millionth, so a vector that is only floating-point noise

@@ -107,11 +107,12 @@ W4 절에 있다.**
 반올림을 하고 MSVC UCRT는 하지 않는다. 어긋남은 전부 1 ULP이고 결정은 바뀌지 않는다.
 **처방과 실측치는 `docs/windows.md` W4의 "실행 결과 · 처방" 절에 있다.**
 
-요지: `hypot`을 `(dx*dx + dy*dy).sqrt()`로 바꾼다 — 화면 좌표에서는 오버플로 보호가 필요
-없고, IEEE가 규정하므로 어디서나 같은 비트가 나오며, 2.9배 싸다. **Swift 2곳 · Rust 2곳 ·
-fixture 재생성이 한 커밋이어야 한다** — 하나만 바꾸면 macOS 차등 테스트가 그 자리에서
-깨진다. `atan2`는 `look_direction_degrees` 한 필드만 1 ULP 면제한다(16방향 양자화를
-거치면 4건 중 0건이 프레임을 바꾼다).
+**그 처방은 2026-09-03에 시행됐다.** `hypot`은 `(dx*dx + dy*dy).sqrt()`로 바뀌었고
+(Swift 2곳 · Rust 2곳 + fixture 재생성, 한 커밋), `atan2`는 `look_direction_degrees` 한
+필드만 1 ULP 면제됐다. 바뀐 fixture 5개가 Windows에서 깨진 5개와 정확히 일치했고,
+**녹화된 세션은 한 바이트도 바뀌지 않았다** — 40초 동안 어떤 비교도 뒤집히지 않았다.
+Windows에서 `cargo test --release`가 이제 초록이어야 한다. **아니라면 그것은 새로운
+발견이므로 fixture를 다시 만들지 말고 원인을 찾는다.**
 
 **이 경계가 Windows port의 전제다.** `docs/windows.md`에 모듈별 실측 이식 비용, 언어
 선택 네 가지의 비교, 그리고 2026-09-01에 Windows에서 실행한 W0 스파이크 결과가 있다.

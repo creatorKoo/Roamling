@@ -14,8 +14,21 @@ public struct WorldPoint: Codable, Hashable, Sendable {
 
     public static let zero = WorldPoint(x: 0, y: 0)
 
+    /// Deliberately not `hypot`.
+    ///
+    /// `hypot` exists to survive operands so large that squaring them
+    /// overflows, and screen coordinates are nowhere near that: at 10^5 the
+    /// squares reach 10^10 against a `Double` ceiling of 10^308. So the
+    /// protection buys nothing here -- and it costs, because `hypot` is not
+    /// required to be correctly rounded and platforms disagree. macOS rounds it
+    /// exactly, MSVC's UCRT does not, and 17 of 600 measured distances differed
+    /// by one unit in the last place. `*`, `+` and `squareRoot()` are all
+    /// specified exactly by IEEE 754, so this is the same bits everywhere, and
+    /// measured 2.9x cheaper besides. `docs/windows.md`, W4.
     public func distance(to other: WorldPoint) -> Double {
-        hypot(other.x - x, other.y - y)
+        let dx = other.x - x
+        let dy = other.y - y
+        return (dx * dx + dy * dy).squareRoot()
     }
 
     public static func + (lhs: WorldPoint, rhs: WorldVector) -> WorldPoint {
@@ -42,7 +55,10 @@ public struct WorldVector: Codable, Hashable, Sendable {
 
     public static let zero = WorldVector(dx: 0, dy: 0)
 
-    public var length: Double { hypot(dx, dy) }
+    /// Same reasoning as `WorldPoint.distance(to:)`: not `hypot`, because the
+    /// overflow it guards against cannot happen on a desktop and platforms do
+    /// not agree on its last bit.
+    public var length: Double { (dx * dx + dy * dy).squareRoot() }
 
     public var normalized: WorldVector {
         let magnitude = length

@@ -727,7 +727,7 @@ world.safeZone.destination   목적지·플래그·점수 동일, 거리만 1 UL
 interest.evaluateSeat        점수가 ~8 ULP (하류에서 누적), 나머지 필드 동일
 ```
 
-#### 처방 — 두 함수의 답이 다르다
+#### 처방 — 두 함수의 답이 다르다 (✅ 2026-09-03 시행)
 
 ##### `hypot`을 버린다 — 테스트 때문이 아니라 더 나은 계산이라서
 
@@ -753,7 +753,27 @@ Windows의 현재 답과 600/600 일치가 이미 증명됐다. 배터리 절대
 근거로 주석에 남긴다. **나머지는 비트 정확 그대로다** — 오차 허용이 코드베이스 전체로
 번지지 않게 한 필드로 묶어 둔다.
 
-#### 이 변경은 원자적이어야 하고, 맥에서 해야 한다
+#### 시행 결과 — 2026-09-03, macOS
+
+처방대로 넷을 바꾸고 fixture를 재생성했다. **바뀐 fixture 5개가 Windows에서 깨진 5개와
+정확히 같다** — geometry · world · interest · mechanics · placement. 통과했던 다섯
+(activity · animation · attention · emptiness · tuning)은 바이트 단위로 그대로다.
+`hypot`이 유일한 원인이었다는 확증이다.
+
+**재생성 전에 생성기 10개가 기존 fixture를 바이트 단위로 재현하는지 먼저 확인했다.**
+그러지 않으면 그동안 생성기에 생긴 다른 변화가 이 커밋에 조용히 섞인다.
+
+**녹화된 세션은 한 바이트도 바뀌지 않았다**(`RuntimeTrace.txt`). 40초 동안 어떤 비교도
+뒤집히지 않았다는 뜻이다 — 값이 마지막 자리에서 달라져도 펫이 고른 답은 전부 같았다.
+diff는 3만 줄 중 491줄이고 줄 수는 그대로다.
+
+`atan2`는 `mechanics_differential`의 `look_direction_degrees` 한 필드만 1 ULP 면제했다.
+허용폭이 정확히 1 ULP인지 확인했다 — +1 ULP는 통과하고 +3은 실패한다.
+
+`Sources/RoamlingMac/PetOverlayPanel.swift:92`의 `hypot`은 처방대로 두었다. AppKit 드래그
+거리이고 `distance > 4` 임계값으로만 쓰이며, Windows 셸은 자기 것을 따로 계산한다.
+
+#### 원래의 처방 — 이 변경은 원자적이어야 하고, 맥에서 해야 한다
 
 바꿀 곳은 넷이고 fixture 재생성이 따라붙는다.
 

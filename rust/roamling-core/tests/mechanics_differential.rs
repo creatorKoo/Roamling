@@ -43,6 +43,33 @@ fn parse(fields: std::str::SplitWhitespace<'_>) -> Vec<f64> {
         .collect()
 }
 
+/// The one field in this fixture that is allowed to differ, and only by the
+/// smallest amount a `f64` can differ by.
+///
+/// `look_direction_degrees` comes from `atan2`, which IEEE does not require to
+/// be correctly rounded and which platforms therefore disagree on. Measured on
+/// Windows 11 / x86_64 / MSVC against this fixture: 4 of 3,057 answers differ,
+/// every one of them by exactly one unit in the last place.
+///
+/// It is exempted rather than replaced because there is no deterministic
+/// stand-in worth having -- writing our own `atan2` is a worse risk than the
+/// difference, and the `libm` crate measured *further* from macOS than the
+/// platform's own. And the difference is unobservable: the angle is quantised
+/// into sixteen directions before anything is drawn with it, and 0 of the 4
+/// disagreements land in a different one.
+///
+/// Distances used to need this too. They no longer do -- `hypot` was dropped
+/// for `(dx*dx + dy*dy).sqrt()`, which IEEE specifies exactly. `docs/windows.md`, W4.
+fn within_one_ulp(lhs: f64, rhs: f64) -> bool {
+    if lhs == rhs {
+        return true;
+    }
+    if lhs.is_nan() || rhs.is_nan() || lhs.is_sign_negative() != rhs.is_sign_negative() {
+        return false;
+    }
+    (lhs.to_bits() as i64 - rhs.to_bits() as i64).abs() <= 1
+}
+
 fn state_index(state: BehaviorState) -> f64 {
     BEHAVIOR_STATES
         .iter()
@@ -232,15 +259,29 @@ fn matches_the_swift_original_bit_for_bit() {
             other => panic!("fixture names an operation this port does not have: {other}"),
         };
 
-        let produced: Vec<u64> = produced.into_iter().map(f64::to_bits).collect();
         assert_eq!(
-            produced,
-            expected,
-            "line {}: {op} disagrees with Swift\n  swift {:?}\n  rust  {:?}",
+            produced.len(),
+            expected.len(),
+            "line {}: {op} produced {} values, the fixture has {}",
             index + 1,
-            expected.iter().map(|b| f64::from_bits(*b)).collect::<Vec<_>>(),
-            produced.iter().map(|b| f64::from_bits(*b)).collect::<Vec<_>>(),
+            produced.len(),
+            expected.len()
         );
+        // Index 8 of a `pointer` case is the look angle, and only that.
+        let tolerant: &[usize] = if op == "pointer" { &[8] } else { &[] };
+        for (slot, (mine, theirs)) in produced.iter().zip(&expected).enumerate() {
+            let theirs = f64::from_bits(*theirs);
+            let agrees = if tolerant.contains(&slot) {
+                within_one_ulp(*mine, theirs)
+            } else {
+                mine.to_bits() == theirs.to_bits()
+            };
+            assert!(
+                agrees,
+                "line {}: {op} disagrees with Swift at field {slot}\n  swift {theirs}\n  rust  {mine}",
+                index + 1,
+            );
+        }
         operations.insert(op.to_string());
         checked += 1;
     }
