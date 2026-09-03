@@ -198,20 +198,36 @@ final class FakeDisplayProvider: DisplayProviding, DisplayChangeObserving {
 
     func currentDisplaySet() -> DisplaySnapshotSet { displaySet }
 
+    private var handlers: [@MainActor () -> Void] = []
+
     func observeDisplayChanges(
         _ handler: @escaping @MainActor () -> Void
     ) -> DisplayChangeSubscription {
         isObserving = true
+        handlers.append(handler)
         return DisplayChangeSubscription { self.isObserving = false }
+    }
+
+    /// Stands in for the screen-parameters notification, so a test can plug in
+    /// a second display and watch what the runtime does about it.
+    func notifyChange() {
+        for handler in handlers { handler() }
     }
 }
 
 @MainActor
 final class FakePointerProvider: PointerProviding {
     var position: WorldPoint = .zero
+    /// The drop path only runs when the button comes back up, so a trace that
+    /// catches the pet has to be able to put it down.
+    var primaryButtonDown = false
 
     func currentPointer(at timestamp: TimeInterval) -> PointerSnapshot {
-        PointerSnapshot(position: position, timestamp: timestamp, primaryButtonDown: false)
+        PointerSnapshot(
+            position: position,
+            timestamp: timestamp,
+            primaryButtonDown: primaryButtonDown
+        )
     }
 }
 
@@ -503,9 +519,13 @@ final class FakeAgent: AgentIntegration {
 /// is what lets that task deliver.
 @MainActor
 func drainActivityEvents() {
-    for _ in 0..<40 {
-        let until = Date().addingTimeInterval(0.005)
-        RunLoop.main.run(mode: .default, before: until)
+    // Deliberately not `before:` a future date. The runtime's own tick timer is
+    // on this run loop, so pumping it for real time lets an unpredictable
+    // number of ticks happen -- which is invisible to a test that only asserts
+    // a state, and fatal to one that records a session tick by tick. A deadline
+    // already past still drains the main queue, which is where the delivery is.
+    for _ in 0..<400 {
+        RunLoop.main.run(mode: .default, before: Date())
     }
 }
 

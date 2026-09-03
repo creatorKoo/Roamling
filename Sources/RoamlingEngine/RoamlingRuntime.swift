@@ -80,6 +80,13 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     private let services: PlatformServices
     private let defaults: UserDefaults
     private let now: @Sendable () -> TimeInterval
+    /// Where the pet's aimlessness comes from.
+    ///
+    /// Injected rather than called inline so a session can be replayed exactly.
+    /// The port needs that: the only way to prove the Rust runtime behaves like
+    /// this one is to record what this one does and require the answer back,
+    /// and `Double.random` makes every run a different session.
+    private let randomUnit: @Sendable () -> Double
 
     private var displayProvider: any DisplayProviding { services.display }
     private var displayChanges: any DisplayChangeObserving { services.displayChanges }
@@ -181,10 +188,12 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         agents: [any AgentIntegration] = [],
         defaults: UserDefaults = .standard,
         catalog: PetCatalog = PetCatalog(),
-        clock: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }
+        clock: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+        randomUnit: @escaping @Sendable () -> Double = { Double.random(in: 0..<1) }
     ) {
         self.defaults = defaults
         now = clock
+        self.randomUnit = randomUnit
         diagnosticsPath = ProcessInfo.processInfo.environment["ROAMLING_REST_LOG"]
             ?? defaults.string(forKey: "roamling.diagnosticsLog")
         defaults.register(defaults: [
@@ -249,7 +258,12 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         nextWanderAt = now() + 2.2
     }
 
-    public func start() {
+    /// Brings the pet up. `drivingTicks` is false for a caller that owns the
+    /// clock itself: the timer is the only part of this the runtime does not
+    /// have to own, and a caller stepping `tick()` by hand cannot share the run
+    /// loop with a timer that steps it too. The recorded-session test needs
+    /// that, and so will a shell whose platform already has a frame loop.
+    public func start(drivingTicks: Bool = true) {
         guard !running else { return }
         running = true
         overlay.inputHandler = self
@@ -261,7 +275,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             self?.handleDisplayChange()
         }
         startActivitySources()
-        scheduleNextTick(after: 0.02)
+        if drivingTicks { scheduleNextTick(after: 0.02) }
     }
 
     public func stop() {
@@ -451,7 +465,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
                 isIdle: behavior.state == .idle,
                 isHeldByPointer: behavior.state == .caught || behavior.state == .dragged,
                 isResting: behavior.state.isResting,
-                randomUnit: Double.random(in: 0..<1),
+                randomUnit: randomUnit(),
                 at: now
             ),
             at: now
@@ -797,7 +811,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
                 located,
                 isHeldByPointer: behavior.state == .caught || behavior.state == .dragged,
                 isResting: behavior.state.isResting,
-                randomUnit: Double.random(in: 0..<1),
+                randomUnit: randomUnit(),
                 at: now
             ),
             at: now
@@ -1213,9 +1227,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         }
         if movement.update(deltaTime: deltaTime).reachedDestination {
             behavior.handle(.arrived, at: timestamp)
-            nextWanderAt = timestamp + tuning.wanderDelay(
-                randomUnit: Double.random(in: 0...1)
-            )
+            nextWanderAt = timestamp + tuning.wanderDelay(randomUnit: randomUnit())
             persistPosition()
         }
     }
@@ -1264,17 +1276,23 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         (0..<Self.wanderCandidateCount).compactMap { _ in randomWanderPoint() }
     }
 
+    /// A draw turned into an index. `randomUnit` is `0..<1`, but the clamp is
+    /// spelled out because a 1.0 would step off the end of the array.
+    private func pickIndex(_ count: Int) -> Int {
+        min(count - 1, max(0, Int(randomUnit() * Double(count))))
+    }
+
     private func randomWanderPoint() -> WorldPoint? {
         guard !displays.isEmpty else { return nil }
         let current = world.display(containing: movement.position) ?? world.nearestDisplay(to: movement.position)
         let target: DisplaySnapshot
         let shouldExploreAnotherDisplay = displays.count > 1
-            && Double.random(in: 0...1) < tuning.crossDisplayWanderChance
+            && randomUnit() < tuning.crossDisplayWanderChance
         if shouldExploreAnotherDisplay {
             let alternatives = displays.filter { $0.id != current?.id }
-            target = alternatives.randomElement() ?? displays[0]
+            target = alternatives.isEmpty ? displays[0] : alternatives[pickIndex(alternatives.count)]
         } else {
-            target = current ?? displays.randomElement()!
+            target = current ?? displays[pickIndex(displays.count)]
         }
 
         let safe = target.visibleFrame.insetBy(
@@ -1289,22 +1307,22 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         if target.id != current?.id {
             let boundary = target.visibleFrame.closestPoint(to: movement.position)
             let inward = (target.visibleFrame.center - boundary).normalized
-            let depth = Double.random(in: 140...360)
+            let depth = 140 + randomUnit() * 220
             return safe.closestPoint(to: boundary + inward * depth)
         }
 
-        let x = Double.random(in: safe.minX...safe.maxX)
+        let x = safe.minX + randomUnit() * safe.size.width
         let y: Double
-        if Double.random(in: 0...1) < 0.72 {
+        if randomUnit() < 0.72 {
             let upper = max(safe.minY, safe.maxY - min(170, safe.size.height * 0.32))
-            y = Double.random(in: upper...safe.maxY)
+            y = upper + randomUnit() * (safe.maxY - upper)
         } else {
-            y = Double.random(in: safe.minY...safe.maxY)
+            y = safe.minY + randomUnit() * safe.size.height
         }
         let sampled = WorldPoint(x: x, y: y)
         let offset = sampled - movement.position
         guard offset.length > 520 else { return sampled }
-        let legLength = Double.random(in: 280...520)
+        let legLength = 280 + randomUnit() * 240
         return safe.closestPoint(to: movement.position + offset.normalized * legLength)
     }
 
@@ -1368,7 +1386,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         behavior.handle(.pointer(.far), at: timestamp)
         nextWanderAt = timestamp + max(
             1.5,
-            tuning.wanderDelay(randomUnit: Double.random(in: 0...1)) * 0.35
+            tuning.wanderDelay(randomUnit: randomUnit()) * 0.35
         )
         persistPosition()
     }

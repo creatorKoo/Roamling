@@ -95,6 +95,9 @@ let package = Package(
                 "RoamlingShell", "RoamlingCoreRs"
             ],
             path: "Tests/RoamlingLogicTests",
+            // The recorded session is read by path, not from a bundle, so that
+            // regenerating it is a plain file write.
+            exclude: ["RuntimeTrace.txt"],
             linkerSettings: [
                 .linkedFramework("ImageIO"),
                 .linkedFramework("UniformTypeIdentifiers")
