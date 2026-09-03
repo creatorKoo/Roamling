@@ -88,6 +88,7 @@ fn matches_the_swift_original_bit_for_bit() {
     let mut pointer = PointerInteractionModel::new(PointerInteractionConfiguration::default());
     let mut behavior = BehaviorController::default();
     let mut checked = 0usize;
+    let mut tolerated = 0usize;
     let mut operations = std::collections::BTreeSet::new();
 
     for (index, line) in fixture.lines().enumerate() {
@@ -271,10 +272,17 @@ fn matches_the_swift_original_bit_for_bit() {
         let tolerant: &[usize] = if op == "pointer" { &[8] } else { &[] };
         for (slot, (mine, theirs)) in produced.iter().zip(&expected).enumerate() {
             let theirs = f64::from_bits(*theirs);
+            let exact = mine.to_bits() == theirs.to_bits();
             let agrees = if tolerant.contains(&slot) {
-                within_one_ulp(*mine, theirs)
+                let near = within_one_ulp(*mine, theirs);
+                // Count the cases that only pass because of the exemption, so
+                // the bound below can hold it to the size it was measured at.
+                if near && !exact {
+                    tolerated += 1;
+                }
+                near
             } else {
-                mine.to_bits() == theirs.to_bits()
+                exact
             };
             assert!(
                 agrees,
@@ -288,6 +296,20 @@ fn matches_the_swift_original_bit_for_bit() {
 
     assert!(checked > 10_000, "only {checked} cases -- the fixture shrank");
     assert_eq!(operations.len(), 12, "an operation lost its coverage");
+
+    // The exemption above is meant to absorb a handful of platform libm
+    // disagreements, not a systematic one. Measured: 0 on macOS/arm64 (the
+    // fixture's own machine) and 4 of 3,057 on Windows/x86_64/MSVC. A porting
+    // mistake that happened to land inside one unit in the last place would
+    // show up here as hundreds, and would otherwise pass silently -- which is
+    // the standing risk of any tolerance.
+    //
+    // Raising this bound is not the fix if it trips. Find out which platform,
+    // which inputs, and whether the angles still quantise to the same frame.
+    assert!(
+        tolerated <= 16,
+        "the one-ULP exemption absorbed {tolerated} disagreements; it was measured at 4"
+    );
 }
 
 /// The look angle is a free function on both sides, so it gets its own check
