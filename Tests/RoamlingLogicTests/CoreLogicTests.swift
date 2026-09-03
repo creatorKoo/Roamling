@@ -205,6 +205,41 @@ func coreLogicTests() -> [LogicTest] {
             }
             try expect(judged > 100, "only \(judged) fields judged")
         },
+        LogicTest(name: "two seats of equal score pick the same one every launch") {
+            // Mirrored seats either side of a centred window score identically
+            // and sit the same distance from the pet. The candidates used to be
+            // a dictionary, whose order Swift randomizes per process, so the pet
+            // sat left 24 launches out of 40 and right the other 16.
+            let display = DisplaySnapshot(
+                id: "d0", name: "d0",
+                frame: WorldRect(x: 0, y: 0, width: 1600, height: 1000),
+                visibleFrame: WorldRect(x: 0, y: 0, width: 1600, height: 1000),
+                scale: 1
+            )
+            let world = DesktopWorldSnapshot(displays: [display])
+            let hint = LocationHint(
+                approximateRegion: WorldRect(x: 600, y: 300, width: 400, height: 300),
+                confidence: 0.8
+            )
+            let first = try require(BasicInterestPositionPlanner.destination(
+                for: hint, in: world,
+                currentPosition: WorldPoint(x: 800, y: 900),
+                pointerPosition: nil,
+                objectSize: WorldSize(width: 96, height: 104)
+            ))
+            // The first candidate proposed is the seat outside the left edge,
+            // and with nothing to separate them that is the one that wins.
+            try expect(first.point.x < 600, "expected the left seat, got \(first.point)")
+            for _ in 0..<50 {
+                let again = try require(BasicInterestPositionPlanner.destination(
+                    for: hint, in: world,
+                    currentPosition: WorldPoint(x: 800, y: 900),
+                    pointerPosition: nil,
+                    objectSize: WorldSize(width: 96, height: 104)
+                ))
+                try expect(again == first)
+            }
+        },
         LogicTest(name: "two routes of equal cost pick the same one every launch") {
             // This failed about half the time before the fix, differently each
             // run: Dijkstra walked a Set, and Swift randomizes Set order per

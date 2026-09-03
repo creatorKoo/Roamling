@@ -114,7 +114,7 @@ public enum BasicInterestPositionPlanner {
         ) else { return nil }
 
         let best = candidates(in: plan)
-            .map { evaluate($0.key, intendedOutside: $0.value, in: plan) }
+            .map { evaluate($0.point, intendedOutside: $0.outside, in: plan) }
             .max { lhs, rhs in
                 if lhs.score == rhs.score {
                     return currentPosition.distance(to: lhs.point)
@@ -188,9 +188,15 @@ public enum BasicInterestPositionPlanner {
         )
     }
 
-    /// Candidate seats keyed by point, valued by whether the seat was meant to
-    /// land outside the window.
-    private static func candidates(in plan: Plan) -> [WorldPoint: Bool] {
+    /// Candidate seats in the order they were proposed, each carrying whether
+    /// it was meant to land outside the window.
+    ///
+    /// Ordered, not a dictionary. Two mirrored seats either side of a window
+    /// score identically and sit the same distance away, and `max(by:)` keeps
+    /// whichever it met first -- which for a dictionary is whatever the hash
+    /// seed decided that launch. The pet sat left of the window 24 runs out of
+    /// 40 and right the other 16, on the same desk with the same window.
+    private static func candidates(in plan: Plan) -> [(point: WorldPoint, outside: Bool)] {
         let region = plan.region
         var raw: [(WorldPoint, Bool)] = [
             (WorldPoint(x: region.minX - plan.halfWidth - 14, y: plan.bottomY), true),
@@ -228,12 +234,17 @@ public enum BasicInterestPositionPlanner {
             }
         }
 
-        var unique: [WorldPoint: Bool] = [:]
+        // Clamping collapses candidates onto each other near a screen edge, so
+        // duplicates still merge -- first proposal keeps its place, and being
+        // wanted outside by any of them wins.
+        var order: [WorldPoint] = []
+        var outsideByPoint: [WorldPoint: Bool] = [:]
         for (point, outside) in raw {
             let clamped = plan.safe.closestPoint(to: point)
-            unique[clamped] = (unique[clamped] ?? false) || outside
+            if outsideByPoint[clamped] == nil { order.append(clamped) }
+            outsideByPoint[clamped] = (outsideByPoint[clamped] ?? false) || outside
         }
-        return unique
+        return order.map { (point: $0, outside: outsideByPoint[$0] ?? false) }
     }
 
     private static func evaluate(
