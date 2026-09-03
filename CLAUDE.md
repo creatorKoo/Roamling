@@ -67,7 +67,12 @@ RoamlingEngine/   RoamlingRuntime — tick loop, placement, activity orchestrati
 RoamlingShell/    메뉴 트리·알림 문구·Localizable.strings. 위젯은 없다
 RoamlingMac/      AppKit display, pointer, overlay, 메뉴 렌더러, app delegate
 RoamlingApp/      entry point
+rust/roamling-win/   Windows 셸. 코어를 rlib으로 직접 링크한다 — 이쪽은 FFI가 없다.
+                  Win32 타입은 platform.rs를 넘지 않는다
 ```
+
+**`roamling-win`은 workspace `default-members`에 없다.** 맨 `cargo test`가 macOS에서
+`windows` 크레이트를 빌드하려다 깨지기 때문이다. Windows에서는 `cargo build -p roamling-win`.
 
 **Core·Pet·Sources·Engine·Shell 다섯은 window system도 Apple 이미지 프레임워크도
 import하지 않는다.** macOS SDK에 다 있어서 컴파일러는 이걸 못 잡는다 — `scripts/test.sh`가 grep으로

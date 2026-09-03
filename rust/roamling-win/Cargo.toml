@@ -1,0 +1,29 @@
+# SPDX-FileCopyrightText: 2026 GooBeom Jeoung
+# SPDX-License-Identifier: GPL-3.0-only
+[package]
+name = "roamling-win"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Windows shell: window, tray, input, and the tick loop around the core."
+
+[dependencies]
+# Linked directly, not through uniffi -- Rust calling Rust, so this side pays
+# no FFI at all. See docs/windows.md, "양 플랫폼이 붙는 방식이 다르다".
+roamling-core = { path = "../roamling-core" }
+
+[dependencies.windows]
+version = "0.58"
+features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_System_LibraryLoader",
+    "Win32_System_SystemInformation",
+]
+
+[[bin]]
+name = "roamling"
+path = "src/main.rs"

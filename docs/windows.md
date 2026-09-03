@@ -818,6 +818,60 @@ fixture에 옛 `hypot` 값이 들어 있기 때문이다. 그래서 **Windows에
 가장 짧은 경로는 **`MascotPetFactory`를 옮기고 `image` crate로 WebP를 읽는 것**이다.
 그러면 Windows 셸에 필요한 것은 창 · 트레이 · 포인터 · 디스플레이 열거뿐이다.
 
+#### 세워진 것 — `rust/roamling-win` (2026-09-03)
+
+셸 크레이트가 워크스페이스에 들어갔고 **코어가 Windows에서 펫을 몰기 시작했다.** 45초 로그:
+
+```text
+1 display(s):  \.\DISPLAY1 2560x1600 at (0,0)  scale 1.50
+    0.0s  Idle -> Sit                      at (1280, 764)
+    2.5s  Sit -> FindSleepSpot             at (1280, 764)
+    7.4s  FindSleepSpot -> LookAtPointer   at (842, 999)
+```
+
+상태기가 돌고, 좌표가 실제로 걸었고, 포인터를 알아챘다 — `MovementController` ·
+`PlacementDirector` · `PointerInteractionModel`이 전부 Rust에서 동작한다. FFI는 없다.
+
+| 파일 | 무엇 |
+|---|---|
+| `src/platform.rs` | 디스플레이 · 포인터 · 버튼 · idle을 코어 도메인 값으로. `MacPlatform.makeServices()`의 대응물 |
+| `src/sprite.rs` | layered window 픽셀. 지금은 blob이고 아틀라스가 오면 여기만 바뀐다 |
+| `src/main.rs` | 창, tick 루프, 포인터 상호작용, click-through 전환 |
+
+**Win32 타입은 `platform.rs`를 넘지 않는다** — `HMONITOR` · `POINT` · `RECT`가 런타임에
+닿지 않는다. 기존 규칙 그대로다.
+
+`preferred_tick_interval`을 따라 타이머를 다시 건다. 쉴 때 물러나는 것이 이 앱 비용의
+대부분이다(`docs/battery.md`).
+
+**`roamling-win`은 workspace의 `default-members`에 없다.** 맥에서 `scripts/test.sh`가
+부르는 맨 `cargo test`가 `windows` 크레이트를 빌드하려다 깨지기 때문이다. Windows에서는
+명시적으로 짓는다:
+
+```sh
+cargo build -p roamling-win     # 그리고 cargo test 는 코어만 짓는다
+```
+
+##### 아직 없는 것
+
+트레이(`Shell_NotifyIcon`) · 위치 저장 · 그리고 본체인 **`MascotPetFactory` 이식 + 아틀라스
+디코딩**. 지금 화면에 있는 것은 blob이라 "MVP 0이 Windows에서 돈다"의 exit 조건에는
+아직 못 미친다 — 배회 · 회피 · 잡기 · 드래그의 **로직**은 붙었고, **그림**이 남았다.
+
+##### 정하지 못한 것 — 좌표 단위 (사용자 확인이 필요하다)
+
+macOS는 코어에 **논리 포인트**를 주고 backing factor를 따로 보고한다. per-monitor DPI를
+아는 Windows 프로세스는 **물리 픽셀**을 받는다. 모니터마다 나눠서 논리로 바꾸면 **평면이
+찢어진다** — 데스크톱이 물리 픽셀로 배치돼 있어서 배율이 다른 두 모니터가 겹치거나
+벌어진다. 그래서 지금은 물리 픽셀을 그대로 world로 쓴다.
+
+대가가 있다. 튜닝값 — walk 40/s · notice 170 · catch radius 74 — 이 여기서는 물리 픽셀로
+읽힌다. **150% 디스플레이에서 펫은 맥의 2/3 거리만 걷는다.** 스프라이트는 모니터 배율을
+곱해 그리므로 크기는 같지만, **속도와 반응 거리는 다르게 느껴진다.**
+
+고치는 방법이 둘이다 — 튜닝값을 배율로 스케일하거나, 평면 자체를 스케일하거나.
+**어느 쪽인지는 실사용으로 봐야 안다.** 지금 추측으로 정하지 않는다.
+
 ### W5 — 나머지 provider
 
 Window / Focus / Capture. 5절 참조.
