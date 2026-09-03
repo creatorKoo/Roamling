@@ -16,34 +16,39 @@ mod platform;
 mod sprite;
 
 use roamling_core::{
-    BehaviorState, DisplaySnapshot, PetRuntime, RuntimeTuning, TickInput, WorldPoint, WorldSize,
+    look_frame_index, AnimationResolver, BehaviorState, DisplaySnapshot, InteractionOutput,
+    PetAnimationPlayer, PetRuntime, RuntimeTuning, TickInput, WorldPoint, WorldSize,
 };
+use roamling_pet::PetAsset;
+use sprite::Surface;
 use std::cell::RefCell;
 use std::time::Instant;
 use windows::core::{w, Result};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
-use windows::Win32::Graphics::Gdi::HDC;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
-use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
 use windows::Win32::UI::HiDpi::{
     SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
+use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
 use windows::Win32::UI::WindowsAndMessaging::*;
 
-/// The atlas cell, before the monitor's scale is applied. `MascotPetFactory`
-/// has not been ported yet, so a blob stands in -- what is under test here is
-/// the loop, not the drawing.
-const CELL: i32 = 192;
-const ROWS: i32 = 208;
+/// The pet's footprint in world units, matching `PetOverlayPanel.baseSize`.
+/// The sheet's cells are twice this -- it is a 2x asset.
+const BASE_WIDTH: f64 = 96.0;
+const BASE_HEIGHT: f64 = 104.0;
 
 struct App {
     pet: PetRuntime,
+    asset: PetAsset,
+    resolver: AnimationResolver,
+    player: PetAnimationPlayer,
     /// Cached, because the tick needs the scale under the pet and enumerating
     /// monitors sixty times a second to learn it would be absurd.
     displays: Vec<DisplaySnapshot>,
     started: Instant,
-    /// The DIB currently on screen, and the scale it was built for.
-    sprite: Option<(HDC, f64)>,
+    surface: Option<Surface>,
+    /// Frame and scale currently on screen, so an unchanged tick redraws none.
+    drawn: Option<(usize, f64)>,
     /// Set while the user is holding the pet, so drags can report a distance.
     drag_from: Option<POINT>,
     dragged: bool,
@@ -61,6 +66,10 @@ fn main() -> Result<()> {
     // Before any window exists, or the process is stuck with the wrong answer.
     unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)? };
 
+    let Some(asset) = roamling_pet::built_in_mochi() else {
+        eprintln!("the built-in mascot did not decode");
+        return Ok(());
+    };
     let displays = platform::displays();
     if displays.is_empty() {
         eprintln!("no displays; nothing to roam");
@@ -79,7 +88,6 @@ fn main() -> Result<()> {
         );
     }
 
-    // Start somewhere visible on the first display.
     let first = displays[0].visible_frame;
     let start = WorldPoint::new(
         first.origin.x + first.size.width / 2.0,
@@ -91,18 +99,23 @@ fn main() -> Result<()> {
         .unwrap_or(1);
 
     let mut pet = PetRuntime::new(start, RuntimeTuning::default(), seed);
-    let cached = displays.clone();
-    pet.set_displays(displays);
-    // No permissions are involved for MVP 0, and neither provider exists yet.
-    pet.set_object_size(WorldSize::new(CELL as f64, ROWS as f64));
+    pet.set_displays(displays.clone());
+    pet.set_object_size(WorldSize::new(BASE_WIDTH, BASE_HEIGHT));
+
+    let resolver = AnimationResolver::new(asset.tracks.clone(), asset.behavior_mappings.clone());
+    let player = PetAnimationPlayer::new(&resolver);
 
     let hwnd = create_window()?;
     APP.with(|slot| {
         *slot.borrow_mut() = Some(App {
             pet,
-            displays: cached,
+            asset,
+            resolver,
+            player,
+            displays,
             started: Instant::now(),
-            sprite: None,
+            surface: None,
+            drawn: None,
             drag_from: None,
             dragged: false,
             tick_ms: 0,
@@ -113,7 +126,11 @@ fn main() -> Result<()> {
     unsafe {
         let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
         // The pet must not make its own seat look busy once capture arrives.
-        let _ = SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
+        // That also makes it invisible to a screenshot, so there is a way out:
+        // without it there is no way to check by eye what was actually drawn.
+        if std::env::var_os("ROAMLING_ALLOW_CAPTURE").is_none() {
+            let _ = SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
+        }
         SetTimer(hwnd, 1, 16, None);
     }
     println!("\nroaming. close the window to stop.");
@@ -150,7 +167,18 @@ fn create_window() -> Result<HWND> {
     let ex = WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT;
     unsafe {
         CreateWindowExW(
-            ex, class, w!("Roamling"), WS_POPUP, 0, 0, CELL, ROWS, None, None, instance, None,
+            ex,
+            class,
+            w!("Roamling"),
+            WS_POPUP,
+            0,
+            0,
+            BASE_WIDTH as i32,
+            BASE_HEIGHT as i32,
+            None,
+            None,
+            instance,
+            None,
         )
     }
 }
@@ -166,8 +194,8 @@ fn tick(hwnd: HWND, app: &mut App) {
     let pointer = platform::pointer();
     let position = app.pet.position();
     let scale = scale_under(app, position);
-    let half_width = CELL as f64 * scale / 2.0;
-    let half_height = ROWS as f64 * scale / 2.0;
+    let half_width = BASE_WIDTH * scale / 2.0;
+    let half_height = BASE_HEIGHT * scale / 2.0;
 
     let output = app.pet.finish_tick(&TickInput {
         now,
@@ -186,11 +214,25 @@ fn tick(hwnd: HWND, app: &mut App) {
 
     if output.state != app.last_state {
         println!(
-            "{:7.1}s  {:?} -> {:?}   at ({:.0}, {:.0})",
-            now, app.last_state, output.state, output.position.x, output.position.y
+            "{:7.1}s  {:?} -> {:?}   {:?}   at ({:.0}, {:.0})",
+            now,
+            app.last_state,
+            output.state,
+            output.capability,
+            output.position.x,
+            output.position.y
         );
         app.last_state = output.state;
     }
+
+    app.player.set_capability(&app.resolver, output.capability);
+    // A sheet with fewer than eleven rows has no directional look row, and
+    // mochi-v3 has nine -- its `gaze` track does the watching instead.
+    let look = output
+        .look_direction_degrees
+        .and_then(|degrees| look_frame_index(degrees, app.asset.columns, app.asset.rows));
+    app.player.set_look_frame(look);
+    app.player.update(output.delta_time * output.locomotion_rate);
 
     set_click_through(hwnd, !output.interaction_enabled);
     draw(hwnd, app, output.position, scale);
@@ -218,46 +260,67 @@ fn scale_under(app: &App, position: WorldPoint) -> f64 {
 }
 
 fn draw(hwnd: HWND, app: &mut App, position: WorldPoint, scale: f64) {
-    let rebuild = match app.sprite {
-        Some((_, built_for)) => (built_for - scale).abs() > f64::EPSILON,
-        None => true,
-    };
-    if rebuild {
-        if let Some((old, _)) = app.sprite.take() {
-            sprite::destroy(old);
-        }
-        match sprite::build(CELL, ROWS, scale) {
-            Some(dc) => app.sprite = Some((dc, scale)),
-            None => return,
-        }
+    let width = (BASE_WIDTH * scale).round() as i32;
+    let height = (BASE_HEIGHT * scale).round() as i32;
+    let resize = app
+        .surface
+        .as_ref()
+        .map_or(true, |s| s.width != width || s.height != height);
+    if resize {
+        app.surface = Surface::new(width, height);
+        app.drawn = None;
         // The footprint changed, so where the pet may stand changed with it.
-        let size = WorldSize::new(CELL as f64 * scale, ROWS as f64 * scale);
-        app.pet.set_scale(size);
+        app.pet
+            .set_scale(WorldSize::new(BASE_WIDTH * scale, BASE_HEIGHT * scale));
     }
-    if let Some((dc, _)) = app.sprite {
-        let width = (CELL as f64 * scale).round() as i32;
-        let height = (ROWS as f64 * scale).round() as i32;
-        // The runtime reports a centre; the window wants a top-left corner.
-        let corner = POINT {
-            x: (position.x - width as f64 / 2.0).round() as i32,
-            y: (position.y - height as f64 / 2.0).round() as i32,
-        };
-        sprite::present(hwnd, dc, corner, width, height);
+
+    let frame = app.player.current_frame_index();
+    let Some(surface) = app.surface.as_mut() else {
+        return;
+    };
+    // Only touch pixels when the frame actually changed. Most ticks do not
+    // change one -- the walk cycle advances every eighth of a second.
+    if app.drawn != Some((frame, scale)) {
+        if let Some(rect) = app.asset.frame_rect(frame) {
+            if let Some(sheet) = app.asset.sheet(rect.sheet) {
+                surface.draw_frame(sheet, rect);
+                app.drawn = Some((frame, scale));
+            }
+        }
     }
+
+    // The runtime reports a centre; the window wants a top-left corner.
+    let corner = POINT {
+        x: (position.x - width as f64 / 2.0).round() as i32,
+        y: (position.y - height as f64 / 2.0).round() as i32,
+    };
+    surface.present(hwnd, corner);
 }
 
 fn set_click_through(hwnd: HWND, through: bool) {
     unsafe {
-        let mut ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
+        let ex = GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32;
         let want = if through {
             ex | WS_EX_TRANSPARENT.0
         } else {
             ex & !WS_EX_TRANSPARENT.0
         };
         if want != ex {
-            ex = want;
-            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex as isize);
+            SetWindowLongPtrW(hwnd, GWL_EXSTYLE, want as isize);
         }
+    }
+}
+
+/// Every interaction ends the same way: the runtime answers, and if it says the
+/// picture changed, it goes up.
+fn apply(hwnd: HWND, app: &mut App, output: InteractionOutput) {
+    if let Some(enabled) = output.set_interaction_enabled {
+        set_click_through(hwnd, !enabled);
+    }
+    if output.render {
+        app.player.set_capability(&app.resolver, output.capability);
+        let scale = scale_under(app, output.position);
+        draw(hwnd, app, output.position, scale);
     }
 }
 
@@ -281,10 +344,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 });
                 app.dragged = false;
                 let out = app.pet.pointer_down(point, now);
-                if out.render {
-                    let scale = scale_under(app, out.position);
-                    draw(hwnd, app, out.position, scale);
-                }
+                apply(hwnd, app, out);
                 SetCapture(hwnd);
                 true
             }
@@ -298,10 +358,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                     app.dragged = true;
                 }
                 let out = app.pet.pointer_dragged(point, distance, now);
-                if out.render {
-                    let scale = scale_under(app, out.position);
-                    draw(hwnd, app, out.position, scale);
-                }
+                apply(hwnd, app, out);
                 true
             }
             WM_LBUTTONUP => {
@@ -311,10 +368,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 app.dragged = false;
                 let _ = ReleaseCapture();
                 let out = app.pet.pointer_up(point, was_dragged, now);
-                if out.render {
-                    let scale = scale_under(app, out.position);
-                    draw(hwnd, app, out.position, scale);
-                }
+                apply(hwnd, app, out);
                 true
             }
             WM_DISPLAYCHANGE | WM_DPICHANGED => {
@@ -322,8 +376,6 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
                 let fresh = platform::displays();
                 app.displays = fresh.clone();
                 app.pet.handle_display_change(fresh, carried, now);
-                // Force the sprite to be rebuilt at the new scale.
-                app.sprite = app.sprite.take().map(|(dc, _)| (dc, -1.0));
                 true
             }
             _ => false,

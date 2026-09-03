@@ -852,11 +852,40 @@ fixture에 옛 `hypot` 값이 들어 있기 때문이다. 그래서 **Windows에
 cargo build -p roamling-win     # 그리고 cargo test 는 코어만 짓는다
 ```
 
+#### 그림도 붙었다 — `rust/roamling-pet`, 그리고 B3가 닫혔다
+
+**Mochi가 Windows 화면에 있다.** 경로 전체가 통했다:
+
+```text
+WebP 디코드 -> premultiply -> 프레임 위치 -> nearest-neighbour 블릿 -> UpdateLayeredWindow
+```
+
+**`image` 크레이트가 WebP를 디코드한다 — B3가 사라졌다.** libwebp 약 4만 줄을 벤더링할
+필요가 없고, PNG도 같이 온다. 이것이 3절에서 D를 고른 세 이유 중 하나였고, 이제 실물로
+확인됐다. W2b의 Windows 쪽은 이걸로 닫힌다.
+
+`roamling-pet`은 `MascotPetFactory.makeStandardMochi`의 이식이다. shipped `mochi-v3`
+경로만 옮겼다 — 옛 authored 시트와 pose-derived 비상 fallback은 필요해질 때까지 Swift에
+남는다. 테스트 4개가 계약을 고정한다: 시트 형태(8×9와 8×3, 셀 192×208), **모든 트랙의 모든
+프레임이 실재하는 칸에 떨어지는지**, 확장 시트가 인덱스를 이어받는지, 그리고 디코드 결과가
+premultiplied인지.
+
+**두 가지가 조용히 틀리기 쉬운 자리였다.**
+
+- **`image`는 straight alpha로 디코드한다.** Swift `PetImage`의 계약은 premultiplied다.
+  곱하지 않으면 시트의 모든 부드러운 경계가 후광으로 렌더된다. 테스트가 이걸 잡는다.
+- **시트는 2x 에셋이다.** 셀은 192×208인데 오버레이의 발자국은 96×104다
+  (`PetOverlayPanel.baseSize`). 셀 크기를 그대로 쓰면 펫이 두 배로 나온다.
+  그리고 픽셀아트이므로 **nearest neighbour**로 샘플링한다 — macOS의
+  `NSImageInterpolation.none`과 같다.
+
 ##### 아직 없는 것
 
-트레이(`Shell_NotifyIcon`) · 위치 저장 · 그리고 본체인 **`MascotPetFactory` 이식 + 아틀라스
-디코딩**. 지금 화면에 있는 것은 blob이라 "MVP 0이 Windows에서 돈다"의 exit 조건에는
-아직 못 미친다 — 배회 · 회피 · 잡기 · 드래그의 **로직**은 붙었고, **그림**이 남았다.
+트레이(`Shell_NotifyIcon`) · 위치 저장 · agent 연동(`RoamlingSources`, MVP 0 밖).
+**로직도 그림도 붙었으므로 남은 것은 셸의 살림살이다.**
+
+개발 중에는 `ROAMLING_ALLOW_CAPTURE=1`로 캡처 제외를 끌 수 있다. 켜져 있으면 펫이
+스크린샷에 안 찍혀서 무엇이 그려졌는지 눈으로 확인할 방법이 없다.
 
 ##### 정하지 못한 것 — 좌표 단위 (사용자 확인이 필요하다)
 

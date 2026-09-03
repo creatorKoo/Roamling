@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2026 GooBeom Jeoung
+# SPDX-License-Identifier: GPL-3.0-only
+[package]
+name = "roamling-pet"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Sprite sheets as bytes: decoding, the built-in mascot, and frame lookup."
+
+[dependencies]
+roamling-core = { path = "../roamling-core" }
+# W2b's decoder. This is what option D buys over vendoring libwebp: WebP and
+# PNG arrive together, cross-platform, with no C in the tree.
+image = { version = "0.25", default-features = false, features = ["webp", "png"] }
