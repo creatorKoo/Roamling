@@ -102,9 +102,16 @@ W4 절에 있다.**
 `ROAMLING_WRITE_TRACE=<path> swift run RoamlingLogicTests`이고, **통과시키려고 다시 만들지
 않는다.**
 
-**Windows에서 처음 할 일은 `cd rust && cargo test --release`다.** fixture 10개가 전부
-macOS/arm64에서 생성됐고 x86_64에서는 한 번도 돌지 않았다 — `hypot` · `atan2` · `round`는
-IEEE가 정확값을 요구하지 않으므로 깨질 수 있고, 깨지면 그것이 실패가 아니라 발견이다.
+**그 `cargo test --release`를 2026-09-03에 Windows에서 돌렸고, 10개 중 5개가 깨졌다.**
+포팅 결함이 아니라 `hypot`/`atan2`가 플랫폼 libm으로 새는 것이 원인이다 — macOS는 정확
+반올림을 하고 MSVC UCRT는 하지 않는다. 어긋남은 전부 1 ULP이고 결정은 바뀌지 않는다.
+**처방과 실측치는 `docs/windows.md` W4의 "실행 결과 · 처방" 절에 있다.**
+
+요지: `hypot`을 `(dx*dx + dy*dy).sqrt()`로 바꾼다 — 화면 좌표에서는 오버플로 보호가 필요
+없고, IEEE가 규정하므로 어디서나 같은 비트가 나오며, 2.9배 싸다. **Swift 2곳 · Rust 2곳 ·
+fixture 재생성이 한 커밋이어야 한다** — 하나만 바꾸면 macOS 차등 테스트가 그 자리에서
+깨진다. `atan2`는 `look_direction_degrees` 한 필드만 1 ULP 면제한다(16방향 양자화를
+거치면 4건 중 0건이 프레임을 바꾼다).
 
 **이 경계가 Windows port의 전제다.** `docs/windows.md`에 모듈별 실측 이식 비용, 언어
 선택 네 가지의 비교, 그리고 2026-09-01에 Windows에서 실행한 W0 스파이크 결과가 있다.

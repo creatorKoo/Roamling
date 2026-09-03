@@ -687,6 +687,105 @@ MSVC의 libm이 1 ulp라도 다르면 fixture가 그 자리에서 깨진다. **�
 (1) 해당 연산을 자체 구현으로 바꾸거나, (2) fixture를 플랫폼별로 나눈다. 어느 쪽이든
 **Windows 코드를 쓰기 전에 알아야 한다.**
 
+#### 실행 결과 — 2026-09-03, Windows 11 / x86_64 / MSVC
+
+**깨졌다. 그리고 예측한 그 자리다.** 10개 중 5개 실패:
+
+| 통과 | 실패 |
+|---|---|
+| activity · animation · attention · emptiness · tuning | geometry · interest · mechanics · placement · world |
+
+**포팅 결함이 아니다.** Swift도 Rust도 똑같이 `hypot`/`atan2`를 부르고, 차이는 **플랫폼 libm**에서
+온다 — macOS는 정확 반올림을 하고 MSVC UCRT는 하지 않는다. 첫 불일치:
+
+```text
+point.distance   macOS  868.9620581941424
+                 Win    868.9620581941423     1 ULP
+```
+
+##### 재본 것
+
+```text
+hypot   600 케이스   std(Win) 583 · libm crate 559 · naive sqrt 583 · borges+fma 561
+atan2 3,057 케이스   std(Win) 3053 · libm crate 2771
+
+std::hypot == naive sqrt(a2+b2)          600 / 600   (완전히 같다)
+hypot 불일치 17건                         전부 정확히 1 ULP (그보다 큰 것 0건)
+atan2 불일치 4건이 16방향 버킷을 바꾸는가   0 / 4
+비용                                      hypot 7.82 ns · naive 2.68 ns (2.91배)
+```
+
+**`libm` 크레이트는 두 함수 모두에서 std보다 나쁘다.** 반사적으로 집지 말 것 — 실제로 걸어봤더니
+mechanics가 142→60행, world가 4250→76행으로 더 일찍 깨졌다.
+
+**하류 실패는 값이지 결정이 아니다.** 세 곳을 열어봤고 전부 같은 답을 골랐다:
+
+```text
+placement.decide  [2.0, 104.248…, 265.709…, 35.0915637166929(6→7), 0.0, 0.0, 1.0]
+                   ↑결정 종류   ↑x        ↑y   전부 동일, 거리값만 마지막 자리
+world.safeZone.destination   목적지·플래그·점수 동일, 거리만 1 ULP
+interest.evaluateSeat        점수가 ~8 ULP (하류에서 누적), 나머지 필드 동일
+```
+
+#### 처방 — 두 함수의 답이 다르다
+
+##### `hypot`을 버린다 — 테스트 때문이 아니라 더 나은 계산이라서
+
+`hypot`이 존재하는 이유는 극단적 크기에서의 오버플로 방지다. **화면 좌표에는 그 보호가 사줄
+것이 없다** — 좌표가 ≲10⁵이라 제곱해도 10¹⁰이고 f64 한계는 10³⁰⁸다. 즉 쓰지도 않을 보호를
+위해 **2.9배 비싼 연산**을 쓰면서 **플랫폼 의존성까지** 얻고 있었다.
+
+```text
+hypot(dx, dy)  ->  (dx*dx + dy*dy).sqrt()
+```
+
+`*` · `+` · `sqrt`는 IEEE가 정확값을 규정하므로 **모든 플랫폼에서 같은 비트**가 나온다.
+Windows의 현재 답과 600/600 일치가 이미 증명됐다. 배터리 절대량은 무시할 수준이지만(비용은
+60Hz 재그리기와 capture가 지배한다) **어차피 바꿀 이유가 있는데 더 싸다.**
+
+##### `atan2`는 그대로 두고 한 필드만 면제한다
+
+결정적 대안이 없고(직접 구현은 위험, `libm`은 실측으로 더 나쁨), 어긋남이 4/3,057이며,
+**결과가 즉시 16방향으로 양자화되어 4건 중 0건이 다른 프레임에 떨어진다.** 관측 가능한
+영향이 0으로 측정된 차이다.
+
+`mechanics_differential`의 `look_direction_degrees` 필드에만 1 ULP를 허용하고 위 숫자를
+근거로 주석에 남긴다. **나머지는 비트 정확 그대로다** — 오차 허용이 코드베이스 전체로
+번지지 않게 한 필드로 묶어 둔다.
+
+#### 이 변경은 원자적이어야 하고, 맥에서 해야 한다
+
+바꿀 곳은 넷이고 fixture 재생성이 따라붙는다.
+
+```text
+Sources/RoamlingCore/Geometry.swift:18   distance   hypot -> squareRoot()
+Sources/RoamlingCore/Geometry.swift:45   length     hypot -> squareRoot()
+rust/roamling-core/src/geometry.rs:55    distance   hypot -> sqrt
+rust/roamling-core/src/geometry.rs:86    length     hypot -> sqrt
+그리고 output/w-unit1/gen 으로 fixture 재생성 (생성기가 Swift라 맥에만 있다)
+```
+
+**셋 중 하나만 바꾸면 빌드가 깨진다.** Rust만 고치면 macOS의 차등 테스트가 즉시 빨개진다 —
+fixture에 옛 `hypot` 값이 들어 있기 때문이다. 그래서 **Windows에서 Rust만 먼저 고치는 것은
+이득이 없다**: Windows의 `hypot`은 이미 naive와 같은 답을 내므로 로컬 결과가 바뀌지 않는다.
+
+`Sources/RoamlingMac/PetOverlayPanel.swift:92`의 `hypot`은 드래그 임계값이라 코어 로직이 아니고
+바꿀 필요가 없다.
+
+#### 그래서 Windows 작업은 이걸 기다리지 않는다
+
+**fixture 실패가 막는 것은 게이트지 셸이 아니다.** Windows 셸은 `roamling-core`를 링크해서
+그냥 돈다 — 1 ULP 차이로 펫이 멈추지 않는다. `cargo test`가 빨간 것뿐이다.
+
+그리고 "Windows에서 처음 할 일은 `cargo test`"의 의도는 **"Windows 코드를 쓰기 전에 알아라"**
+였고, 이제 원인·범위·영향·처방까지 측정으로 확정됐다.
+
+```text
+맥:      hypot 결정화 + fixture 재생성 ──┐
+                                          ├─→ 게이트 초록
+윈도우:  W4 셸 (창·트레이·포인터·틱) ────┘
+```
+
 #### 그 다음 — 아직 Swift에 남은 것
 
 | 남은 것 | 줄 | W4에 필요한가 |
