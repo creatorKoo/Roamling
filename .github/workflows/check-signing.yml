@@ -1,0 +1,83 @@
+# SPDX-FileCopyrightText: 2026 GooBeom Jeoung
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# Answers one question -- do MACOS_CERT_P12 and MACOS_CERT_PASSWORD go
+# together -- without cutting a release to find out.
+#
+# The release workflow used to be the only place that touched them, so the only
+# way to test a change to either was to publish, and a wrong password came back
+# as `MAC verification failed during PKCS12 import` eleven minutes into a run
+# whose Windows half had already succeeded.
+#
+# Nothing here is published and nothing secret is printed. The certificate's
+# name is, because a certificate's subject is public by definition -- it is in
+# every signature it has ever made.
+
+name: Check signing
+
+on: workflow_dispatch
+
+jobs:
+  macos:
+    runs-on: macos-14
+    steps:
+      - name: Check the certificate and its password
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          set +e
+          if [ -z "$MACOS_CERT_P12" ]; then
+            echo "::error::MACOS_CERT_P12 is not set"
+            exit 1
+          fi
+
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          if [ ! -s "$RUNNER_TEMP/cert.p12" ]; then
+            echo "::error::MACOS_CERT_P12 did not decode to anything. Re-upload with:"
+            echo "  base64 -i cert.p12 | gh secret set MACOS_CERT_P12"
+            exit 1
+          fi
+          echo "decoded $(wc -c < "$RUNNER_TEMP/cert.p12" | tr -d ' ') bytes"
+
+          # Structure first, which needs no password. If this fails the upload
+          # is damaged and the password is not the problem.
+          openssl asn1parse -inform DER -in "$RUNNER_TEMP/cert.p12" -noout 2>/dev/null
+          if [ $? -ne 0 ]; then
+            echo "::error::the decoded bytes are not a PKCS#12 file -- the upload is damaged, not the password"
+            exit 1
+          fi
+          echo "structure reads as PKCS#12"
+
+          # Then the password, by itself, before the keychain is involved. This
+          # separates "wrong password" from "keychain would not take it".
+          if openssl pkcs12 -in "$RUNNER_TEMP/cert.p12" \
+              -passin env:MACOS_CERT_PASSWORD -noout 2>/dev/null; then
+            echo "password opens the file"
+          else
+            echo "::error::MACOS_CERT_PASSWORD does not open MACOS_CERT_P12."
+            echo "Check it locally against the same file:"
+            echo "  openssl pkcs12 -in roamling-secure.p12 -noout"
+            echo "and set it again, letting gh prompt so no newline is added:"
+            echo "  gh secret set MACOS_CERT_PASSWORD"
+            rm -f "$RUNNER_TEMP/cert.p12"
+            exit 1
+          fi
+
+          keychain="$RUNNER_TEMP/check.keychain-db"
+          keychain_password="$(openssl rand -base64 24)"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" \
+            -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          status=$?
+          rm -f "$RUNNER_TEMP/cert.p12"
+          if [ $status -ne 0 ]; then
+            echo "::error::the password is right but the keychain refused the file"
+            exit 1
+          fi
+
+          security set-key-partition-list -S apple-tool:,apple: \
+            -k "$keychain_password" "$keychain" >/dev/null
+          echo "imported. identities the runner can sign with:"
+          security find-identity -v -p codesigning "$keychain"
