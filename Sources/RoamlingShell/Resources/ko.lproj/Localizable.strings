@@ -80,6 +80,7 @@
 "unit.secondsPrecise" = "%.2f초";
 "unit.multiplier" = "%.2f배";
 "button.ok" = "확인";
+"about.version" = "버전 %@";
 "alert.about.body" = "데스크톱에 진짜로 사는 작은 친구.\n\nCopyright © 2026 GooBeom Jeoung\nGNU GPL v3.0 only 라이선스로 배포합니다.\n이 프로그램은 어떠한 보증도 제공하지 않습니다.\n\n설치한 펫 패키지는 각 제작자의 라이선스를 따릅니다.";
 "tuning.section.advanced" = "애니메이션";
 "tuning.gaitCadence" = "걸음 속도";

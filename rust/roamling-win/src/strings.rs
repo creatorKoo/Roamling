@@ -205,6 +205,7 @@ mod tests {
             "menu.viewSource",
             "menu.quit",
             "alert.about.body",
+            "about.version",
             "status.hooks.installed",
             "status.receiver.ready",
             "action.install",

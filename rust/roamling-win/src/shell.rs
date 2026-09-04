@@ -196,7 +196,14 @@ const SOURCE_URL: &str = "https://github.com/creatorKoo/Roamling";
 /// relabel its buttons, and a mislabelled one is worse than none, so the source
 /// is its own menu item instead. Same two actions, one level up.
 pub fn about(hwnd: HWND) {
-    let text = wide(localized("alert.about.body"));
+    // Which build this is, first, because that is what someone opens this box
+    // to find out -- "is the update I was told about actually running".
+    let body = format!(
+        "{}\r\n\r\n{}",
+        crate::strings::localized_format("about.version", &[env!("CARGO_PKG_VERSION")]),
+        localized("alert.about.body")
+    );
+    let text = wide(&body);
     let title = wide("Roamling");
     unsafe {
         MessageBoxW(

@@ -80,6 +80,7 @@
 "unit.secondsPrecise" = "%.2f s";
 "unit.multiplier" = "%.2f×";
 "button.ok" = "OK";
+"about.version" = "Version %@";
 "alert.about.body" = "A tiny companion that actually lives on your desktop.\n\nCopyright © 2026 GooBeom Jeoung\nLicensed under GNU GPL v3.0 only.\nThis program comes with absolutely no warranty.\n\nInstalled pet packages remain subject to their authors’ licenses.";
 "tuning.section.advanced" = "Animation";
 "tuning.gaitCadence" = "Gait cadence";
