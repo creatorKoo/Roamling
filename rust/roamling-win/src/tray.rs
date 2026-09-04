@@ -16,6 +16,7 @@ use crate::strings::localized;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
+    HDC,
     CreateCompatibleDC, CreateFontW, DeleteDC, DrawTextW, GetDC, ReleaseDC, SelectObject,
     SetBkMode, SetTextColor, CLEARTYPE_QUALITY,
     CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH, DT_CENTER, DT_NOCLIP, DT_SINGLELINE,
@@ -48,46 +49,37 @@ fn wide(text: &str) -> Vec<u16> {
 ///
 /// `RoamlingAppDelegate` sets its status item's title to "🐾" and nothing else,
 /// so the tray gets the same glyph rather than a second, different idea of what
-/// Roamling looks like. It is drawn rather than shipped as an .ico so it lands
+/// Roamling looks like. It is drawn rather than shipped as an `.ico` so it lands
 /// on whatever size the shell asks for -- a tray icon is 16px at 100% and 24 at
 /// 150%, and a bitmap picked for one is wrong on the other.
 ///
 /// GDI has no colour-emoji path, so the glyph is drawn white on black and the
-/// coverage becomes the alpha. That is what makes the antialiased edge survive:
-/// the shape is the alpha, the colour is chosen here.
+/// coverage becomes the alpha. The shape is the alpha; the colour is chosen here.
+///
+/// It is drawn oversized, then the *ink* is measured and fitted to the box.
+/// Picking a font size instead means guessing at the glyph's side bearings, and
+/// guessing left the paws small with empty margin all round.
 fn paw_icon() -> Option<HICON> {
     let side = unsafe { GetSystemMetrics(SM_CXSMICON) }.max(16);
+    // Four times over, so the fitted result is downscaled rather than up.
+    let work = side * 4;
+
     unsafe {
         let screen = GetDC(None);
         let dc = CreateCompatibleDC(screen);
         ReleaseDC(None, screen);
 
-        let info = BITMAPINFO {
-            bmiHeader: BITMAPINFOHEADER {
-                biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-                biWidth: side,
-                biHeight: -side,
-                biPlanes: 1,
-                biBitCount: 32,
-                biCompression: 0,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
-        let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
-        let Ok(bitmap) = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &mut bits, None, 0) else {
+        let Some((scratch, scratch_bits)) = dib(dc, work, work) else {
             let _ = DeleteDC(dc);
             return None;
         };
-        SelectObject(dc, bitmap);
-        let pixels = std::slice::from_raw_parts_mut(bits as *mut u8, (side * side * 4) as usize);
-        pixels.fill(0);
+        SelectObject(dc, scratch);
+        let drawn = std::slice::from_raw_parts_mut(scratch_bits, (work * work * 4) as usize);
+        drawn.fill(0);
 
-        // Slightly under the box: the glyph has its own side bearings and a
-        // paw drawn edge to edge reads as a smudge at sixteen pixels.
         let face = wide("Segoe UI Emoji");
         let font = CreateFontW(
-            -(side * 5 / 8),
+            -work,
             0,
             0,
             0,
@@ -111,8 +103,8 @@ fn paw_icon() -> Option<HICON> {
         let mut box_ = RECT {
             left: 0,
             top: 0,
-            right: side,
-            bottom: side,
+            right: work,
+            bottom: work,
         };
         DrawTextW(
             dc,
@@ -123,43 +115,116 @@ fn paw_icon() -> Option<HICON> {
         SelectObject(dc, previous);
         let _ = DeleteObject(font);
 
-        // Coverage becomes alpha, premultiplied against the colour. Windows
-        // taskbars are light as often as dark, so this is the emoji's own warm
-        // brown rather than a flat black that vanishes on one of them.
-        let (r, g, b) = (0x6Du32, 0x4Cu32, 0x41u32);
-        for pixel in pixels.chunks_exact_mut(4) {
-            let coverage = pixel[0].max(pixel[1]).max(pixel[2]) as u32;
-            pixel[0] = (b * coverage / 255) as u8;
-            pixel[1] = (g * coverage / 255) as u8;
-            pixel[2] = (r * coverage / 255) as u8;
-            pixel[3] = coverage as u8;
-        }
-
-        // A development affordance: the tray hides new icons behind the Windows
-        // 11 chevron, so there is no way to look at this one on screen.
-        if let Some(path) = std::env::var_os("ROAMLING_DUMP_ICON") {
-            let mut raw = (side as u32).to_le_bytes().to_vec();
-            raw.extend_from_slice(pixels);
-            let _ = std::fs::write(path, raw);
-        }
-
-        // A 32bpp icon carries its own alpha; the mask exists because the
-        // structure demands one, and all-zero means "let the colour through".
-        let mask: HBITMAP = CreateBitmap(side, side, 1, 1, None);
-        let mut icon_info = ICONINFO {
-            fIcon: true.into(),
-            xHotspot: 0,
-            yHotspot: 0,
-            hbmMask: mask,
-            hbmColor: bitmap,
+        let coverage = |x: i32, y: i32| -> u8 {
+            let at = ((y * work + x) * 4) as usize;
+            drawn[at].max(drawn[at + 1]).max(drawn[at + 2])
         };
-        let icon = CreateIconIndirect(&mut icon_info).ok();
-        let _ = DeleteObject(mask);
-        let _ = DeleteObject(bitmap);
+
+        // The ink's own bounds, which is what gets fitted -- not the em box.
+        let (mut left, mut top, mut right, mut bottom) = (work, work, -1, -1);
+        for y in 0..work {
+            for x in 0..work {
+                if coverage(x, y) > 8 {
+                    left = left.min(x);
+                    top = top.min(y);
+                    right = right.max(x);
+                    bottom = bottom.max(y);
+                }
+            }
+        }
+        let mut icon = None;
+        if right >= left && bottom >= top {
+            let ink_w = right - left + 1;
+            let ink_h = bottom - top + 1;
+            // Square the source so the paws keep their proportions, and leave a
+            // single pixel of air so the shape does not touch the tray's edge.
+            let span = ink_w.max(ink_h);
+            let origin_x = left - (span - ink_w) / 2;
+            let origin_y = top - (span - ink_h) / 2;
+            let margin = 1;
+            let target = (side - margin * 2).max(1);
+
+            if let Some((bitmap, bits)) = dib(dc, side, side) {
+                let out = std::slice::from_raw_parts_mut(bits, (side * side * 4) as usize);
+                out.fill(0);
+                // The emoji's own warm brown: Windows taskbars are light as
+                // often as dark, and a flat black vanishes on one of them.
+                let (r, g, b) = (0x6Du32, 0x4Cu32, 0x41u32);
+                for y in 0..target {
+                    for x in 0..target {
+                        // Box-average the source cell, so shrinking by four
+                        // keeps the antialiasing rather than dropping it.
+                        let x0 = origin_x + x * span / target;
+                        let x1 = (origin_x + (x + 1) * span / target).max(x0 + 1);
+                        let y0 = origin_y + y * span / target;
+                        let y1 = (origin_y + (y + 1) * span / target).max(y0 + 1);
+                        let mut total = 0u32;
+                        let mut count = 0u32;
+                        for sy in y0..y1 {
+                            for sx in x0..x1 {
+                                if (0..work).contains(&sx) && (0..work).contains(&sy) {
+                                    total += coverage(sx, sy) as u32;
+                                }
+                                count += 1;
+                            }
+                        }
+                        let alpha = if count == 0 { 0 } else { total / count };
+                        let at = (((y + margin) * side + (x + margin)) * 4) as usize;
+                        out[at] = (b * alpha / 255) as u8;
+                        out[at + 1] = (g * alpha / 255) as u8;
+                        out[at + 2] = (r * alpha / 255) as u8;
+                        out[at + 3] = alpha as u8;
+                    }
+                }
+
+                // A development affordance: Windows 11 files new tray icons
+                // behind the chevron, so there is no way to look at this one.
+                if let Some(path) = std::env::var_os("ROAMLING_DUMP_ICON") {
+                    let mut raw = (side as u32).to_le_bytes().to_vec();
+                    raw.extend_from_slice(out);
+                    let _ = std::fs::write(path, raw);
+                }
+
+                // A 32bpp icon carries its own alpha; the mask exists because
+                // the structure demands one, and zero lets the colour through.
+                let mask: HBITMAP = CreateBitmap(side, side, 1, 1, None);
+                let mut icon_info = ICONINFO {
+                    fIcon: true.into(),
+                    xHotspot: 0,
+                    yHotspot: 0,
+                    hbmMask: mask,
+                    hbmColor: bitmap,
+                };
+                icon = CreateIconIndirect(&mut icon_info).ok();
+                let _ = DeleteObject(mask);
+                let _ = DeleteObject(bitmap);
+            }
+        }
+        let _ = DeleteObject(scratch);
         let _ = DeleteDC(dc);
         icon
     }
 }
+
+/// A 32bpp top-down DIB and a pointer to its pixels.
+fn dib(dc: HDC, width: i32, height: i32) -> Option<(HBITMAP, *mut u8)> {
+    let info = BITMAPINFO {
+        bmiHeader: BITMAPINFOHEADER {
+            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+            biWidth: width,
+            biHeight: -height,
+            biPlanes: 1,
+            biBitCount: 32,
+            biCompression: 0,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
+    let bitmap = unsafe { CreateDIBSection(dc, &info, DIB_RGB_COLORS, &mut bits, None, 0) }.ok()?;
+    Some((bitmap, bits as *mut u8))
+}
+
 fn data(hwnd: HWND) -> NOTIFYICONDATAW {
     NOTIFYICONDATAW {
         cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
