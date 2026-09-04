@@ -62,6 +62,7 @@
 "tuning.window.title" = "Roamling 동작 세부 설정";
 "tuning.header" = "펫이 움직이는 방식";
 "tuning.footer" = "바꾸면 바로 적용되고 그대로 기억됩니다. 꼭 건드려야 하는 것은 없습니다 — 기본값이 원래 의도된 움직임이고, 언제든 '기본값으로'로 되돌릴 수 있습니다.";
+"tuning.offDefault" = "%1$@ (기본 %2$@)";
 "tuning.section.movement" = "이동";
 "tuning.walkSpeed" = "이동 속도";
 "tuning.idleBeforeRest" = "잠들기 전 대기";

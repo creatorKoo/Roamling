@@ -207,6 +207,26 @@ fn positions(row: &Row, tuning: &RuntimeTuning) -> (i32, i32) {
     (half * 2, at.clamp(0, half * 2))
 }
 
+/// What the readout says: the value, and the authored one beside it when the
+/// slider has been moved off it.
+///
+/// The centre of the track means "what the pet was designed to do", and without
+/// this there is no way to tell a value you chose from one that came with the
+/// app -- which is the question a user actually asks when a slider is not in
+/// the middle.
+fn readout_text(row: &Row, tuning: &RuntimeTuning) -> String {
+    let value = tuning.get(row.key);
+    let default = RuntimeTuning::default().get(row.key);
+    if (value - default).abs() < 1e-9 {
+        row.unit.text(value)
+    } else {
+        localized_format(
+            "tuning.offDefault",
+            &[&row.unit.text(value), &row.unit.text(default)],
+        )
+    }
+}
+
 fn value_at(row: &Row, tuning: &RuntimeTuning, position: i32) -> f64 {
     let half = half_notches(row, tuning);
     let (lower, upper) = tuning.limits(row.key);
@@ -323,7 +343,9 @@ fn build(window: HWND, tuning: RuntimeTuning) {
 
         let margin = scaled(20);
         let label_width = scaled(150);
-        let value_width = scaled(80);
+        // Wide enough for "1.30x (default 1.12x)", which is the longest thing
+        // a readout has to say.
+        let value_width = scaled(150);
         let track_width = scaled(200);
         let row_height = scaled(26);
         let gap = scaled(6);
@@ -547,7 +569,7 @@ fn refresh() {
                     LPARAM(((notches as isize) << 16) | 0),
                 );
                 SendMessageW(*track, TBM_SETPOS, WPARAM(1), LPARAM(at as isize));
-                let text = wide(&row.unit.text(panel.tuning.get(row.key)));
+                let text = wide(&readout_text(row, &panel.tuning));
                 let _ = SetWindowTextW(*readout, PCWSTR(text.as_ptr()));
                 let _ = InvalidateRect(*readout, None, true);
             }
@@ -787,6 +809,39 @@ mod tests {
             let _ = DestroyWindow(window);
         }
         assert_eq!(take_pending(), Some(RuntimeTuning::default()));
+    }
+
+    /// A slider sitting on its default says only the value; one that has been
+    /// moved says what it was. Without that there is no way to tell a value you
+    /// chose from one that shipped -- which is exactly the question the centre
+    /// of the track invites.
+    #[test]
+    fn a_moved_slider_says_what_the_default_was() {
+        let defaults = RuntimeTuning::default();
+        for item in items() {
+            let Item::Slider(row) = item else { continue };
+            let plain = readout_text(&row, &defaults);
+            assert_eq!(
+                plain,
+                row.unit.text(defaults.get(row.key)),
+                "{} says something extra while sitting on its default",
+                row.title
+            );
+
+            // Move it to the far end of its track and the default must appear.
+            let (notches, _) = positions(&row, &defaults);
+            let moved = defaults.with(row.key, value_at(&row, &defaults, notches));
+            if (moved.get(row.key) - defaults.get(row.key)).abs() < 1e-9 {
+                continue; // Nowhere to move; nothing to report.
+            }
+            let text = readout_text(&row, &moved);
+            assert!(
+                text.contains(&plain),
+                "{} lost the authored value: {text}",
+                row.title
+            );
+            assert_ne!(text, plain, "{} did not mark itself as moved", row.title);
+        }
     }
 
     /// The panel is a list, and it has to be the same list the macOS panel is.

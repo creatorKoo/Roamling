@@ -206,6 +206,7 @@ mod tests {
             "menu.quit",
             "alert.about.body",
             "about.version",
+            "tuning.offDefault",
             "status.hooks.installed",
             "status.receiver.ready",
             "action.install",

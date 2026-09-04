@@ -62,6 +62,7 @@
 "tuning.window.title" = "Roamling Behavior Settings";
 "tuning.header" = "How your pet moves";
 "tuning.footer" = "Every change applies straight away and is remembered. Nothing here is required — the defaults are the authored behaviour, and Reset Defaults brings them back at any time.";
+"tuning.offDefault" = "%1$@ (default %2$@)";
 "tuning.section.movement" = "Movement";
 "tuning.walkSpeed" = "Walk speed";
 "tuning.idleBeforeRest" = "Idle before napping";
