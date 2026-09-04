@@ -82,6 +82,16 @@ impl Settings {
         self.write();
     }
 
+    /// Forgets a key, so whatever supplies the fallback gets to answer again.
+    ///
+    /// This is what keeps a settings file from freezing the defaults that
+    /// happened to be current when it was written -- see `remember_tuning`.
+    pub fn clear(&mut self, key: &str) {
+        if self.values.remove(key).is_some() {
+            self.write();
+        }
+    }
+
     fn write(&self) {
         let Some(path) = self.path.as_ref() else {
             return;
@@ -128,6 +138,24 @@ fn parse(text: &str) -> BTreeMap<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A cleared key has to actually go, or whatever supplies the fallback --
+    /// for the tuning values, the authored default -- never gets to answer.
+    #[test]
+    fn clearing_a_key_removes_it() {
+        let mut settings = Settings {
+            values: parse("a=1
+b=2
+"),
+            path: None,
+        };
+        assert_eq!(settings.number("a"), Some(1.0));
+        settings.clear("a");
+        assert_eq!(settings.number("a"), None);
+        assert_eq!(settings.number("b"), Some(2.0), "it took the wrong one");
+        // Clearing something that was never there is not an error.
+        settings.clear("nothing");
+    }
 
     #[test]
     fn a_byte_order_mark_does_not_eat_the_first_key() {

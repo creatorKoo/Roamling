@@ -619,10 +619,23 @@ fn tuning_key(key: RuntimeTuningKey) -> String {
     format!("{}{out}", settings::TUNING_PREFIX)
 }
 
+/// Saves only what the user moved away from the authored value.
+///
+/// Writing all eleven every time -- which this used to do -- freezes whichever
+/// defaults happened to be current when the file was written. The wander pause
+/// went from 12 to 40 and nobody who had ever opened the panel would have seen
+/// it, because their file still said 12 and a stored value wins. Keys equal to
+/// the default are removed instead, so the default gets to answer again, and
+/// "Reset Defaults" leaves no tuning keys behind at all.
 fn remember_tuning(app: &mut App, tuning: RuntimeTuning) {
+    let authored = RuntimeTuning::default();
     for key in roamling_core::TUNING_KEYS {
         let name = tuning_key(key);
-        app.settings.set(&name, tuning.get(key));
+        if tuning.get(key) == authored.get(key) {
+            app.settings.clear(&name);
+        } else {
+            app.settings.set(&name, tuning.get(key));
+        }
     }
 }
 
