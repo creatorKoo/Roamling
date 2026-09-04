@@ -149,6 +149,29 @@ jobs:
       - name: Package
         run: ./scripts/build-dmg.sh "${{ steps.version.outputs.version }}"
 
+      # A well-formed, correctly signed bundle can still be one that cannot
+      # start. 0.3.0 was exactly that: SwiftPM compiles an absolute path to this
+      # checkout's build directory into the resource lookup, so a binary finds
+      # its resources on the machine that built it and nowhere else. Renaming
+      # the build directory is what makes this runner stand in for a user's.
+      #
+      # The zip, because that is the copy the updater installs -- the one that
+      # reaches a machine without asking anybody first.
+      - name: Start it the way a user would
+        run: |
+          set -e
+          ditto -x -k "build/Roamling-${{ steps.version.outputs.version }}.zip" \
+            "$RUNNER_TEMP/launch"
+          mv .build .build-hidden
+          trap 'mv .build-hidden .build' EXIT
+          ROAMLING_SMOKE_TEST=1 "$RUNNER_TEMP/launch/Roamling.app/Contents/MacOS/Roamling" \
+            2>&1 | tee "$RUNNER_TEMP/smoke.log"
+          # A pipeline exits with `tee`'s status, so a crash on the left would
+          # pass unnoticed. The line the smoke path prints once the app is fully
+          # up is the thing worth checking, so check that.
+          grep -q '^smoke.localization=' "$RUNNER_TEMP/smoke.log"
+          echo "it launched, drew its menu bar item, and shut down cleanly"
+
       # Both are already in `build/`, which is the directory they have in
       # common, so they arrive at the top of the artifact.
       - name: Hand the build on
