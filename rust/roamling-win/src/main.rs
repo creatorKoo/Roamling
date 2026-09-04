@@ -225,7 +225,9 @@ fn main() -> Result<()> {
 
     let mut pet = PetRuntime::new(start, stored_tuning(&stored), seed);
     pet.set_displays(displays.clone());
-    pet.set_object_size(WorldSize::new(BASE_WIDTH, BASE_HEIGHT));
+    // World units, so this carries the user's size choice and nothing about
+    // any display's DPI -- the same value macOS passes.
+    pet.set_object_size(WorldSize::new(BASE_WIDTH * scale, BASE_HEIGHT * scale));
     pet.set_flags(roaming, avoiding, interactive);
 
     let resolver = AnimationResolver::new(asset.tracks.clone(), asset.behavior_mappings.clone());
@@ -471,8 +473,10 @@ fn tick(hwnd: HWND, app: &mut App) {
     let pointer = platform::pointer();
     let position = app.pet.position();
     let scale = render_scale(app, position);
-    let half_width = BASE_WIDTH * scale / 2.0;
-    let half_height = BASE_HEIGHT * scale / 2.0;
+    // World units, matching the size the core was given -- the pointer and the
+    // position are both world, so the half-extents must be too.
+    let half_width = BASE_WIDTH * app.scale / 2.0;
+    let half_height = BASE_HEIGHT * app.scale / 2.0;
 
     let output = app.pet.finish_tick(&TickInput {
         now,
@@ -716,8 +720,10 @@ fn draw(hwnd: HWND, app: &mut App, position: WorldPoint, scale: f64) {
         app.surface = Surface::new(width, height);
         app.drawn = None;
         // The footprint changed, so where the pet may stand changed with it.
+        // In world units: `scale` here is physical pixels, which is right for
+        // the surface and wrong for the core.
         app.pet
-            .set_scale(WorldSize::new(BASE_WIDTH * scale, BASE_HEIGHT * scale));
+            .set_scale(WorldSize::new(BASE_WIDTH * app.scale, BASE_HEIGHT * app.scale));
     }
 
     let frame = app.player.current_frame_index();
@@ -735,10 +741,12 @@ fn draw(hwnd: HWND, app: &mut App, position: WorldPoint, scale: f64) {
         }
     }
 
-    // The runtime reports a centre; the window wants a top-left corner.
+    // The runtime reports a centre in world units; the window wants a top-left
+    // corner in physical pixels.
+    let world_scale = platform::world_scale();
     let corner = POINT {
-        x: (position.x - width as f64 / 2.0).round() as i32,
-        y: (position.y - height as f64 / 2.0).round() as i32,
+        x: (position.x * world_scale - width as f64 / 2.0).round() as i32,
+        y: (position.y * world_scale - height as f64 / 2.0).round() as i32,
     };
     surface.present(hwnd, corner);
 }

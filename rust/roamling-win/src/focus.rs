@@ -52,17 +52,21 @@ pub fn activity_location_hint() -> Option<LocationHint> {
     Some(LocationHint::new(Some(frame), 0.55))
 }
 
+/// Rectangles arrive from Win32 in physical pixels and the core works in the
+/// world plane, so everything this file produces goes through here. One funnel,
+/// so the caret and the window frame cannot end up in different units.
 fn to_world(rect: RECT) -> Option<WorldRect> {
-    let width = (rect.right - rect.left) as f64;
-    let height = (rect.bottom - rect.top) as f64;
+    let scale = crate::platform::world_scale();
+    let width = (rect.right - rect.left) as f64 / scale;
+    let height = (rect.bottom - rect.top) as f64 / scale;
     // Empty rects are dropped on the way in, so a `Some` means something real
     // was measured. `FocusSnapshot`'s own documentation asks for that.
     if width <= 0.0 || height <= 0.0 {
         return None;
     }
     Some(WorldRect::new(
-        rect.left as f64,
-        rect.top as f64,
+        rect.left as f64 / scale,
+        rect.top as f64 / scale,
         width,
         height,
     ))
