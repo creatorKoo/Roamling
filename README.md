@@ -1,3 +1,5 @@
+**English** | [한국어](README.ko.md)
+
 # 🐾 Roamling
 
 **A tiny companion that actually lives on your desktop.**
