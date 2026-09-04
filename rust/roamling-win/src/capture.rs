@@ -99,47 +99,74 @@ impl Capturer {
 /// Averaging rather than picking one pixel per cell is the whole point: a page
 /// of text point-sampled reads as blank, which is exactly the thing this is
 /// here to notice.
+///
+/// **Every pixel counts, and that is a deliberate reversal.** This used to take
+/// at most sixteen samples per axis per cell, on the reasoning that sixteen is
+/// plenty to tell dense from empty. It is not. A cell on a 2560-wide screen is
+/// forty pixels across, so the cap stepped by three and looked at one pixel in
+/// nine -- and a one-pixel antialiased stroke has two chances in three of being
+/// stepped straight over. Faint text is exactly the case made of thin strokes
+/// and low contrast, and the pet sat on it. macOS never had this problem: it
+/// asks ScreenCaptureKit for a 64-column image and the system scaler reads
+/// every pixel.
+///
+/// The cost of reading all of them is paid back by doing integer work per
+/// pixel. The 51 ms that justified the cap was floating-point per pixel with a
+/// cast; weights scaled to 1024 make it a multiply-add on bytes.
 fn average(pixels: &[u8], width: usize, height: usize, stride: usize, rows: usize) -> Vec<f64> {
-    let mut samples = Vec::with_capacity(COLUMNS * rows);
-    for row in 0..rows {
-        let y0 = row * height / rows;
-        let y1 = (((row + 1) * height) / rows).max(y0 + 1).min(height);
-        for column in 0..COLUMNS {
-            let x0 = column * width / COLUMNS;
-            let x1 = (((column + 1) * width) / COLUMNS).max(x0 + 1).min(width);
-            // Sixteen samples per axis is plenty to tell dense from empty, and
-            // it stops the cost growing with the monitor: a cell on this screen
-            // is about forty pixels across, on a 4K one it is eighty, and both
-            // end up doing the same work. Averaging every pixel measured 51 ms.
-            let step = (x1 - x0).max(y1 - y0).div_ceil(16).max(1);
-            let mut total = 0u64;
-            let mut count = 0u64;
-            for y in (y0..y1).step_by(step) {
-                let line = y * stride;
-                for x in (x0..x1).step_by(step) {
-                    let at = line + x * 4;
-                    if at + 2 >= pixels.len() {
-                        continue;
-                    }
-                    // BGRA, and Rec. 709 because the screen is sRGB. macOS
-                    // reaches the same place through a DeviceGray context; the
-                    // two will not agree bit for bit and nothing requires them
-                    // to -- the differential fixture takes a field as *input*
-                    // and only pins the scoring done with it.
-                    total += (0.2126 * pixels[at + 2] as f64
-                        + 0.7152 * pixels[at + 1] as f64
-                        + 0.0722 * pixels[at] as f64) as u64;
-                    count += 1;
-                }
-            }
-            samples.push(if count == 0 {
-                0.0
-            } else {
-                total as f64 / count as f64 / 255.0
-            });
+    // Rec. 709, scaled so the three sum to exactly 1024 -- the screen is sRGB
+    // and this is the same weighting macOS reaches through a DeviceGray
+    // context. The two will not agree bit for bit and nothing requires them to:
+    // the differential fixture takes a field as *input* and pins only the
+    // scoring done with it.
+    const BLUE: u64 = 74;
+    const GREEN: u64 = 732;
+    const RED: u64 = 218;
+    const UNIT: u64 = 1_024;
+
+    if width == 0 || height == 0 || rows == 0 {
+        return vec![0.0; COLUMNS * rows];
+    }
+
+    // Which column each source x falls in, worked out once rather than as a
+    // division inside the inner loop.
+    let column_for: Vec<usize> = (0..width).map(|x| (x * COLUMNS / width).min(COLUMNS - 1)).collect();
+
+    // A screen far beyond 4K would make reading every row cost more than the
+    // answer is worth. Skipping rows keeps the horizontal resolution, which is
+    // the axis that catches the vertical stems letters are mostly made of.
+    let row_step = (height * width).div_ceil(4_000_000).max(1);
+
+    let mut totals = vec![0u64; COLUMNS * rows];
+    let mut counts = vec![0u64; COLUMNS * rows];
+
+    for y in (0..height).step_by(row_step) {
+        let target = (y * rows / height).min(rows - 1) * COLUMNS;
+        let line = y * stride;
+        if line + width * 4 > pixels.len() {
+            continue;
+        }
+        let row = &pixels[line..line + width * 4];
+        for (x, pixel) in row.chunks_exact(4).enumerate() {
+            let at = target + column_for[x];
+            totals[at] += BLUE * pixel[0] as u64
+                + GREEN * pixel[1] as u64
+                + RED * pixel[2] as u64;
+            counts[at] += 1;
         }
     }
-    samples
+
+    totals
+        .iter()
+        .zip(counts.iter())
+        .map(|(total, count)| {
+            if *count == 0 {
+                0.0
+            } else {
+                *total as f64 / (*count as f64 * UNIT as f64 * 255.0)
+            }
+        })
+        .collect()
 }
 
 /// Whether there is anything to look at.
@@ -173,5 +200,92 @@ impl Capturer {
     pub fn release(&mut self) {
         self.duplication = None;
         self.opened_for.clear();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A BGRA frame of white paper with thin, faint vertical strokes across the
+    /// left half -- one pixel wide, every third pixel, at the contrast of grey
+    /// text on white. The right half is bare.
+    fn page(width: usize, height: usize) -> Vec<u8> {
+        let mut pixels = vec![0xFFu8; width * height * 4];
+        for y in 0..height {
+            for x in (0..width / 2).step_by(3) {
+                let at = (y * width + x) * 4;
+                // 190 on 255: light grey, the kind of text this kept missing.
+                pixels[at] = 190;
+                pixels[at + 1] = 190;
+                pixels[at + 2] = 190;
+            }
+        }
+        pixels
+    }
+
+    /// The defect this replaced: stepping through a cell can land entirely
+    /// between one-pixel strokes, so a page of faint text reads as bare paper
+    /// and the pet sits on it. Reading every pixel cannot miss them.
+    #[test]
+    fn faint_thin_text_is_not_stepped_over() {
+        let (width, height) = (COLUMNS * 40, 40 * 8);
+        let pixels = page(width, height);
+        let samples = average(&pixels, width, height, width * 4, 8);
+        assert_eq!(samples.len(), COLUMNS * 8);
+
+        // One stroke in three columns of pixels, at 190 against 255:
+        // (190 + 255 + 255) / 3 = 233.3, so about 0.915 of full white.
+        let inked = samples[0];
+        assert!(
+            (inked - 233.0 / 255.0).abs() < 0.01,
+            "the written half averaged {inked}, not the ink it actually has"
+        );
+
+        // The bare half is white, and the two halves have to be far enough
+        // apart that a seat chooser can tell them apart at all.
+        let bare = samples[COLUMNS - 1];
+        assert!((bare - 1.0).abs() < 1e-6, "the bare half averaged {bare}");
+        assert!(
+            bare - inked > 0.05,
+            "written and bare paper differ by only {}",
+            bare - inked
+        );
+    }
+
+    /// The old cap, reproduced, to show it was not a theoretical loss: stepping
+    /// by three over strokes drawn every three pixels can see none of them.
+    #[test]
+    fn the_sixteen_sample_cap_could_miss_every_stroke() {
+        let (width, height) = (COLUMNS * 40, 40 * 8);
+        let pixels = page(width, height);
+        let cell = width / COLUMNS;
+        let step = cell.div_ceil(16).max(1);
+        assert_eq!(step, 3, "the cap stepped by three on a screen this wide");
+
+        // Start one pixel in, which is where a cell boundary lands for many
+        // columns, and every sample falls between the strokes.
+        let mut total = 0u64;
+        let mut count = 0u64;
+        for y in (0..40).step_by(step) {
+            for x in (1..cell).step_by(step) {
+                let at = (y * width + x) * 4;
+                total += pixels[at] as u64;
+                count += 1;
+            }
+        }
+        let seen = total as f64 / count as f64 / 255.0;
+        assert!(
+            seen > 0.99,
+            "the cap saw {seen}; if it saw the ink this test is no longer the point"
+        );
+
+        // And what is actually there is meaningfully darker.
+        let truth = average(&pixels, width, height, width * 4, 8)[0];
+        assert!(
+            seen - truth > 0.05,
+            "stepping lost only {}, which would not have mattered",
+            seen - truth
+        );
     }
 }
