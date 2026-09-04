@@ -43,17 +43,30 @@ WizardStyle=modern
 ; calls it. Below that the integration would install and silently never fire.
 MinVersion=10.0.17134
 LicenseFile=..\LICENSE
+; Only ask which language when the system's own matches neither. Korean Windows
+; gets the Korean wizard with no question; everything else gets English with no
+; question. Being asked your own language is a question with a known answer.
+ShowLanguageDialog=auto
 UninstallDisplayName=Roamling
 UninstallDisplayIcon={app}\roamling.exe
 
 [Languages]
-; English only. Inno Setup 6 does not ship a Korean translation in its official
-; set, and an unofficial .isl vendored here would be one more file to keep in
-; step with the two Localizable.strings that are the real source of copy.
+; Both ship with Inno Setup 6. The wizard's own text comes from these; the
+; three lines that are ours are in [CustomMessages] below. The app's own copy
+; is not here -- that lives in the two Localizable.strings the runtime reads.
 Name: "english"; MessagesFile: "compiler:Default.isl"
+Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
+
+[CustomMessages]
+english.AutostartTask=Start Roamling when I sign in
+english.StartupGroup=Startup
+english.LaunchProgram=Start Roamling
+korean.AutostartTask=로그인할 때 Roamling 시작
+korean.StartupGroup=시작 프로그램
+korean.LaunchProgram=Roamling 시작
 
 [Tasks]
-Name: "autostart"; Description: "Start Roamling when I sign in"; GroupDescription: "Startup"
+Name: "autostart"; Description: "{cm:AutostartTask}"; GroupDescription: "{cm:StartupGroup}"
 
 [Files]
 Source: "..\rust\target\release\roamling.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -68,7 +81,7 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
     Flags: uninsdeletevalue; Tasks: autostart
 
 [Run]
-Filename: "{app}\roamling.exe"; Description: "Start Roamling"; \
+Filename: "{app}\roamling.exe"; Description: "{cm:LaunchProgram}"; \
     Flags: nowait postinstall skipifsilent
 
 [InstallDelete]
