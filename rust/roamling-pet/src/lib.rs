@@ -10,6 +10,8 @@
 //! The decoder is the Rust `image` crate, which is what W2b was waiting on: it
 //! gives WebP and PNG together, on every platform, with no C vendored in.
 
+pub mod package;
+
 use roamling_core::{standard_tracks, PetAnimationFrame, PetAnimationTrack};
 use std::collections::BTreeMap;
 
@@ -138,9 +140,9 @@ const EXTENSION_ROWS: usize = 3;
 // The shipped `mochi-v3` package, byte for byte the same files as
 // `~/.codex/pets/mochi-v3`. Compiled in rather than read from disk: the
 // built-in mascot has to exist even when nothing else does.
-const STANDARD: &[u8] =
+pub(crate) const STANDARD: &[u8] =
     include_bytes!("../../../Sources/RoamlingPet/Resources/BuiltInPets/mochi-standard-atlas.webp");
-const EXTENSION: &[u8] =
+pub(crate) const EXTENSION: &[u8] =
     include_bytes!("../../../Sources/RoamlingPet/Resources/BuiltInPets/mochi-extension-atlas.webp");
 
 fn track(name: &str, frames: &[(usize, f64)], loops: bool) -> PetAnimationTrack {

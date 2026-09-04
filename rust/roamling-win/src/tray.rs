@@ -5,8 +5,7 @@
 //!
 //! macOS puts this in the menu bar and builds it from `ShellMenu`, which holds
 //! the tree as data. That module is Swift, so this one carries its own small
-//! tree for now, in the same order and with the same words. What is missing is
-//! what the shell cannot do yet: the installed-pet list needs the catalogue.
+//! tree for now, in the same order and with the same words.
 //!
 //! The strings still come from the shared `.strings` files. See `strings.rs`.
 
@@ -43,6 +42,10 @@ pub const CMD_COPY_DIAGNOSTICS: usize = 8;
 pub const CMD_ABOUT: usize = 9;
 pub const CMD_VIEW_SOURCE: usize = 10;
 pub const CMD_TUNING: usize = 11;
+pub const CMD_RELOAD_PETS: usize = 12;
+/// The built-in mascot, then one id per discovered package.
+pub const CMD_PET_BUILT_IN: usize = 1_000;
+pub const CMD_PET_BASE: usize = 1_001;
 /// One id per entry in `SCALE_CHOICES`, in that order.
 pub const CMD_SCALE_BASE: usize = 20;
 /// One block of ids per agent, so the handler can tell which one was picked
@@ -286,6 +289,11 @@ pub struct MenuState {
     pub placeholder: Vec<String>,
     /// The user's own size multiplier, on top of the display's scale.
     pub scale: f64,
+    /// Discovered packages and whether each is the one in use. Empty when
+    /// nothing is installed, which is the ordinary case.
+    pub pets: Vec<(String, bool)>,
+    /// Whether the built-in mascot is the one showing.
+    pub built_in: bool,
     /// Each agent, whether its hook is installed, stale or absent, and whether
     /// its endpoint came up.
     pub agents: [(Agent, installer::Status, bool); 2],
@@ -373,14 +381,26 @@ unsafe fn build(state: &MenuState) -> Option<HMENU> {
         // Pet. Only the built-in for now -- installed packages arrive with the
         // catalogue -- but the coverage lines are real, read off the resolver.
         if let Ok(pets) = CreatePopupMenu() {
-            let label = localized_format("menu.pet.builtin", &[&state.pet_name]);
+            let label = localized_format("menu.pet.builtin", &["Mochi"]);
             let name = wide(&label);
             let _ = AppendMenuW(
                 pets,
-                MF_STRING | MF_CHECKED | MF_DISABLED | MF_GRAYED,
-                0,
+                MF_STRING | checked(state.built_in),
+                CMD_PET_BUILT_IN,
                 PCWSTR(name.as_ptr()),
             );
+            if !state.pets.is_empty() {
+                let _ = separator(pets);
+            }
+            for (index, (name, selected)) in state.pets.iter().enumerate() {
+                let label = wide(name);
+                let _ = AppendMenuW(
+                    pets,
+                    MF_STRING | checked(*selected),
+                    CMD_PET_BASE + index,
+                    PCWSTR(label.as_ptr()),
+                );
+            }
             let _ = separator(pets);
             caption(
                 pets,
@@ -489,6 +509,7 @@ unsafe fn build(state: &MenuState) -> Option<HMENU> {
         let _ = separator(menu);
         command(menu, CMD_OPEN_PET_FOLDER, localized("menu.openPetFolder"));
         command(menu, CMD_COPY_DIAGNOSTICS, localized("menu.copyDiagnostics"));
+        command(menu, CMD_RELOAD_PETS, localized("menu.reloadPets"));
         let _ = separator(menu);
         command(menu, CMD_ABOUT, localized("menu.about"));
         // The macOS About alert carries this as a second button. `MessageBoxW`
@@ -511,6 +532,8 @@ mod tests {
             substituted: vec!["sit".into()],
             placeholder: vec![],
             scale: 1.0,
+            pets: vec![("Installed One".into(), true), ("Installed Two".into(), false)],
+            built_in: false,
             agents: [
                 (Agent::ClaudeCode, installer::Status::Installed, true),
                 (Agent::Codex, installer::Status::NotInstalled, false),
@@ -568,6 +591,10 @@ mod tests {
             CMD_VIEW_SOURCE,
             CMD_QUIT,
             CMD_TUNING,
+            CMD_RELOAD_PETS,
+            CMD_PET_BUILT_IN,
+            CMD_PET_BASE,
+            CMD_PET_BASE + 1,
             CMD_SCALE_BASE,
             CMD_SCALE_BASE + SCALE_CHOICES.len() - 1,
             // Installed, so it offers repair, remove and a test.

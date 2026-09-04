@@ -35,10 +35,11 @@ use roamling_core::{
     WorldSize,
 };
 use roamling_agent::{installer, Agent, Receiver};
-use roamling_pet::PetAsset;
+use roamling_pet::{package, PetAsset};
 use settings::Settings;
 use sprite::Surface;
 use std::cell::RefCell;
+use std::path::PathBuf;
 use std::time::Instant;
 use windows::core::{w, Result};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
@@ -57,6 +58,10 @@ const BASE_HEIGHT: f64 = 104.0;
 struct App {
     pet: PetRuntime,
     asset: PetAsset,
+    /// Packages found on disk, and which one is showing. `None` is the
+    /// built-in mascot, which is always available and never fails to load.
+    catalog: Vec<package::PetDescriptor>,
+    current_package: Option<std::path::PathBuf>,
     resolver: AnimationResolver,
     player: PetAnimationPlayer,
     /// Cached, because the tick needs the scale under the pet and enumerating
@@ -122,7 +127,7 @@ fn main() -> Result<()> {
     // Before any window exists, or the process is stuck with the wrong answer.
     unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)? };
 
-    let Some(asset) = roamling_pet::built_in_mochi() else {
+    let Some(built_in) = roamling_pet::built_in_mochi() else {
         eprintln!("the built-in mascot did not decode");
         return Ok(());
     };
@@ -170,6 +175,31 @@ fn main() -> Result<()> {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_nanos() as u64)
         .unwrap_or(1);
+
+    // Whatever is on disk, and whichever of it was showing last. A package
+    // that has gone away or stopped loading falls back to the built-in rather
+    // than leaving the user with no pet.
+    let catalog = package::discover(&package::default_roots());
+    let wanted = stored.text(settings::PET_PACKAGE_PATH).map(PathBuf::from);
+    let (asset, current_package) = match wanted {
+        Some(path) if catalog.iter().any(|found| found.package == path) => {
+            match package::load(&path) {
+                Ok(loaded) => {
+                    for warning in &loaded.warnings {
+                        println!("   pet  {warning}");
+                    }
+                    println!("pet: {} from {}", loaded.asset.display_name, path.display());
+                    (loaded.asset, Some(path))
+                }
+                Err(error) => {
+                    println!("{}: {error}", path.display());
+                    (built_in, None)
+                }
+            }
+        }
+        _ => (built_in, None),
+    };
+    println!("{} pet package(s) found", catalog.len());
 
     let roaming = stored.bool(settings::ROAMING, true);
     let avoiding = stored.bool(settings::AVOID_POINTER, true);
@@ -251,6 +281,8 @@ fn main() -> Result<()> {
             interactive,
             visual,
             cursor_aware,
+            catalog,
+            current_package,
             capturer: capture::Capturer::default(),
             receivers,
             agent_events,
@@ -520,6 +552,30 @@ fn remember(app: &mut App, position: WorldPoint) {
     app.settings.set(settings::HAS_POSITION, true);
 }
 
+/// Swap the pet showing on screen.
+///
+/// Everything derived from the sheet has to go with it: the resolver reads the
+/// tracks, the player holds a position inside one of them, and the surface is
+/// sized for the old cell. Keeping any of them would draw the new sheet through
+/// the old sheet's idea of where its frames are.
+fn adopt(app: &mut App, asset: PetAsset, package: Option<PathBuf>) {
+    println!("pet: {}", asset.display_name);
+    app.resolver = AnimationResolver::new(asset.tracks.clone(), asset.behavior_mappings.clone());
+    app.player = PetAnimationPlayer::new(&app.resolver);
+    app.asset = asset;
+    app.surface = None;
+    app.drawn = None;
+    app.current_package = package.clone();
+    match package {
+        Some(path) => app
+            .settings
+            .set(settings::PET_PACKAGE_PATH, &path.to_string_lossy()),
+        // Empty rather than absent, so the choice of the built-in survives a
+        // restart instead of falling back to whatever was selected before.
+        None => app.settings.set(settings::PET_PACKAGE_PATH, ""),
+    }
+}
+
 /// "Test Reaction": a turn starting, then finishing three seconds later.
 ///
 /// Ported from `RoamlingRuntime.testAgentReaction`, including the pause -- the
@@ -733,6 +789,17 @@ unsafe fn dispatch(hwnd: HWND, msg: u32, lp: LPARAM, app: &mut App) -> bool {
                     substituted: names(&coverage.substituted),
                     placeholder: names(&coverage.placeholder),
                     scale: app.scale,
+                    pets: app
+                        .catalog
+                        .iter()
+                        .map(|found| {
+                            (
+                                found.display_name.clone(),
+                                app.current_package.as_deref() == Some(found.package.as_path()),
+                            )
+                        })
+                        .collect(),
+                    built_in: app.current_package.is_none(),
                     roaming: app.roaming,
                     avoiding: app.avoiding,
                     interactive: app.interactive,
@@ -782,6 +849,31 @@ unsafe fn dispatch(hwnd: HWND, msg: u32, lp: LPARAM, app: &mut App) -> bool {
                         app.settings.set(settings::CURSOR_AWARENESS, app.cursor_aware);
                     }
                     tray::CMD_TUNING => tuning::show(app.pet.tuning()),
+                    tray::CMD_RELOAD_PETS => {
+                        app.catalog = package::discover(&package::default_roots());
+                        println!("{} pet package(s) found", app.catalog.len());
+                    }
+                    tray::CMD_PET_BUILT_IN => {
+                        if let Some(asset) = roamling_pet::built_in_mochi() {
+                            adopt(app, asset, None);
+                        }
+                    }
+                    // The pet list, in the order the catalogue reports.
+                    picked if picked >= tray::CMD_PET_BASE => {
+                        let index = picked - tray::CMD_PET_BASE;
+                        if let Some(found) = app.catalog.get(index) {
+                            let path = found.package.clone();
+                            match package::load(&path) {
+                                Ok(loaded) => {
+                                    for warning in &loaded.warnings {
+                                        println!("   pet  {warning}");
+                                    }
+                                    adopt(app, loaded.asset, Some(path));
+                                }
+                                Err(error) => println!("{}: {error}", path.display()),
+                            }
+                        }
+                    }
                     tray::CMD_OPEN_PET_FOLDER => shell::open_pet_folder(),
                     tray::CMD_COPY_DIAGNOSTICS => {
                         let text = app.log.text(now);
@@ -791,8 +883,11 @@ unsafe fn dispatch(hwnd: HWND, msg: u32, lp: LPARAM, app: &mut App) -> bool {
                     }
                     tray::CMD_ABOUT => shell::about(hwnd),
                     tray::CMD_VIEW_SOURCE => shell::view_source(),
-                    // Agent ids live in blocks of ten from 100.
-                    picked if picked >= tray::CMD_AGENT_BASE => {
+                    // Agent ids live in blocks of ten from 100, below the
+                    // pet list -- so this arm has to be bounded at both ends.
+                    picked
+                        if (tray::CMD_AGENT_BASE..tray::CMD_PET_BUILT_IN).contains(&picked) =>
+                    {
                         let index = (picked - tray::CMD_AGENT_BASE) / tray::CMD_AGENT_STRIDE;
                         let action = (picked - tray::CMD_AGENT_BASE) % tray::CMD_AGENT_STRIDE;
                         if let Some((agent, token)) = app.tokens.get(index) {
