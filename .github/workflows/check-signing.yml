@@ -95,5 +95,31 @@ jobs:
 
           security set-key-partition-list -S apple-tool:,apple: \
             -k "$keychain_password" "$keychain" >/dev/null
-          echo "imported. identities the runner can sign with:"
-          security find-identity -v -p codesigning "$keychain"
+          security list-keychains -d user -s "$keychain" \
+            $(security list-keychains -d user | tr -d '"')
+          echo "imported"
+
+          # Then the only question that matters: can codesign sign with it.
+          #
+          # Not `find-identity -v`, which was here first and lied. That filters
+          # on *trust*, and a self-signed certificate is not trusted on a fresh
+          # runner -- so it reports "0 valid identities found" about a
+          # certificate that signs perfectly well. Measured: codesign does not
+          # need trust to sign, only to verify.
+          cp /bin/echo "$RUNNER_TEMP/victim"
+          codesign --force --sign "Roamling" --keychain "$keychain" "$RUNNER_TEMP/victim"
+          if [ $? -ne 0 ]; then
+            echo "::error::the certificate imported but codesign will not use it"
+            exit 1
+          fi
+          requirement="$(codesign -d -r- "$RUNNER_TEMP/victim" 2>&1 |
+            sed -n 's/^#* *designated => //p')"
+          echo "signed a throwaway file, and it came out as:"
+          echo "  $requirement"
+          # Certificate-based, not a cdhash. That is the whole point of signing
+          # with an identity: an update stays the same app to macOS and the user
+          # keeps the permissions they granted.
+          case "$requirement" in
+            *"certificate leaf"*) echo "pinned to the certificate -- this is what a release needs" ;;
+            *) echo "::error::signed ad-hoc, which would reset the user's permissions on every update"; exit 1 ;;
+          esac
