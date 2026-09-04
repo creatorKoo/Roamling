@@ -142,6 +142,64 @@ impl RuntimeTuning {
         Self::bounds(key, self.pointer_awareness_distance)
     }
 
+    /// Swift reaches these through a subscript, which is what lets the panel be
+    /// a list of rows rather than eleven near-identical blocks. Same idea here.
+    pub fn get(&self, key: RuntimeTuningKey) -> f64 {
+        match key {
+            RuntimeTuningKey::WalkingSpeed => self.walking_speed,
+            RuntimeTuningKey::WanderPause => self.wander_pause,
+            RuntimeTuningKey::CrossDisplayWanderChance => self.cross_display_wander_chance,
+            RuntimeTuningKey::IdleBeforeRest => self.idle_before_rest,
+            RuntimeTuningKey::PointerAwarenessDistance => self.pointer_awareness_distance,
+            RuntimeTuningKey::EvadeSpeedScale => self.evade_speed_scale,
+            RuntimeTuningKey::CatchArmDistance => self.catch_arm_distance,
+            RuntimeTuningKey::CatchApproachSpeed => self.catch_approach_speed,
+            RuntimeTuningKey::CatchWindow => self.catch_window,
+            RuntimeTuningKey::HitRegionScale => self.hit_region_scale,
+            RuntimeTuningKey::GaitCadence => self.gait_cadence,
+        }
+    }
+
+    /// One value changed, and the whole thing re-clamped.
+    ///
+    /// It goes back through `new` rather than assigning the field, because the
+    /// bounds are not independent: raising the catch arm past the notice
+    /// distance has to be caught, and only `new` knows that.
+    #[must_use]
+    pub fn with(&self, key: RuntimeTuningKey, value: f64) -> Self {
+        let mut fields = *self;
+        match key {
+            RuntimeTuningKey::WalkingSpeed => fields.walking_speed = value,
+            RuntimeTuningKey::WanderPause => fields.wander_pause = value,
+            RuntimeTuningKey::CrossDisplayWanderChance => {
+                fields.cross_display_wander_chance = value
+            }
+            RuntimeTuningKey::IdleBeforeRest => fields.idle_before_rest = value,
+            RuntimeTuningKey::PointerAwarenessDistance => {
+                fields.pointer_awareness_distance = value
+            }
+            RuntimeTuningKey::EvadeSpeedScale => fields.evade_speed_scale = value,
+            RuntimeTuningKey::CatchArmDistance => fields.catch_arm_distance = value,
+            RuntimeTuningKey::CatchApproachSpeed => fields.catch_approach_speed = value,
+            RuntimeTuningKey::CatchWindow => fields.catch_window = value,
+            RuntimeTuningKey::HitRegionScale => fields.hit_region_scale = value,
+            RuntimeTuningKey::GaitCadence => fields.gait_cadence = value,
+        }
+        Self::new(
+            fields.walking_speed,
+            fields.wander_pause,
+            fields.cross_display_wander_chance,
+            fields.pointer_awareness_distance,
+            fields.catch_arm_distance,
+            fields.catch_approach_speed,
+            fields.catch_window,
+            fields.hit_region_scale,
+            fields.gait_cadence,
+            fields.evade_speed_scale,
+            fields.idle_before_rest,
+        )
+    }
+
     /// Evading has to outrun strolling, so both evade speeds scale with the
     /// walking speed. The floor keeps evasion usable at the slowest walk; it
     /// only takes over below roughly 43 pt/s.
@@ -197,5 +255,50 @@ impl Default for RuntimeTuning {
             1.4,
             STANDARD_IDLE_BEFORE_REST,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `get` and `with` have to name the same field for every key, or the panel
+    /// silently edits a different slider than the one under the cursor. Eleven
+    /// keys, eleven fields, and no compiler check that they line up.
+    #[test]
+    fn every_key_reads_back_what_it_wrote() {
+        let tuning = RuntimeTuning::default();
+        for key in TUNING_KEYS {
+            let (lower, upper) = tuning.limits(key);
+            // A value inside the bounds, so clamping cannot mask a mismatch.
+            let wanted = lower + (upper - lower) * 0.25;
+            let updated = tuning.with(key, wanted);
+            assert_eq!(updated.get(key), wanted, "{key:?} did not read back");
+
+            // And nothing else moved.
+            for other in TUNING_KEYS {
+                if other != key {
+                    assert_eq!(
+                        updated.get(other),
+                        tuning.get(other),
+                        "{key:?} also changed {other:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    /// The one bound that is not independent: arming a catch further away than
+    /// the pet can notice is meaningless, so lowering the notice distance has
+    /// to pull the catch arm down with it.
+    #[test]
+    fn narrowing_awareness_pulls_the_catch_arm_in() {
+        let wide = RuntimeTuning::default()
+            .with(RuntimeTuningKey::PointerAwarenessDistance, 360.0)
+            .with(RuntimeTuningKey::CatchArmDistance, 300.0);
+        assert_eq!(wide.get(RuntimeTuningKey::CatchArmDistance), 300.0);
+
+        let narrow = wide.with(RuntimeTuningKey::PointerAwarenessDistance, 140.0);
+        assert_eq!(narrow.get(RuntimeTuningKey::CatchArmDistance), 140.0);
     }
 }

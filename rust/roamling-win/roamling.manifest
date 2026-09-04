@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  SPDX-FileCopyrightText: 2026 GooBeom Jeoung
+  SPDX-License-Identifier: GPL-3.0-only
+
+  Comctl32 version 6, which is what the tuning panel's trackbars need to be
+  drawn the way the rest of Windows 11 is drawn. Without this the process gets
+  version 5 and the sliders come out in the Windows Classic style: grey, blocky,
+  and visibly not part of the same decade as the pet.
+
+  DPI awareness is deliberately not declared here. SetProcessDpiAwarenessContext
+  sets it as the first statement in main, before any window exists, and that is
+  the path the W0 spike measured on real mixed-DPI hardware.
+
+  (XML comments cannot contain a double hyphen. The linker reports that as
+  "failed to load and parse the manifest", which says nothing about where.)
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+        type="win32"
+        name="Microsoft.Windows.Common-Controls"
+        version="6.0.0.0"
+        processorArchitecture="*"
+        publicKeyToken="6595b64144ccf1df"
+        language="*"
+      />
+    </dependentAssembly>
+  </dependency>
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <!-- Windows 10 and 11. Without it the OS applies compatibility shims
+           meant for software written before they existed. The floor is
+           Windows 10 anyway: the hook command needs System32's curl.exe. -->
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+    </application>
+  </compatibility>
+</assembly>

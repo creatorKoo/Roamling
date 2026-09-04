@@ -26,6 +26,11 @@ pub const HAS_POSITION: &str = "roamling.position.exists";
 pub const VISUAL_PLACEMENT: &str = "roamling.visualPlacement";
 pub const CURSOR_AWARENESS: &str = "roamling.cursorAwareness";
 pub const SCALE: &str = "roamling.scale";
+/// macOS keeps the whole tuning as one JSON blob under `roamling.runtimeTuning`,
+/// because `UserDefaults` can hold data. This file is flat text, so the eleven
+/// values get eleven sub-keys under the same name -- which also means the file
+/// stays something a person can read and edit.
+pub const TUNING_PREFIX: &str = "roamling.runtimeTuning.";
 
 pub struct Settings {
     values: BTreeMap<String, String>,

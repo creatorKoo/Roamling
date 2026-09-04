@@ -6,8 +6,7 @@
 //! macOS puts this in the menu bar and builds it from `ShellMenu`, which holds
 //! the tree as data. That module is Swift, so this one carries its own small
 //! tree for now, in the same order and with the same words. What is missing is
-//! what the shell cannot do yet: the installed-pet list needs the catalogue,
-//! and "Behavior Tuning" needs a panel.
+//! what the shell cannot do yet: the installed-pet list needs the catalogue.
 //!
 //! The strings still come from the shared `.strings` files. See `strings.rs`.
 
@@ -43,6 +42,7 @@ pub const CMD_OPEN_PET_FOLDER: usize = 7;
 pub const CMD_COPY_DIAGNOSTICS: usize = 8;
 pub const CMD_ABOUT: usize = 9;
 pub const CMD_VIEW_SOURCE: usize = 10;
+pub const CMD_TUNING: usize = 11;
 /// One id per entry in `SCALE_CHOICES`, in that order.
 pub const CMD_SCALE_BASE: usize = 20;
 /// One block of ids per agent, so the handler can tell which one was picked
@@ -334,9 +334,36 @@ unsafe fn attach(parent: HMENU, submenu: HMENU, title: &str) {
 /// re-entrancy-sensitive -- see the note on `wndproc`.
 pub fn show_menu(hwnd: HWND, state: MenuState) -> usize {
     unsafe {
-        let Ok(menu) = CreatePopupMenu() else {
+        let Some(menu) = build(&state) else {
             return 0;
         };
+
+        let mut cursor = POINT::default();
+        let _ = GetCursorPos(&mut cursor);
+        // Without the foreground dance the menu will not dismiss when the user
+        // clicks away from it. A tray menu has needed both halves since Win95.
+        let _ = SetForegroundWindow(hwnd);
+        let chosen = TrackPopupMenu(
+            menu,
+            TPM_RETURNCMD | TPM_RIGHTBUTTON,
+            cursor.x,
+            cursor.y,
+            0,
+            hwnd,
+            None,
+        );
+        let _ = PostMessageW(hwnd, WM_NULL, WPARAM(0), LPARAM(0));
+        let _ = DestroyMenu(menu);
+        chosen.0 as usize
+    }
+}
+
+/// The tree itself, separated from showing it so a test can build one.
+///
+/// `DestroyMenu` on the returned handle frees the submenus with it.
+unsafe fn build(state: &MenuState) -> Option<HMENU> {
+    {
+        let menu = CreatePopupMenu().ok()?;
         let checked = |on: bool| if on { MF_CHECKED } else { MF_UNCHECKED };
         let separator = |menu| AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
 
@@ -400,6 +427,7 @@ pub fn show_menu(hwnd: HWND, state: MenuState) -> usize {
             let label = wide(localized(key));
             let _ = AppendMenuW(menu, MF_STRING | flag, id, PCWSTR(label.as_ptr()));
         }
+        command(menu, CMD_TUNING, localized("menu.tuning"));
 
         // One submenu per agent, the same shape `ShellMenu.agentItems` builds:
         // two status lines that cannot be clicked, then install-or-repair,
@@ -467,23 +495,118 @@ pub fn show_menu(hwnd: HWND, state: MenuState) -> usize {
         // cannot relabel its buttons, so it is an item instead.
         command(menu, CMD_VIEW_SOURCE, localized("menu.viewSource"));
         command(menu, CMD_QUIT, localized("menu.quit"));
+        Some(menu)
+    }
+}
 
-        let mut cursor = POINT::default();
-        let _ = GetCursorPos(&mut cursor);
-        // Without the foreground dance the menu will not dismiss when the user
-        // clicks away from it. A tray menu has needed both halves since Win95.
-        let _ = SetForegroundWindow(hwnd);
-        let chosen = TrackPopupMenu(
-            menu,
-            TPM_RETURNCMD | TPM_RIGHTBUTTON,
-            cursor.x,
-            cursor.y,
-            0,
-            hwnd,
-            None,
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn state() -> MenuState {
+        MenuState {
+            pet_name: "Mochi".into(),
+            covered: 14,
+            total: 16,
+            substituted: vec!["sit".into()],
+            placeholder: vec![],
+            scale: 1.0,
+            agents: [
+                (Agent::ClaudeCode, installer::Status::Installed, true),
+                (Agent::Codex, installer::Status::NotInstalled, false),
+            ],
+            roaming: true,
+            avoiding: true,
+            interactive: true,
+            visual: false,
+            cursor_aware: false,
+        }
+    }
+
+    /// Every command id the dispatcher answers, gathered off a real menu.
+    fn ids(menu: HMENU) -> Vec<usize> {
+        let mut found = Vec::new();
+        unsafe {
+            for index in 0..GetMenuItemCount(menu) {
+                let id = GetMenuItemID(menu, index);
+                if id != u32::MAX && id != 0 {
+                    found.push(id as usize);
+                }
+                let submenu = GetSubMenu(menu, index);
+                if !submenu.is_invalid() {
+                    found.extend(ids(submenu));
+                }
+            }
+        }
+        found
+    }
+
+    /// The tree is Win32 objects rather than a value, so the only way to know
+    /// it came out whole is to build one. This catches an id colliding with
+    /// another -- the ranges are hand-assigned -- and a submenu that failed to
+    /// attach, which would silently drop everything under it.
+    #[test]
+    fn the_tree_builds_with_every_command_reachable() {
+        let state = state();
+        let menu = unsafe { build(&state) }.expect("the menu did not build");
+        let found = ids(menu);
+        unsafe {
+            let _ = DestroyMenu(menu);
+        }
+
+        let agent_one = CMD_AGENT_BASE;
+        let agent_two = CMD_AGENT_BASE + CMD_AGENT_STRIDE;
+        let expected = [
+            CMD_ROAMING,
+            CMD_AVOID_POINTER,
+            CMD_INTERACTIONS,
+            CMD_VISUAL,
+            CMD_CURSOR_AWARE,
+            CMD_OPEN_PET_FOLDER,
+            CMD_COPY_DIAGNOSTICS,
+            CMD_ABOUT,
+            CMD_VIEW_SOURCE,
+            CMD_QUIT,
+            CMD_TUNING,
+            CMD_SCALE_BASE,
+            CMD_SCALE_BASE + SCALE_CHOICES.len() - 1,
+            // Installed, so it offers repair, remove and a test.
+            agent_one + CMD_AGENT_INSTALL,
+            agent_one + CMD_AGENT_REMOVE,
+            agent_one + CMD_AGENT_TEST,
+            // Not installed, so there is nothing to remove.
+            agent_two + CMD_AGENT_INSTALL,
+            agent_two + CMD_AGENT_TEST,
+        ];
+        for id in expected {
+            assert!(found.contains(&id), "{id} is not in the menu: {found:?}");
+        }
+        assert!(
+            !found.contains(&(agent_two + CMD_AGENT_REMOVE)),
+            "an agent with no hooks offered Remove"
         );
-        let _ = PostMessageW(hwnd, WM_NULL, WPARAM(0), LPARAM(0));
-        let _ = DestroyMenu(menu);
-        chosen.0 as usize
+
+        let mut seen = found.clone();
+        seen.sort_unstable();
+        let before = seen.len();
+        seen.dedup();
+        assert_eq!(before, seen.len(), "two items share a command id: {found:?}");
+    }
+
+    /// A caption reports; it must not be pickable, or "Animations: 14 of 16"
+    /// would return an id the dispatcher has never heard of.
+    #[test]
+    fn captions_cannot_be_chosen() {
+        let state = state();
+        let menu = unsafe { build(&state) }.expect("the menu did not build");
+        let title = unsafe { GetMenuState(menu, 0, MF_BYPOSITION) };
+        unsafe {
+            let _ = DestroyMenu(menu);
+        }
+        assert_ne!(title, u32::MAX, "the title line is missing");
+        assert!(
+            title & (MF_DISABLED.0 | MF_GRAYED.0) != 0,
+            "the title caption is clickable"
+        );
     }
 }

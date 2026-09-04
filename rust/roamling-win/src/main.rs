@@ -27,10 +27,12 @@ mod shell;
 mod sprite;
 mod strings;
 mod tray;
+mod tuning;
 
 use roamling_core::{
     look_frame_index, AnimationResolver, BehaviorState, DisplaySnapshot, InteractionOutput,
-    PetAnimationPlayer, PetRuntime, RuntimeTuning, TickInput, WorldPoint, WorldSize,
+    PetAnimationPlayer, PetRuntime, RuntimeTuning, RuntimeTuningKey, TickInput, WorldPoint,
+    WorldSize,
 };
 use roamling_agent::{installer, Agent, Receiver};
 use roamling_pet::PetAsset;
@@ -178,7 +180,7 @@ fn main() -> Result<()> {
     // cannot produce a pet too small to catch or too big to walk around.
     let scale = stored.number(settings::SCALE).unwrap_or(1.0).clamp(0.5, 2.0);
 
-    let mut pet = PetRuntime::new(start, RuntimeTuning::default(), seed);
+    let mut pet = PetRuntime::new(start, stored_tuning(&stored), seed);
     pet.set_displays(displays.clone());
     pet.set_object_size(WorldSize::new(BASE_WIDTH, BASE_HEIGHT));
     pet.set_flags(roaming, avoiding, interactive);
@@ -346,6 +348,13 @@ fn tick(hwnd: HWND, app: &mut App) {
 
     // The core decides whether the caret is worth a synchronous round trip;
     // the shell decides whether the user allowed one at all.
+    // Anything the tuning panel changed. It runs in this thread's message
+    // loop but never reaches into the runtime -- see `tuning.rs`.
+    if let Some(tuning) = tuning::take_pending() {
+        app.pet.apply_tuning(tuning, now);
+        remember_tuning(app, tuning);
+    }
+
     let wants_focus = app.pet.begin_tick(now) && app.cursor_aware;
     let queried = if wants_focus { focus::focus() } else { None };
 
@@ -461,6 +470,46 @@ fn refresh_luminance(app: &mut App, requests: &[roamling_core::LuminanceRequest]
     if !capture.unchanged {
         app.pet.set_luminance(capture.field);
     }
+}
+
+/// The eleven tunable values, under one sub-key each.
+///
+/// `RuntimeTuningKey` declares the wire order and this walks it, so a key added
+/// to the core is saved here without this function being touched.
+fn tuning_key(key: RuntimeTuningKey) -> String {
+    // The camelCase names the macOS blob uses, derived rather than tabulated.
+    let name = format!("{key:?}");
+    let mut out = String::with_capacity(name.len());
+    for (index, character) in name.chars().enumerate() {
+        if index == 0 {
+            out.extend(character.to_lowercase());
+        } else {
+            out.push(character);
+        }
+    }
+    format!("{}{out}", settings::TUNING_PREFIX)
+}
+
+fn remember_tuning(app: &mut App, tuning: RuntimeTuning) {
+    for key in roamling_core::TUNING_KEYS {
+        let name = tuning_key(key);
+        app.settings.set(&name, tuning.get(key));
+    }
+}
+
+/// Whatever was saved, re-clamped on the way in.
+///
+/// A missing value keeps the default rather than becoming zero: a settings file
+/// written by an older build has fewer keys, and a walking speed of nothing is
+/// a pet that never moves again.
+fn stored_tuning(stored: &Settings) -> RuntimeTuning {
+    let mut tuning = RuntimeTuning::default();
+    for key in roamling_core::TUNING_KEYS {
+        if let Some(value) = stored.number(&tuning_key(key)) {
+            tuning = tuning.with(key, value);
+        }
+    }
+    tuning
 }
 
 /// The pet came to rest somewhere worth keeping. Same three keys the macOS
@@ -732,6 +781,7 @@ unsafe fn dispatch(hwnd: HWND, msg: u32, lp: LPARAM, app: &mut App) -> bool {
                         app.cursor_aware = !app.cursor_aware;
                         app.settings.set(settings::CURSOR_AWARENESS, app.cursor_aware);
                     }
+                    tray::CMD_TUNING => tuning::show(app.pet.tuning()),
                     tray::CMD_OPEN_PET_FOLDER => shell::open_pet_folder(),
                     tray::CMD_COPY_DIAGNOSTICS => {
                         let text = app.log.text(now);
