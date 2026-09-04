@@ -19,8 +19,10 @@ public final class RuntimeTuningWindowController: NSWindowController {
         self.model = model
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 610),
-            styleMask: [.titled, .closable, .miniaturizable],
+            // Tall enough that nothing scrolls at the default size. The scroll
+            // view is the safety net for a longer translation, not the plan.
+            contentRect: NSRect(x: 0, y: 0, width: 580, height: 700),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
@@ -92,7 +94,33 @@ private struct RuntimeTuningView: View {
     @ObservedObject var model: RuntimeTuningViewModel
     let onDone: @MainActor () -> Void
 
+    /// The sliders scroll and the buttons do not.
+    ///
+    /// They used to share one fixed-height stack inside a window that could not
+    /// be resized, so the content wanted 660 points and had 610 -- and what got
+    /// cut off was the bottom row, which is where Reset and Done live. Nothing
+    /// reported it because nothing draws attention to a button that is simply
+    /// not there. Pinning the row means no added slider and no longer
+    /// translation can take it away again.
     var body: some View {
+        VStack(spacing: 0) {
+            ScrollView {
+                content.padding(20)
+            }
+            Divider()
+            HStack {
+                Button(localized("button.resetDefaults")) { model.reset() }
+                Spacer()
+                Button(localized("button.done"), action: onDone)
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+        }
+        .frame(minWidth: 560, minHeight: 420)
+    }
+
+    private var content: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text(localized("tuning.header"))
                 .font(.title2.weight(.semibold))
@@ -208,17 +236,8 @@ private struct RuntimeTuningView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-
-            Spacer(minLength: 0)
-            HStack {
-                Button(localized("button.resetDefaults")) { model.reset() }
-                Spacer()
-                Button(localized("button.done"), action: onDone)
-                    .keyboardShortcut(.defaultAction)
-            }
         }
-        .padding(20)
-        .frame(minWidth: 500, minHeight: 590)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -279,8 +298,11 @@ private struct TuningSliderRow: View {
             Slider(value: position, in: 0...1)
             Text(readout)
                 .monospacedDigit()
-                // Wide enough for the value and the authored one beside it.
-                .frame(width: 150, alignment: .trailing)
+                // Wide enough for the longest of both together --
+                // "240 pt/s (default 160 pt/s)" -- on one line. Wrapping it
+                // makes the rows different heights, which reads as a mistake.
+                .lineLimit(1)
+                .frame(width: 200, alignment: .trailing)
         }
     }
 }
