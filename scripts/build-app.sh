@@ -43,6 +43,10 @@ APP_DIR="$REPOSITORY_DIR/build/Roamling.app"
 mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 cp "$BIN_DIR/Roamling" "$APP_DIR/Contents/MacOS/Roamling"
 cp "$REPOSITORY_DIR/Support/Info.plist" "$APP_DIR/Contents/Info.plist"
+# Named by `CFBundleIconFile`. Committed rather than drawn here: an app bundle
+# needs the icon as a file, and a build should not depend on which emoji font
+# the machine happens to have. `scripts/build-icon.sh` redraws it.
+cp "$REPOSITORY_DIR/assets/Roamling.icns" "$APP_DIR/Contents/Resources/Roamling.icns"
 # Every target with resources produces its own bundle, and Bundle.module traps
 # at runtime when one is missing. Copy them all rather than naming each.
 for module_bundle in "$BIN_DIR"/*.bundle; do
