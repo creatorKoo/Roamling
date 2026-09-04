@@ -40,7 +40,6 @@ pub const CMD_QUIT: usize = 6;
 pub const CMD_OPEN_PET_FOLDER: usize = 7;
 pub const CMD_COPY_DIAGNOSTICS: usize = 8;
 pub const CMD_ABOUT: usize = 9;
-pub const CMD_VIEW_SOURCE: usize = 10;
 pub const CMD_TUNING: usize = 11;
 pub const CMD_RELOAD_PETS: usize = 12;
 pub const CMD_UPDATE_CHECK: usize = 13;
@@ -536,10 +535,9 @@ unsafe fn build(state: &MenuState) -> Option<HMENU> {
         );
 
         let _ = separator(menu);
+        // "View Source" is not here: it is a button inside About, which is
+        // where macOS puts it.
         command(menu, CMD_ABOUT, localized("menu.about"));
-        // The macOS About alert carries this as a second button. `MessageBoxW`
-        // cannot relabel its buttons, so it is an item instead.
-        command(menu, CMD_VIEW_SOURCE, localized("menu.viewSource"));
         command(menu, CMD_QUIT, localized("menu.quit"));
         Some(menu)
     }
@@ -616,7 +614,6 @@ mod tests {
             CMD_OPEN_PET_FOLDER,
             CMD_COPY_DIAGNOSTICS,
             CMD_ABOUT,
-            CMD_VIEW_SOURCE,
             CMD_QUIT,
             CMD_TUNING,
             CMD_RELOAD_PETS,

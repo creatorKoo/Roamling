@@ -15,6 +15,9 @@ use windows::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, OpenClipboard, SetClipboardData,
 };
 use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
+use windows::Win32::UI::Controls::{
+    TaskDialogIndirect, TASKDIALOGCONFIG, TASKDIALOG_BUTTON, TDF_ALLOW_DIALOG_CANCELLATION,
+};
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
     MessageBoxW, IDOK, MB_ICONINFORMATION, MB_ICONWARNING, MB_OKCANCEL, MB_OK, SW_SHOWNORMAL,
@@ -190,20 +193,76 @@ pub fn warn(hwnd: HWND, title: &str, body: &str) {
 /// user can act on it.
 const SOURCE_URL: &str = "https://github.com/creatorKoo/Roamling";
 
-/// `ShellPrompt.about`, as the dialog Windows has.
+/// `ShellPrompt.about`: the same two buttons the macOS alert has.
 ///
-/// The macOS alert carries a second button for the source. `MessageBoxW` cannot
-/// relabel its buttons, and a mislabelled one is worse than none, so the source
-/// is its own menu item instead. Same two actions, one level up.
+/// A task dialog rather than a message box, because `MessageBoxW` cannot
+/// relabel its buttons and this needs "View Source" beside "OK". Comctl32
+/// version 6 is what makes one available, and `roamling.manifest` already asks
+/// for it so the tuning panel's trackbars are drawn properly.
 pub fn about(hwnd: HWND) {
+    const OK: i32 = 1;
+    const SOURCE: i32 = 100;
+
+    let title = wide("Roamling");
+    let body = about_body();
+    let content = wide(&body);
+    let ok = wide(localized("button.ok"));
+    let source = wide(localized("menu.viewSource"));
+    // Two custom buttons rather than one custom and the common OK: a task
+    // dialog draws custom buttons before common ones, so making both custom is
+    // what puts them in the order the macOS alert uses.
+    let buttons = [
+        TASKDIALOG_BUTTON {
+            nButtonID: OK,
+            pszButtonText: PCWSTR(ok.as_ptr()),
+        },
+        TASKDIALOG_BUTTON {
+            nButtonID: SOURCE,
+            pszButtonText: PCWSTR(source.as_ptr()),
+        },
+    ];
+
+    let config = TASKDIALOGCONFIG {
+        cbSize: std::mem::size_of::<TASKDIALOGCONFIG>() as u32,
+        hwndParent: hwnd,
+        // Neither button is the cancel one, so without this the dialog could
+        // not be dismissed with Escape or the close box.
+        dwFlags: TDF_ALLOW_DIALOG_CANCELLATION,
+        pszWindowTitle: PCWSTR(title.as_ptr()),
+        pszMainInstruction: PCWSTR(title.as_ptr()),
+        pszContent: PCWSTR(content.as_ptr()),
+        cButtons: buttons.len() as u32,
+        pButtons: buttons.as_ptr(),
+        nDefaultButton: OK,
+        ..Default::default()
+    };
+
+    let mut pressed = 0i32;
+    match unsafe { TaskDialogIndirect(&config, Some(&mut pressed), None, None) } {
+        Ok(()) if pressed == SOURCE => view_source(),
+        Ok(()) => {}
+        // A task dialog needs comctl32 version 6 and `roamling.manifest` asks
+        // for it, so this is unreachable in a built app. Falling back to a
+        // plain box still beats a dialog that never appears.
+        Err(error) => {
+            println!("task dialog unavailable ({error}); falling back");
+            plain_about(hwnd, &body);
+        }
+    }
+}
+
+fn about_body() -> String {
     // Which build this is, first, because that is what someone opens this box
     // to find out -- "is the update I was told about actually running".
-    let body = format!(
+    format!(
         "{}\r\n\r\n{}",
         crate::strings::localized_format("about.version", &[env!("CARGO_PKG_VERSION")]),
         localized("alert.about.body")
-    );
-    let text = wide(&body);
+    )
+}
+
+fn plain_about(hwnd: HWND, body: &str) {
+    let text = wide(body);
     let title = wide("Roamling");
     unsafe {
         MessageBoxW(

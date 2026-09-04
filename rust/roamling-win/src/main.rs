@@ -947,7 +947,6 @@ unsafe fn perform(hwnd: HWND, chosen: usize, app: &mut App, now: f64) {
             }
         }
         tray::CMD_ABOUT => shell::about(hwnd),
-        tray::CMD_VIEW_SOURCE => shell::view_source(),
         // Agent ids live in blocks of ten from 100, below the
         // pet list -- so this arm has to be bounded at both ends.
         picked
