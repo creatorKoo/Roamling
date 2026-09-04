@@ -418,6 +418,7 @@ fn tick(hwnd: HWND, app: &mut App) {
         app.checking = false;
         match report.outcome {
             update::Outcome::UpToDate => {
+                println!("update check: already on {}", roamling_update::Version::current());
                 if report.asked {
                     shell::report(
                         hwnd,
