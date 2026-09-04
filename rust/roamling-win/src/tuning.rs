@@ -155,6 +155,34 @@ fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
+/// Puts the application icon on a window's title bar and in Alt-Tab.
+///
+/// Resource id 1 is the icon `build.rs` compiles in -- the same file the macOS
+/// app uses. `LoadImageW` is asked for each size rather than letting the shell
+/// scale one, because the icon carries an image drawn at each size and picking
+/// the right one is the whole point of having them.
+fn set_icon(window: HWND, instance: windows::Win32::Foundation::HMODULE) {
+    const ICON: PCWSTR = PCWSTR(1 as *const u16);
+    unsafe {
+        for (which, metric) in [
+            (ICON_SMALL, SM_CXSMICON),
+            (ICON_BIG, SM_CXICON),
+        ] {
+            let side = GetSystemMetrics(metric);
+            let Ok(icon) = LoadImageW(instance, ICON, IMAGE_ICON, side, side, LR_DEFAULTCOLOR)
+            else {
+                continue;
+            };
+            SendMessageW(
+                window,
+                WM_SETICON,
+                WPARAM(which as usize),
+                LPARAM(icon.0 as isize),
+            );
+        }
+    }
+}
+
 /// The authored value for this row, which is what the middle of the track means.
 fn anchor(row: &Row, tuning: &RuntimeTuning) -> f64 {
     let (lower, upper) = tuning.limits(row.key);
@@ -309,6 +337,11 @@ fn create(current: RuntimeTuning) -> windows::core::Result<HWND> {
             None,
         )?;
 
+        // A window does not pick up the executable's icon on its own: the
+        // resource is there, and the title bar still shows the default until
+        // something says otherwise. Both sizes, because the title bar takes the
+        // small one and Alt-Tab takes the large.
+        set_icon(window, instance);
         build(window, current);
         Ok(window)
     }
@@ -763,6 +796,21 @@ mod tests {
             );
             assert_eq!(notches, middle * 2);
         }
+    }
+
+    /// The window has to carry the application icon, or its title bar shows the
+    /// shell's default -- which is what happened when the icon was compiled in
+    /// but nothing put it on a window.
+    #[test]
+    fn the_panel_wears_the_app_icon() {
+        let window = create(RuntimeTuning::default()).expect("the panel did not build");
+        let small = unsafe { SendMessageW(window, WM_GETICON, WPARAM(ICON_SMALL as usize), LPARAM(0)) };
+        let big = unsafe { SendMessageW(window, WM_GETICON, WPARAM(ICON_BIG as usize), LPARAM(0)) };
+        unsafe {
+            let _ = DestroyWindow(window);
+        }
+        assert_ne!(small.0, 0, "no small icon; the title bar would show the default");
+        assert_ne!(big.0, 0, "no large icon; Alt-Tab would show the default");
     }
 
     /// The layout is Win32 objects, so the only way to know it came out whole
