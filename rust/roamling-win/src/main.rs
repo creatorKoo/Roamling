@@ -44,7 +44,10 @@ use std::cell::RefCell;
 use std::path::PathBuf;
 use std::time::Instant;
 use windows::core::{w, Result};
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, POINT, WPARAM};
+use windows::Win32::Foundation::{
+    CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HWND, LPARAM, LRESULT, POINT, WPARAM,
+};
+use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::{
     SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
@@ -136,6 +139,18 @@ thread_local! {
 }
 
 fn main() -> Result<()> {
+    // One pet per desktop. Without this an installed copy and one started by
+    // hand both run: two Mochis, two tray icons, and only one of them able to
+    // hold the agent ports -- and quitting from a tray menu leaves the other
+    // one wandering, which is exactly how this was found.
+    //
+    // `Local\` scopes the name to the logon session, so two users signed in at
+    // once still get a pet each.
+    if !claim_single_instance() {
+        println!("another copy of Roamling is already running");
+        return Ok(());
+    }
+
     // Before any window exists, or the process is stuck with the wrong answer.
     unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)? };
 
@@ -343,7 +358,48 @@ fn main() -> Result<()> {
             DispatchMessageW(&message);
         }
     }
-    Ok(())
+    // Teardown, in an order this file chooses rather than whatever order a
+    // thread-local destructor would run in at process exit.
+    //
+    // The GPU objects go first and explicitly. Two copies were once found still
+    // alive minutes after being told to quit, both of them with a live desktop
+    // duplication -- and a window that outlives its process is a pet that will
+    // not go away. Whether releasing DXGI from the exit path is what wedged
+    // them was never pinned down, which is the reason for the `exit` below
+    // rather than an excuse for skipping this.
+    if let Some(mut app) = APP.with(|slot| slot.borrow_mut().take()) {
+        app.capturer.release();
+        drop(app);
+    }
+    // And then leave, deterministically. A Win32 program that has closed its
+    // window is finished, and there is no answer a driver can give during
+    // teardown that should be able to keep the process -- and the pet -- on
+    // screen. Nothing after this point needs to run.
+    std::process::exit(0);
+}
+
+/// Whether this process is the first one.
+fn claim_single_instance() -> bool {
+    let name = w!(r"Local\Roamling.SingleInstance");
+    unsafe {
+        match CreateMutexW(None, true, name) {
+            Ok(handle) => {
+                if GetLastError() == ERROR_ALREADY_EXISTS {
+                    let _ = CloseHandle(handle);
+                    false
+                } else {
+                    // The handle is deliberately not closed. `HANDLE` is a
+                    // plain value with no destructor, so simply dropping it
+                    // here leaves the mutex held -- which is the lifetime
+                    // wanted, and the kernel releases it when the process ends.
+                    true
+                }
+            }
+            // Something is wrong with the kernel object, not with us. Running
+            // is a better answer than refusing to start.
+            Err(_) => true,
+        }
+    }
 }
 
 fn create_window() -> Result<HWND> {
@@ -1008,8 +1064,11 @@ unsafe fn perform(hwnd: HWND, chosen: usize, app: &mut App, now: f64) {
             // grows next to an edge.
         }
         tray::CMD_QUIT => {
-            tray::remove(hwnd);
-            PostQuitMessage(0);
+            // Destroy the window rather than only posting the quit. The pet
+            // then leaves the screen at once, instead of waiting for the
+            // process to finish tidying up -- which is the difference between
+            // "it closed" and "it is still there". `WM_DESTROY` posts the quit.
+            let _ = DestroyWindow(hwnd);
         }
         _ => {}
     }
