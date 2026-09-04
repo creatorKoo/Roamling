@@ -11,9 +11,14 @@
 //! placement it had, which is the same thing that happens on macOS when
 //! Accessibility is not granted.
 //!
+//! The same file answers the other window question -- where the work the agent
+//! is doing probably is -- because both are "measure the foreground window" and
+//! macOS only splits them because one needs a permission and the other does not.
+//! Windows needs neither.
+//!
 //! It reads rectangles. Not text, not window titles, not what is typed.
 
-use roamling_core::{FocusSnapshot, WorldRect};
+use roamling_core::{FocusSnapshot, LocationHint, WorldRect};
 use windows::Win32::Foundation::{HWND, POINT, RECT};
 use windows::Win32::Graphics::Dwm::{DwmGetWindowAttribute, DWMWA_EXTENDED_FRAME_BOUNDS};
 use windows::Win32::Graphics::Gdi::ClientToScreen;
@@ -21,6 +26,31 @@ use windows::Win32::UI::WindowsAndMessaging::{
     GetForegroundWindow, GetGUIThreadInfo, GetWindowRect,
     GetWindowThreadProcessId, GUITHREADINFO,
 };
+
+/// Roughly where the user is working, for an event that arrived without a place.
+///
+/// Ported from `MacWindowProvider.currentActivityLocationHint`, down to the
+/// 0.55 confidence and the size floor: a window smaller than this is a palette
+/// or a notification, and sitting next to one says nothing about where the work
+/// is. It never reads a window title, and it never reads any window but the
+/// foreground one.
+pub fn activity_location_hint() -> Option<LocationHint> {
+    let foreground = unsafe { GetForegroundWindow() };
+    if foreground.is_invalid() {
+        return None;
+    }
+    // Roamling's own overlay must not be mistaken for the user's work.
+    let mut owner = 0u32;
+    unsafe { GetWindowThreadProcessId(foreground, Some(&mut owner)) };
+    if owner == std::process::id() {
+        return None;
+    }
+    let frame = frame_of(foreground)?;
+    if frame.size.width < 120.0 || frame.size.height < 100.0 {
+        return None;
+    }
+    Some(LocationHint::new(Some(frame), 0.55))
+}
 
 fn to_world(rect: RECT) -> Option<WorldRect> {
     let width = (rect.right - rect.left) as f64;

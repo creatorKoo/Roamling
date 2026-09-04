@@ -8,6 +8,7 @@
 //! is no second consumer here, so they are performed directly.
 
 use crate::strings::localized;
+use roamling_agent::Agent;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HANDLE, HWND};
 use windows::Win32::System::DataExchange::{
@@ -16,7 +17,7 @@ use windows::Win32::System::DataExchange::{
 use windows::Win32::System::Memory::{GlobalAlloc, GlobalLock, GlobalUnlock, GMEM_MOVEABLE};
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
-    MessageBoxW, MB_ICONINFORMATION, MB_OK, SW_SHOWNORMAL,
+    MessageBoxW, IDOK, MB_ICONINFORMATION, MB_ICONWARNING, MB_OKCANCEL, MB_OK, SW_SHOWNORMAL,
 };
 
 fn wide(text: &str) -> Vec<u16> {
@@ -89,6 +90,98 @@ pub fn copy_to_clipboard(hwnd: HWND, text: &str) -> bool {
         }
         let _ = CloseClipboard();
         placed
+    }
+}
+
+/// Which strings belong to which agent.
+///
+/// Written out rather than built from the id, for the reason `ShellPrompt`
+/// gives: a constructed key that is missing shows up as the key itself on
+/// screen, and nothing greps for a name that was never typed.
+pub struct AgentCopy {
+    pub install_title: &'static str,
+    pub install_body: &'static str,
+    pub remove_title: &'static str,
+    pub remove_body: &'static str,
+    pub installed: &'static str,
+    pub removed: &'static str,
+    pub installed_detail: &'static str,
+    pub removed_detail: &'static str,
+    pub failure: &'static str,
+}
+
+pub fn agent_copy(agent: Agent) -> AgentCopy {
+    match agent {
+        Agent::ClaudeCode => AgentCopy {
+            install_title: "alert.claude.install.title",
+            install_body: "alert.claude.install.body",
+            remove_title: "alert.claude.remove.title",
+            remove_body: "alert.claude.remove.body",
+            installed: "result.claude.installed",
+            removed: "result.claude.removed",
+            installed_detail: "result.detail.claude",
+            removed_detail: "result.detail.claude",
+            failure: "error.claude.settings",
+        },
+        Agent::Codex => AgentCopy {
+            install_title: "alert.codex.install.title",
+            install_body: "alert.codex.install.body",
+            remove_title: "alert.codex.remove.title",
+            remove_body: "alert.codex.remove.body",
+            installed: "result.codex.installed",
+            removed: "result.codex.removed",
+            installed_detail: "result.detail.codex.installed",
+            removed_detail: "result.detail.codex.removed",
+            failure: "error.codex.hooks",
+        },
+    }
+}
+
+/// Asks before doing something to the user's own files, and returns whether to
+/// go ahead.
+///
+/// `ShellPrompt.confirmation(for:)` labels the confirming button "Install" or
+/// "Remove". `MessageBoxW` cannot relabel its buttons, so this is OK/Cancel --
+/// which is fine, because the body says exactly what is about to be written.
+pub fn confirm(hwnd: HWND, title: &'static str, body: &'static str) -> bool {
+    let text = wide(localized(body));
+    let caption = wide(localized(title));
+    let answer = unsafe {
+        MessageBoxW(
+            hwnd,
+            PCWSTR(text.as_ptr()),
+            PCWSTR(caption.as_ptr()),
+            MB_OKCANCEL | MB_ICONINFORMATION,
+        )
+    };
+    answer == IDOK
+}
+
+/// Says what happened. The macOS alert has no buttons beyond dismissal either.
+pub fn report(hwnd: HWND, title: &str, body: &str) {
+    let text = wide(body);
+    let caption = wide(title);
+    unsafe {
+        MessageBoxW(
+            hwnd,
+            PCWSTR(text.as_ptr()),
+            PCWSTR(caption.as_ptr()),
+            MB_OK | MB_ICONINFORMATION,
+        );
+    }
+}
+
+/// The same, for something that did not work.
+pub fn warn(hwnd: HWND, title: &str, body: &str) {
+    let text = wide(body);
+    let caption = wide(title);
+    unsafe {
+        MessageBoxW(
+            hwnd,
+            PCWSTR(text.as_ptr()),
+            PCWSTR(caption.as_ptr()),
+            MB_OK | MB_ICONWARNING,
+        );
     }
 }
 

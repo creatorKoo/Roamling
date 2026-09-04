@@ -52,6 +52,7 @@
 "result.detail.codex.removed" = "Restart Codex sessions to stop using the removed hooks.";
 "error.pet.load" = "Couldn’t load this pet";
 "error.claude.settings" = "Couldn’t update Claude Code settings";
+"error.codex.hooks" = "Couldn’t update Codex hooks";
 "accessibility.status.on" = "Accessibility: Granted";
 "accessibility.status.off" = "Accessibility: Not granted";
 "accessibility.enable" = "Grant Accessibility…";

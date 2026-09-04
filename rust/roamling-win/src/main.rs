@@ -37,6 +37,7 @@ use roamling_core::{
 use roamling_agent::{installer, Agent, Receiver};
 use roamling_pet::{package, PetAsset};
 use settings::Settings;
+use strings::localized;
 use sprite::Surface;
 use std::cell::RefCell;
 use std::path::PathBuf;
@@ -373,7 +374,13 @@ fn tick(hwnd: HWND, app: &mut App) {
         }
     }
     app.deferred = still_waiting;
-    for event in pending {
+    for mut event in pending {
+        // Where the work probably is, for an event that did not say. The query
+        // costs a round trip, so the core decides when it is worth making --
+        // the same rule, in the same place, as `handleActivityEvent`.
+        if event.location_hint.is_none() && roamling_core::wants_window_hint(event.kind) {
+            event.location_hint = focus::activity_location_hint();
+        }
         println!("{:7.1}s  agent {:?} {:?}", now, event.kind, event.source_id);
         app.pet.handle_activity_event(event, now);
     }
@@ -598,7 +605,8 @@ fn test_reaction(app: &mut App, agent: Agent, now: f64) {
         event.context = Some(UserContext::Working);
         event
     };
-    let started = make(CompanionEventKind::ActivityStarted, now);
+    let mut started = make(CompanionEventKind::ActivityStarted, now);
+    started.location_hint = focus::activity_location_hint();
     let finished = make(CompanionEventKind::Achievement, now + 3.0);
     println!("{:7.1}s  test reaction for {}", now, agent.display_name());
     app.pet.handle_activity_event(started, now);
@@ -870,7 +878,9 @@ unsafe fn dispatch(hwnd: HWND, msg: u32, lp: LPARAM, app: &mut App) -> bool {
                                     }
                                     adopt(app, loaded.asset, Some(path));
                                 }
-                                Err(error) => println!("{}: {error}", path.display()),
+                                Err(error) => {
+                                    shell::warn(hwnd, localized("error.pet.load"), &error)
+                                }
                             }
                         }
                     }
@@ -891,18 +901,44 @@ unsafe fn dispatch(hwnd: HWND, msg: u32, lp: LPARAM, app: &mut App) -> bool {
                         let index = (picked - tray::CMD_AGENT_BASE) / tray::CMD_AGENT_STRIDE;
                         let action = (picked - tray::CMD_AGENT_BASE) % tray::CMD_AGENT_STRIDE;
                         if let Some((agent, token)) = app.tokens.get(index) {
-                            let agent = *agent;
+                            let (agent, token) = (*agent, token.clone());
                             if action == tray::CMD_AGENT_TEST {
                                 test_reaction(app, agent, now);
                             } else {
-                                let outcome = if action == tray::CMD_AGENT_REMOVE {
-                                    installer::remove(agent)
+                                let removing = action == tray::CMD_AGENT_REMOVE;
+                                let copy = shell::agent_copy(agent);
+                                // It is the user's own config file, so they are
+                                // told what is about to be written to it before
+                                // anything is. `ShellPrompt.confirmation(for:)`.
+                                let (title, body) = if removing {
+                                    (copy.remove_title, copy.remove_body)
                                 } else {
-                                    installer::install(agent, token)
+                                    (copy.install_title, copy.install_body)
                                 };
-                                match outcome {
-                                    Ok(()) => println!("{} hooks updated", agent.display_name()),
-                                    Err(error) => println!("{}: {error}", agent.display_name()),
+                                if shell::confirm(hwnd, title, body) {
+                                    let outcome = if removing {
+                                        installer::remove(agent)
+                                    } else {
+                                        installer::install(agent, &token)
+                                    };
+                                    match outcome {
+                                        Ok(()) => shell::report(
+                                            hwnd,
+                                            localized(if removing {
+                                                copy.removed
+                                            } else {
+                                                copy.installed
+                                            }),
+                                            localized(if removing {
+                                                copy.removed_detail
+                                            } else {
+                                                copy.installed_detail
+                                            }),
+                                        ),
+                                        Err(error) => {
+                                            shell::warn(hwnd, localized(copy.failure), &error)
+                                        }
+                                    }
                                 }
                             }
                         }

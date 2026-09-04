@@ -1075,7 +1075,7 @@ Window / Focus / Capture. 5절 참조.
 |---|---|---|
 | **Capture** (빈 공간) | ✅ DXGI Duplication | ✅ 실측으로 확인 |
 | **Focus** (캐럿) | ✅ `focus.rs`, `GetGUIThreadInfo` | ✅ **W5b로 열렸다** — 아래 |
-| **Window** | ❌ | — 소비자가 없다 |
+| **Window** | ✅ `focus.rs` | ✅ **W5b로 열렸다** — 소비자가 생겼다 |
 
 *아래 진단은 W5b 이전 상태다. Focus 행은 W5b 절이 뒤집는다.*
 
@@ -1174,8 +1174,30 @@ JSON을 망가뜨린다. 엔드포인트는 payload를 못 읽어도 204를 돌�
 
 - **캐럿.** `is_watching`이 참이 될 수 있으므로 `focus.rs`가 실제로 불린다. 트레이의
   "커서 인식" 토글이 되살아났다.
-- **작업 자리.** 이벤트에 붙는 위치 힌트의 소비자가 생겼다. 다만 창 provider는 아직
-  없어서 힌트는 비어 있다 — W5의 마지막 남은 조각이다.
+- **작업 자리.** 이벤트에 붙는 위치 힌트의 소비자가 생겼고, 창 provider도 같이 붙였다.
+  `MacWindowProvider.currentActivityLocationHint`의 이식이라 confidence 0.55와 최소
+  크기(120x100)까지 같다 — 그보다 작은 창은 팔레트나 알림이고, 그 옆에 앉는 것은 작업
+  자리에 대해 아무것도 말하지 않는다. **창 제목은 읽지 않고 포그라운드 창 하나만 잰다.**
+  질의를 할지 말지는 `wants_window_hint`가 정한다 — 규칙과 호출을 같은 자리에 두는
+  `handleActivityEvent`의 배치 그대로다.
+
+  macOS는 focus와 window를 다른 파일로 나눈다. 한쪽만 권한을 요구하기 때문인데 Windows는
+  둘 다 요구하지 않으므로 `focus.rs` 하나가 답한다.
+
+#### 훅 설치는 물어보고 나서 한다
+
+macOS는 `ShellPrompt.confirmation(for:)`으로 먼저 묻고 `integrationResult`로 결과를
+알린다. Windows 쪽은 처음에 콘솔에 `println!`만 했는데, **release 빌드에는 콘솔이 없다** —
+사용자 입장에서는 눌러도 아무 일도 안 일어나는 항목이었다. 게다가 그 동작은 사용자의
+`~/.claude/settings.json`을 쓴다.
+
+이제 같은 문구로 묻고, 같은 문구로 결과를 알린다. `MessageBoxW`가 버튼 이름을 못 바꾸므로
+확인 버튼은 "설치"가 아니라 "확인"이다 — 본문이 무엇을 쓸지 정확히 말하므로 그걸로 족하다.
+
+**`error.codex.hooks`를 새로 넣었다.** Swift 쪽 `integrationResult`는 실패 제목으로 항상
+`error.claude.settings`를 쓴다 — Codex 설치가 실패해도 "Claude Code 설정을 바꾸지
+못했습니다"가 뜬다. Windows는 새 키를 쓰고, 두 `.strings`에 다 넣었다. **맥 할 일**: Swift
+쪽도 이 키를 쓰도록 고칠 것.
 
 ### W6 — 패키징
 

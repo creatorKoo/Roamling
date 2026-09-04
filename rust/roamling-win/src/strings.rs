@@ -209,6 +209,13 @@ mod tests {
             "status.receiver.ready",
             "action.install",
             "action.testReaction",
+            "alert.claude.install.body",
+            "alert.codex.install.body",
+            "result.claude.installed",
+            "result.detail.codex.removed",
+            "error.pet.load",
+            "error.claude.settings",
+            "error.codex.hooks",
         ] {
             assert!(en.contains_key(key), "{key} is gone from en.lproj");
         }

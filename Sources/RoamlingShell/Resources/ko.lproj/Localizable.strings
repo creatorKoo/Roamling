@@ -52,6 +52,7 @@
 "result.detail.codex.removed" = "제거한 훅을 더 쓰지 않으려면 Codex 세션을 재시작하세요.";
 "error.pet.load" = "이 펫을 불러오지 못했습니다";
 "error.claude.settings" = "Claude Code 설정을 바꾸지 못했습니다";
+"error.codex.hooks" = "Codex 훅을 바꾸지 못했습니다";
 "accessibility.status.on" = "손쉬운 사용: 허용됨";
 "accessibility.status.off" = "손쉬운 사용: 허용 안 됨";
 "accessibility.enable" = "손쉬운 사용 허용…";
