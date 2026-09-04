@@ -54,10 +54,31 @@ done
 # instead of the binary's cdhash, so macOS keeps a granted Accessibility
 # permission across rebuilds. Ad-hoc resets it on every build.
 CODESIGN_IDENTITY="${ROAMLING_CODESIGN_IDENTITY:--}"
+# Ad-hoc is refused by default, and that is not caution -- it is the only way
+# to not cost the user something.
+#
+# An ad-hoc signature makes the designated requirement the binary's cdhash, so
+# macOS treats every build as a different app and drops the Accessibility and
+# Screen Recording grants. Getting them back is a trip to System Settings, per
+# permission, by hand. There is no warning and nothing in the app looks wrong:
+# the pet simply stops seeing the caret and stops judging the screen.
+#
+# It used to warn and carry on, which meant one build run with the environment
+# slightly wrong cost the user that trip. Say no instead, and make saying yes
+# something a person has to type.
+if [[ "$CODESIGN_IDENTITY" == "-" && "${ROAMLING_ALLOW_ADHOC:-0}" != "1" ]]; then
+  echo "No signing identity, so this build would be ad-hoc." >&2
+  echo "That resets Accessibility and Screen Recording, which you would have to" >&2
+  echo "grant again by hand in System Settings." >&2
+  echo >&2
+  echo "Set ROAMLING_CODESIGN_IDENTITY (see scripts/signing.env.example), or" >&2
+  echo "ROAMLING_ALLOW_ADHOC=1 if you genuinely want a throwaway build." >&2
+  exit 1
+fi
 if command -v codesign >/dev/null 2>&1; then
   codesign --force --deep --sign "$CODESIGN_IDENTITY" "$APP_DIR"
   if [[ "$CODESIGN_IDENTITY" == "-" ]]; then
-    echo "Signed ad-hoc. Set ROAMLING_CODESIGN_IDENTITY to keep TCC grants across builds."
+    echo "Signed ad-hoc by request. Launching this will reset TCC grants."
   else
     echo "Signed with identity: $CODESIGN_IDENTITY"
   fi
