@@ -122,27 +122,61 @@ import하지 않는다.** macOS SDK에 다 있어서 컴파일러는 이걸 못 
 world · topology · emptiness · 배치 · attention · 반응 · 튜닝 · 활동 지휘 · tick 본체 ·
 애니메이션 해석까지. macOS 앱이 그것을 쓰고 있고 `RoamlingRuntime`은 667줄만 남았다 —
 타이머 · UserDefaults · 진단 파일 · agent 구독 · 스프라이트 시트, 즉 결정이 아닌 것들뿐이다.
-**현재 게이트는 W4(Windows 최소 루프)이고, 착수 순서와 호출 예시는 `docs/windows.md`의
-W4 절에 있다.**
+**Windows 게이트는 W7까지 전부 닫혔다 (2026-09-04).** W4 최소 루프 · W5 provider 셋 ·
+W5b agent 연동 · W6 패키징(Inno Setup, per-user) · W7 자동 업데이트(공유 Rust 업데이터 +
+Ed25519 서명)까지 실물로 돈다. 첫 릴리스 `v0.2.0`이 나가 있고 자동 업데이트가 켜져 있다.
+각 게이트의 실측과 결정은 `docs/windows.md`에 있다.
 
-## 맥에서 해야 하는 일 (2026-09-04 기준 4건)
+## 맥에서 해야 하는 일 (2026-09-04)
 
 전부 Windows 실사용에서 나왔지만 **Windows 문제가 아니다.** 결정 로직과 튜닝 기본값·경계는
-공유 코어에 있고, 그것을 `tuning.txt` 등 differential fixture가 잡는다 — 그 fixture는
-**macOS에서 Swift 원본을 돌려 만든 기록**이라 Windows에서는 고칠 수도 다시 만들 수도 없다.
+공유 코어에 있고, 문자열은 두 플랫폼이 같은 `.strings`를 읽는다.
 
-| | 무엇 | 어디에 적혀 있나 |
+### A. 동작 — fixture 재생성이 필요하다
+
+값이 실제로 바뀌므로 **정당한 재생성이다**(통과시키려고 다시 만드는 것과 다르다).
+순서는 넷 다 같다: **Swift 정본 수정 → Rust 동기화 → fixture 재생성 →
+`RuntimeTrace.txt` 재생성.** 기본 튜닝이 그 40초 녹화의 입력이라 A2만으로도 어긋난다.
+
+| | 무엇 | 어디에 |
 |---|---|---|
-| 1 | **착지 동작이 아무에게도 안 보인다.** 놓으면 `Dropped`(0.84초)가 한 tick도 못 버티고 커서 회피로 넘어간다 — `handle_pointer`가 `is_held()`만 거부한다 | `docs/behavior-flow.md` 7절 |
-| 2 | **걷기 사이 멈춤** 기본 12 → 40, 경계 2~40 → 2~78 | `docs/windows.md` "맥에서 할 일" |
-| 3 | **피하는 거리**를 인식 거리에 비례하게. `pointer_configuration()`의 상수 100/50 → 인식 거리의 100/170·50/170 (기본 170에서 지금과 동일) | 같은 절 |
-| 4 | **피하기에 이력이 없다.** 반경을 1픽셀 벗어나면 즉시 멈춰서 두어 픽셀만 밀리고 다시 앉는다. 멈춤 문턱을 시작 문턱의 1.35배 + 최소 0.4초 유지 | 같은 절 |
+| A1 | **착지 동작이 아무에게도 안 보인다.** 놓으면 `Dropped`(0.84초)가 한 tick도 못 버티고 커서 회피로 넘어간다 — `handle_pointer`가 `is_held()`만 거부한다 | `docs/behavior-flow.md` 7절 |
+| A2 | **걷기 사이 멈춤** 기본 12 → 40, 경계 2~40 → 2~78 | `docs/windows.md` "맥에서 할 일" |
+| A3 | **피하는 거리**를 인식 거리에 비례하게. `pointer_configuration()`의 상수 100/50 → 인식 거리의 `100/170`·`50/170`. 기본 170에서 정확히 지금 값이 나오므로 **기본 동작은 안 바뀐다** | 같은 절 |
+| A4 | **피하기에 이력이 없다.** 반경을 1픽셀 벗어나면 즉시 멈춰 두어 픽셀만 밀리고 다시 앉는다. 멈춤 문턱을 시작의 1.35배 + 최소 0.4초 유지 | 같은 절 |
 
-3과 4는 **같이 가야** 한다 — 반경만 넓히면 넓어진 경계에서 똑같이 딱 멈춘다.
+**A3와 A4는 같이 가야 한다** — 반경만 넓히면 넓어진 경계에서 똑같이 딱 멈춘다.
 
-값을 바꾸는 2~4는 fixture 재생성이 필요하고, **그건 값이 실제로 바뀌었으니 정당한
-재생성이다**(통과시키려고 다시 만드는 것과 다르다). 순서: Swift 정본 수정 → Rust 동기화 →
-fixture 재생성 → `RuntimeTrace.txt` 재생성.
+### B. 공유 문자열인데 Swift가 아직 안 쓰는 키 셋
+
+Windows 쪽에서 넣었고 두 `.strings`에 다 있다. Swift 참조는 아직 0곳이다.
+
+| | 무엇 |
+|---|---|
+| B1 | **정보 창에 버전.** `ShellPrompt.about`이 `about.version`을 본문 첫 줄에 넣는다. macOS는 `Bundle.main` 의 `CFBundleShortVersionString` (`Support/Info.plist`) |
+| B2 | **Codex 실패 제목.** `ShellPrompt.integrationResult`가 실패 제목으로 항상 `error.claude.settings`를 쓴다 — Codex 설치가 실패해도 "Claude Code 설정을 바꾸지 못했습니다"가 뜬다. `failure` 인자를 받아 Codex는 `error.codex.hooks`를 쓰게 한다 |
+| B3 | **`Support/Info.plist`의 버전은 `rust/Cargo.toml`을 따라간다.** 0.1.0에 멈춰 있던 것을 0.2.0으로 맞춰 뒀다. 릴리스마다 같이 올린다 |
+
+### C. 패널 손질 — fixture와 무관하다
+
+Windows 패널에만 들어간 표현이라 SwiftUI 쪽은 아직 옛 모습이다.
+
+| | 무엇 |
+|---|---|
+| C1 | **슬라이더가 기본값에서 시작하게.** 트랙을 기본값에서 반으로 갈라 양쪽 눈금 수를 같게 한다. 경계가 기본값을 중심으로 대칭이 아니라, 지금은 "인식 거리"가 왼쪽에서 7분의 1 지점에 있다 |
+| C2 | **움직인 슬라이더는 원래 값을 같이 보여준다.** `tuning.offDefault` — `걷기 사이 멈춤  40초 (기본 12초)` |
+
+C1은 A2가 들어가면 경계가 대칭에 가까워지므로 급하지 않다.
+
+### D. 자동 업데이트 macOS 절반 — 지출 결정이 걸려 있다
+
+`rust/roamling-update`가 결정 로직을 다 들고 있고 양 플랫폼 공유다. macOS가 할 일은
+uniffi로 그것을 가져다 쓰고 `.app` 교체와 재실행을 쓰는 것 — 대략 80줄이다. 그러면
+`.github/workflows/release.yml`에 mac 잡 한 개가 붙고 같은 appcast에 줄 하나가 는다.
+
+**막는 것은 코드가 아니라 서명이다.** 배포 가능한 `.app`은 Developer ID 서명 + notarize가
+필요하고 그건 **Apple Developer Program 연 $99**가 있어야 나온다. 빌드와 테스트를 CI에서
+돌리는 것은 공개 저장소라 무료다. 자세한 것은 `docs/windows.md` W7.
 
 포팅 규칙은 그대로다: **살아 있는 구현은 항상 1벌.** Swift 원본은 대조군으로 Core에
 남아 있고(`MovementController` · `PlacementDirector` · `AttentionModel` 등), 단위마다
