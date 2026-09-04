@@ -177,6 +177,15 @@ pub struct PetRuntime {
     catch_armed_until: f64,
     caught_animation_until: f64,
     click_reaction_until: f64,
+    /// How long the pet is allowed to land for before it notices the cursor.
+    ///
+    /// The cursor is on top of the pet the instant it is dropped, because that
+    /// is where it was put down -- so proximity there is a by-product of the
+    /// gesture, not a signal. Without this the pointer input arrives on the
+    /// very next tick and `Dropped` never survives one, which made the landing
+    /// animation unreachable by construction: a 0.84 s state and an authored
+    /// 0.50 s track that nobody had ever seen. `docs/behavior-flow.md` 7.
+    landing_until: f64,
     is_click_reaction_pending: bool,
     is_dragging: bool,
     drag_offset: WorldVector,
@@ -222,6 +231,7 @@ impl PetRuntime {
             catch_armed_until: 0.0,
             caught_animation_until: 0.0,
             click_reaction_until: 0.0,
+            landing_until: 0.0,
             is_click_reaction_pending: false,
             is_dragging: false,
             drag_offset: WorldVector::ZERO,
@@ -361,6 +371,7 @@ impl PetRuntime {
     pub fn clear_click_reaction(&mut self, clear_caught_transition: bool) {
         self.click_reaction_until = 0.0;
         self.is_click_reaction_pending = false;
+        self.landing_until = 0.0;
         if clear_caught_transition {
             self.caught_animation_until = 0.0;
         }
@@ -547,6 +558,10 @@ impl PetRuntime {
                 delta_time,
             ) {
                 // Rest owns movement until input wakes the creature.
+            } else if now < self.landing_until {
+                // Landing. The cursor is only where it is because the user put
+                // the pet there, so the pet finishes the animation first.
+                self.apply_intent(&intent, now, delta_time);
             } else if self.is_pointer_avoidance_enabled
                 && !self.escape_outranks_pointer(&intent, decision.proximity)
             {
@@ -1331,6 +1346,10 @@ impl PetRuntime {
         let clamped = self.world.clamp(self.movement.position(), self.object_size);
         self.movement.teleport(clamped, true);
         self.catch_armed_until = 0.0;
+        // The whole of `Dropped`, so the pet lands and then notices the user a
+        // beat later. Reusing the state's own length keeps this from becoming
+        // a second number that has to be kept in step with it.
+        self.landing_until = now + crate::behavior::timing::DROPPED;
         self.next_wander_at = now + 1.4;
         self.persist_position = true;
     }
