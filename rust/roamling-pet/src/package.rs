@@ -393,6 +393,15 @@ fn safe_asset_path(path: &str, package: &Path) -> Result<PathBuf, String> {
     if path.is_empty() || path.starts_with('/') || path.starts_with('~') || path.starts_with('\\') {
         return Err(unsafe_path());
     }
+    // A drive letter is checked by hand rather than left to `Component`,
+    // because `Component::Prefix` only exists on Windows: on Unix the same
+    // string parses as a directory literally named `C:`, so a manifest written
+    // on Windows would be refused there and quietly accepted here. A pet
+    // package is the same file on both machines and gets the same answer.
+    let bytes = path.as_bytes();
+    if bytes.len() >= 2 && bytes[1] == b':' && bytes[0].is_ascii_alphabetic() {
+        return Err(unsafe_path());
+    }
     let relative = Path::new(path);
     // Windows adds two forms Unix does not have: `C:\...` is a prefix, and a
     // leading separator is a root. Both escape the package.
@@ -477,6 +486,10 @@ mod tests {
 
     /// The manifest is a file the user downloaded, so a path in it must not be
     /// able to name anything outside the package.
+    ///
+    /// Every form is refused on every platform, which is not free: `C:/...`
+    /// is a `Component::Prefix` on Windows and three ordinary names on Unix,
+    /// so leaving it to `Component` alone passed here and failed there.
     #[test]
     fn a_path_cannot_escape_the_package() {
         let package = Path::new("C:/pets/mochi");
