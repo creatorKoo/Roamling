@@ -109,28 +109,32 @@ private struct RuntimeTuningView: View {
                 value: model.binding(.walkingSpeed),
                 range: model.tuning.limits(for: .walkingSpeed),
                 step: 1,
-                style: .pointsPerSecond
+                style: .pointsPerSecond,
+                authored: RuntimeTuning.standard.walkingSpeed
             )
             TuningSliderRow(
                 title: localized("tuning.wanderPause"),
                 value: model.binding(.wanderPause),
                 range: model.tuning.limits(for: .wanderPause),
                 step: 1,
-                style: .seconds
+                style: .seconds,
+                authored: RuntimeTuning.standard.wanderPause
             )
             TuningSliderRow(
                 title: localized("tuning.crossDisplay"),
                 value: model.binding(.crossDisplayWanderChance),
                 range: model.tuning.limits(for: .crossDisplayWanderChance),
                 step: 0.01,
-                style: .percent
+                style: .percent,
+                authored: RuntimeTuning.standard.crossDisplayWanderChance
             )
             TuningSliderRow(
                 title: localized("tuning.idleBeforeRest"),
                 value: model.binding(.idleBeforeRest),
                 range: model.tuning.limits(for: .idleBeforeRest),
                 step: 5,
-                style: .seconds
+                style: .seconds,
+                authored: RuntimeTuning.standard.idleBeforeRest
             )
 
             Divider()
@@ -141,42 +145,48 @@ private struct RuntimeTuningView: View {
                 value: model.binding(.pointerAwarenessDistance),
                 range: model.tuning.limits(for: .pointerAwarenessDistance),
                 step: 5,
-                style: .points
+                style: .points,
+                authored: RuntimeTuning.standard.pointerAwarenessDistance
             )
             TuningSliderRow(
                 title: localized("tuning.evadeSpeed"),
                 value: model.binding(.evadeSpeedScale),
                 range: model.tuning.limits(for: .evadeSpeedScale),
                 step: 0.05,
-                style: .multiplier
+                style: .multiplier,
+                authored: RuntimeTuning.standard.evadeSpeedScale
             )
             TuningSliderRow(
                 title: localized("tuning.catchArm"),
                 value: model.binding(.catchArmDistance),
                 range: model.tuning.limits(for: .catchArmDistance),
                 step: 2,
-                style: .points
+                style: .points,
+                authored: RuntimeTuning.standard.catchArmDistance
             )
             TuningSliderRow(
                 title: localized("tuning.catchSpeed"),
                 value: model.binding(.catchApproachSpeed),
                 range: model.tuning.limits(for: .catchApproachSpeed),
                 step: 10,
-                style: .pointsPerSecond
+                style: .pointsPerSecond,
+                authored: RuntimeTuning.standard.catchApproachSpeed
             )
             TuningSliderRow(
                 title: localized("tuning.catchWindow"),
                 value: model.binding(.catchWindow),
                 range: model.tuning.limits(for: .catchWindow),
                 step: 0.05,
-                style: .secondsDecimal
+                style: .secondsDecimal,
+                authored: RuntimeTuning.standard.catchWindow
             )
             TuningSliderRow(
                 title: localized("tuning.hitRegion"),
                 value: model.binding(.hitRegionScale),
                 range: model.tuning.limits(for: .hitRegionScale),
                 step: 0.01,
-                style: .multiplier
+                style: .multiplier,
+                authored: RuntimeTuning.standard.hitRegionScale
             )
             Divider()
             Text(localized("tuning.section.advanced"))
@@ -186,7 +196,8 @@ private struct RuntimeTuningView: View {
                 value: model.binding(.gaitCadence),
                 range: model.tuning.limits(for: .gaitCadence),
                 step: 0.05,
-                style: .multiplier
+                style: .multiplier,
+                authored: RuntimeTuning.standard.gaitCadence
             )
             Text(localized("tuning.gaitCadenceNote"))
                 .font(.caption)
@@ -217,15 +228,59 @@ private struct TuningSliderRow: View {
     let range: ClosedRange<Double>
     let step: Double
     let style: TuningValueStyle
+    /// What this knob ships at. The track is split here rather than at the
+    /// midpoint of the range, and the authored value is shown once the user
+    /// has moved away from it.
+    let authored: Double
+
+    /// The slider runs on a 0...1 position with the authored value at the
+    /// halfway mark, because the ranges are not symmetric around it: "notice
+    /// distance" is 140...360 around a default of 170, which put the shipped
+    /// setting a seventh of the way along and made every adjustment feel like
+    /// a reduction.
+    private var position: Binding<Double> {
+        Binding(
+            get: {
+                let below = authored - range.lowerBound
+                let above = range.upperBound - authored
+                if value <= authored {
+                    return below > 0 ? (value - range.lowerBound) / below * 0.5 : 0
+                }
+                return above > 0 ? 0.5 + (value - authored) / above * 0.5 : 1
+            },
+            set: { position in
+                let raw: Double
+                if position <= 0.5 {
+                    raw = range.lowerBound
+                        + (authored - range.lowerBound) * (position / 0.5)
+                } else {
+                    raw = authored
+                        + (range.upperBound - authored) * ((position - 0.5) / 0.5)
+                }
+                // Snapped here rather than by the slider: its steps would be
+                // even in position, which is uneven in value once the halves
+                // cover different amounts of ground.
+                let snapped = (raw / step).rounded() * step
+                value = min(max(snapped, range.lowerBound), range.upperBound)
+            }
+        )
+    }
+
+    private var readout: String {
+        let current = style.string(for: value)
+        guard abs(value - authored) > step / 2 else { return current }
+        return localizedFormat("tuning.offDefault", current, style.string(for: authored))
+    }
 
     var body: some View {
         HStack(spacing: 12) {
             Text(title)
                 .frame(width: 145, alignment: .leading)
-            Slider(value: $value, in: range, step: step)
-            Text(style.string(for: value))
+            Slider(value: position, in: 0...1)
+            Text(readout)
                 .monospacedDigit()
-                .frame(width: 78, alignment: .trailing)
+                // Wide enough for the value and the authored one beside it.
+                .frame(width: 150, alignment: .trailing)
         }
     }
 }
