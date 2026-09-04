@@ -1,0 +1,146 @@
+# SPDX-FileCopyrightText: 2026 GooBeom Jeoung
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: Import the signing certificate
+description: >
+  Puts the release certificate in a keychain for this job and proves codesign
+  will sign with it, failing with the reason when it will not.
+
+# Shared so the rehearsal and the release cannot answer this differently. They
+# had separate copies once, the rehearsal's copy got the fixes, and the
+# release kept a check that reports "0 valid identities found" about a
+# certificate that signs perfectly well.
+#
+# Nothing secret is printed. The certificate's name is, because a certificate's
+# subject is public by definition -- it is in every signature it has ever made.
+
+inputs:
+  p12:
+    description: The certificate and key, PKCS#12, base64
+    required: true
+  password:
+    description: The password the PKCS#12 was written with
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        MACOS_CERT_P12: ${{ inputs.p12 }}
+        MACOS_CERT_PASSWORD: ${{ inputs.password }}
+      run: |
+        set -uo pipefail
+
+        if [ -z "$MACOS_CERT_P12" ]; then
+          echo "::error::MACOS_CERT_P12 is not set; this build would be ad-hoc"
+          exit 1
+        fi
+
+        # Failure lands in the size check below, which explains it; letting the
+        # pipeline abort the step here would replace that with base64's usage.
+        echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12" || true
+        if [ ! -s "$RUNNER_TEMP/cert.p12" ]; then
+          echo "::error::MACOS_CERT_P12 did not decode to anything. Re-upload with:"
+          echo "  base64 -i roamling.p12 | gh secret set MACOS_CERT_P12"
+          exit 1
+        fi
+        echo "decoded $(wc -c < "$RUNNER_TEMP/cert.p12" | tr -d ' ') bytes"
+
+        # Structure first, which needs no password: if this fails the upload is
+        # damaged and the password is not the problem.
+        if ! openssl asn1parse -inform DER -in "$RUNNER_TEMP/cert.p12" -noout \
+            >/dev/null 2>&1; then
+          echo "::error::the decoded bytes are not a PKCS#12 file -- the upload is damaged, not the password"
+          exit 1
+        fi
+        echo "structure reads as PKCS#12"
+
+        # Then the password by itself, before the keychain is involved, because
+        # "wrong password" and "keychain would not take it" want opposite fixes
+        # and arrive as the same eleven words.
+        #
+        # Which of the two forms opens it is printed but not judged. OpenSSL 3
+        # moved the older PKCS#12 encryption behind `-legacy`, and this check
+        # once claimed that only the older form imports -- then the next line
+        # imported a file that needed no `-legacy`. security is the only
+        # opinion that decides anything here, and it is four lines down.
+        if openssl pkcs12 -in "$RUNNER_TEMP/cert.p12" \
+            -passin env:MACOS_CERT_PASSWORD -noout 2>/dev/null; then
+          echo "password opens the file"
+        elif openssl pkcs12 -in "$RUNNER_TEMP/cert.p12" \
+            -passin env:MACOS_CERT_PASSWORD -noout -legacy 2>/dev/null; then
+          echo "password opens the file (needs OpenSSL's legacy provider)"
+        else
+          echo "::error::MACOS_CERT_PASSWORD does not open MACOS_CERT_P12."
+          echo "Check it locally against the same file:"
+          echo "  openssl pkcs12 -in roamling.p12 -noout"
+          echo "and set it again, letting gh prompt so no newline is added:"
+          echo "  gh secret set MACOS_CERT_PASSWORD"
+          rm -f "$RUNNER_TEMP/cert.p12"
+          exit 1
+        fi
+
+        keychain="$RUNNER_TEMP/roamling.keychain-db"
+        # This keychain exists for one job, so its password is worth nothing
+        # outside it and is never written down.
+        keychain_password="$(openssl rand -base64 24)"
+        security create-keychain -p "$keychain_password" "$keychain"
+        # Long enough to outlast the build. A keychain that relocks midway
+        # fails the signing with an error that says nothing about locking.
+        security set-keychain-settings -lut 3600 "$keychain"
+        security unlock-keychain -p "$keychain_password" "$keychain"
+
+        # A composite action's bash runs with -e, so this needs to be a
+        # condition rather than a status read afterwards -- otherwise the step
+        # dies here and the explanation below never prints.
+        if security import "$RUNNER_TEMP/cert.p12" -k "$keychain" \
+            -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign; then
+          rm -f "$RUNNER_TEMP/cert.p12"
+        else
+          rm -f "$RUNNER_TEMP/cert.p12"
+          echo "::error::the password is right but the keychain refused the file."
+          echo "security is pickier than openssl about how a PKCS#12 is written,"
+          echo "and re-wrapping one with openssl has produced files it will not"
+          echo "read. Export from Keychain Access instead, which writes a form it"
+          echo "has always accepted, and give it a long password rather than"
+          echo "reaching for a stronger container."
+          exit 1
+        fi
+
+        # Without this, codesign stops to ask permission to use the key, and a
+        # headless runner has nobody to ask.
+        security set-key-partition-list -S apple-tool:,apple: \
+          -k "$keychain_password" "$keychain" >/dev/null
+        security list-keychains -d user -s "$keychain" \
+          $(security list-keychains -d user | tr -d '"')
+        echo "imported"
+
+        # And then the only question that matters, asked by signing something.
+        #
+        # Not `find-identity -v`, which was here first and lied: it filters on
+        # trust, and a self-signed certificate is not trusted on a fresh runner,
+        # so it reports "0 valid identities found" about a certificate that
+        # signs fine. Measured -- codesign needs trust to verify, not to sign.
+        cp /bin/echo "$RUNNER_TEMP/victim"
+        if ! codesign --force --sign "Roamling" --keychain "$keychain" \
+            "$RUNNER_TEMP/victim"; then
+          echo "::error::the certificate imported but codesign will not use it"
+          exit 1
+        fi
+        requirement="$(codesign -d -r- "$RUNNER_TEMP/victim" 2>&1 |
+          sed -n 's/^#* *designated => //p')"
+        echo "signed a throwaway file, and it came out as:"
+        echo "  $requirement"
+        # Certificate-based rather than a cdhash. That is the whole point of
+        # signing with an identity: an update stays the same app to macOS, and
+        # the user keeps the permissions they granted.
+        case "$requirement" in
+          *"certificate leaf"*)
+            echo "pinned to the certificate -- this is what a release needs"
+            ;;
+          *)
+            echo "::error::this would sign ad-hoc, and every update would reset the user's permissions"
+            exit 1
+            ;;
+        esac

@@ -133,56 +133,10 @@ jobs:
             exit 1
           fi
 
-      - name: Import the signing certificate
-        env:
-          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
-          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
-        run: |
-          if [ -z "$MACOS_CERT_P12" ]; then
-            echo "::error::MACOS_CERT_P12 is not set; this build would be ad-hoc" >&2
-            exit 1
-          fi
-          keychain="$RUNNER_TEMP/roamling.keychain-db"
-          # The keychain exists for this job only, so its password is worth
-          # nothing outside it and is never written down.
-          keychain_password="$(openssl rand -base64 24)"
-          security create-keychain -p "$keychain_password" "$keychain"
-          # Long enough to outlast the build. A keychain that relocks midway
-          # fails the signing with an error that says nothing about locking.
-          security set-keychain-settings -lut 3600 "$keychain"
-          security unlock-keychain -p "$keychain_password" "$keychain"
-          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
-          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" \
-            -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
-          rm -f "$RUNNER_TEMP/cert.p12"
-          # Without this, codesign stops to ask for permission to use the key,
-          # and a headless runner has nobody to ask.
-          security set-key-partition-list -S apple-tool:,apple: \
-            -k "$keychain_password" "$keychain" >/dev/null
-          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
-
-          # Proven by signing something, not by `find-identity -v`, which used
-          # to be this line. That filters on trust, and a self-signed
-          # certificate is not trusted on a fresh runner -- so it says "0 valid
-          # identities found" about a certificate that signs perfectly well,
-          # and as the last command in this step it decided whether the step
-          # passed. codesign needs trust to verify, not to sign.
-          cp /bin/echo "$RUNNER_TEMP/victim"
-          if ! codesign --force --sign "Roamling" --keychain "$keychain" \
-              "$RUNNER_TEMP/victim"; then
-            echo "::error::the certificate imported but codesign will not use it" >&2
-            exit 1
-          fi
-          requirement="$(codesign -d -r- "$RUNNER_TEMP/victim" 2>&1 |
-            sed -n 's/^#* *designated => //p')"
-          echo "signs as: $requirement"
-          case "$requirement" in
-            *"certificate leaf"*) ;;
-            *)
-              echo "::error::this would sign ad-hoc, and every update would reset the user's permissions" >&2
-              exit 1
-              ;;
-          esac
+      - uses: ./.github/actions/signing-identity
+        with:
+          p12: ${{ secrets.MACOS_CERT_P12 }}
+          password: ${{ secrets.MACOS_CERT_PASSWORD }}
 
       - name: Test
         run: ./scripts/test.sh
