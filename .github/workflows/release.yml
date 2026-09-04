@@ -122,14 +122,20 @@ jobs:
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-          # Both files have to agree with the tag. `rust/Cargo.toml` is what
-          # the updater compares against, and `Support/Info.plist` is what the
-          # About box shows; either one drifting is a bug a user sees.
+          # Every one of them has to agree with the tag. `rust/Cargo.toml` is
+          # what the updater compares against, `CFBundleShortVersionString` is
+          # what the About box shows, and `CFBundleVersion` is what macOS
+          # itself treats as the build -- it sat at 1 through two releases,
+          # which is how LaunchServices ends up serving a stale copy of an app
+          # that has been replaced underneath it.
           declared=$(grep -m1 '^version' rust/Cargo.toml | cut -d'"' -f2)
-          plist=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
+          short=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
             Support/Info.plist)
-          if [ "$declared" != "$version" ] || [ "$plist" != "$version" ]; then
-            echo "tag says $version, Cargo.toml says $declared, Info.plist says $plist" >&2
+          build=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' Support/Info.plist)
+          if [ "$declared" != "$version" ] || [ "$short" != "$version" ] \
+              || [ "$build" != "$version" ]; then
+            echo "tag says $version, Cargo.toml says $declared," >&2
+            echo "CFBundleShortVersionString says $short, CFBundleVersion says $build" >&2
             exit 1
           fi
 

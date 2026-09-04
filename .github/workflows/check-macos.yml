@@ -71,6 +71,19 @@ jobs:
           codesign --verify --deep --strict "$RUNNER_TEMP/unzipped/Roamling.app"
           echo "the zip the updater would install verifies too"
 
+      # The window arrangement is two committed files copied in, so the way it
+      # goes missing is quietly -- a rename, a path that moved -- and what a
+      # user would see is a bare white window with two icons in a corner.
+      - name: The disk image is arranged
+        run: |
+          set -e
+          version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Support/Info.plist)"
+          hdiutil attach "build/Roamling-$version.dmg" -readonly -nobrowse -mountpoint /tmp/arranged
+          test -f /tmp/arranged/.DS_Store
+          test -f /tmp/arranged/.background/background.tiff
+          hdiutil detach /tmp/arranged -quiet
+          echo "the window has its picture and its layout"
+
       # Everything above says the bundle is well formed and correctly signed.
       # 0.3.0 was all of that and trapped before it finished launching, because
       # SwiftPM compiles an absolute path to this checkout's build directory

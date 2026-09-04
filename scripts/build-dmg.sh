@@ -72,7 +72,11 @@ cleanup() {
 trap cleanup EXIT
 
 rm -f "$RW_IMAGE"
-hdiutil create -size 128m -fs APFS -volname "Roamling $VERSION" \
+# Named without the version. The window layout comes from a committed
+# .DS_Store, and the background inside it is referenced by an alias that
+# records the path it was made from -- so a volume name that changed every
+# release would point that alias at a volume nobody has.
+hdiutil create -size 128m -fs APFS -volname "Roamling" \
   -type UDIF -ov "$RW_IMAGE" >/dev/null
 hdiutil attach "$RW_IMAGE" -nobrowse -mountpoint "$MOUNT_POINT" >/dev/null
 
@@ -81,6 +85,16 @@ ditto "$APP_DIR" "$MOUNT_POINT/Roamling.app"
 # other, and the user drags across.
 ln -s /Applications "$MOUNT_POINT/Applications"
 xattr -cr "$MOUNT_POINT/Roamling.app"
+
+# And the picture that says which way to drag. Both files are committed --
+# `scripts/build-dmg-background.sh` draws them -- because producing the
+# .DS_Store means either scripting Finder, which wants a desktop session a
+# release runner does not have, or two Python packages a release should not
+# need to fetch.
+mkdir -p "$MOUNT_POINT/.background"
+cp "$REPOSITORY_DIR/assets/dmg-background.tiff" \
+  "$MOUNT_POINT/.background/background.tiff"
+cp "$REPOSITORY_DIR/assets/dmg/DS_Store" "$MOUNT_POINT/.DS_Store"
 # Verified where it will actually be read from, which is the only place the
 # stamp shows up.
 codesign --verify --deep --strict "$MOUNT_POINT/Roamling.app"

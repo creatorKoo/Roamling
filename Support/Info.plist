@@ -30,7 +30,7 @@
     <key>CFBundleShortVersionString</key>
     <string>0.3.1</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>0.3.1</string>
 	<key>NSHumanReadableCopyright</key>
 	<string>Copyright © 2026 GooBeom Jeoung. GNU GPL v3.0 only.</string>
 	<key>LSMinimumSystemVersion</key>
