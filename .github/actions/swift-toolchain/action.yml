@@ -29,25 +29,43 @@ runs:
         fi
         echo "Package.swift asks for Swift $needed"
 
-        found=""
-        for app in $(ls -d /Applications/Xcode*.app 2>/dev/null | sort -Vr); do
+        echo "the runner's default is $(xcode-select -p)"
+        swift --version 2>&1 | sed 's/^/  /' || true
+
+        shopt -s nullglob
+        apps=(/Applications/Xcode*.app)
+        if [ ${#apps[@]} -eq 0 ]; then
+          echo "::error::no /Applications/Xcode*.app on this runner. /Applications holds:"
+          ls -1 /Applications | sed 's/^/  /'
+          exit 1
+        fi
+
+        # Newest first, so the first one that can build is the one we take.
+        readarray -t apps < <(printf '%s\n' "${apps[@]}" | sort -Vr)
+        report=""
+        for app in "${apps[@]}"; do
           swift="$app/Contents/Developer/usr/bin/swift"
-          [ -x "$swift" ] || continue
-          have="$("$swift" --version 2>/dev/null |
+          if [ ! -x "$swift" ]; then
+            report="$report  $app -- no swift in it"$'\n'
+            continue
+          fi
+          have="$("$swift" --version 2>&1 |
             sed -n 's/.*Apple Swift version \([0-9][0-9.]*\).*/\1/p' | head -1)"
-          [ -n "$have" ] || continue
-          found="$found  $app -> Swift $have"$'\n'
-          # sort -V puts the lower one first, so if that is what we need, the
-          # one we have is at least as new.
+          if [ -z "$have" ]; then
+            report="$report  $app -- would not say its version"$'\n'
+            continue
+          fi
+          report="$report  $app -- Swift $have"$'\n'
+          # sort -V puts the lower one first, so if what we need sorts first,
+          # what this Xcode has is at least as new.
           if [ "$(printf '%s\n%s\n' "$needed" "$have" | sort -V | head -1)" = "$needed" ]; then
             sudo xcode-select -s "$app/Contents/Developer"
             echo "using $app (Swift $have)"
-            swift --version
             exit 0
           fi
         done
 
         echo "::error::no installed Xcode has Swift $needed. What this runner has:"
-        printf '%s' "$found"
+        printf '%s' "$report"
         echo "Newer toolchains come with newer images -- try a later runs-on."
         exit 1
