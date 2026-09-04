@@ -780,6 +780,214 @@ fn apply(hwnd: HWND, app: &mut App, output: InteractionOutput) {
         draw(hwnd, app, output.position, scale);
     }
 }
+/// What the tray menu should show, read off the app.
+///
+/// Split out from the message handler because showing the menu has to happen
+/// with the app back in its cell -- see the note on `wndproc`.
+fn menu_state(app: &App) -> tray::MenuState {
+    let coverage = app.resolver.coverage();
+    let names = |set: &[roamling_core::PetCapability]| {
+        let mut names: Vec<String> = set
+            .iter()
+            .map(|c| roamling_core::capability_name(*c).to_string())
+            .collect();
+        names.sort();
+        names
+    };
+    let state = tray::MenuState {
+        pet_name: app.asset.display_name.clone(),
+        covered: coverage.covered(),
+        total: coverage.total(),
+        substituted: names(&coverage.substituted),
+        placeholder: names(&coverage.placeholder),
+        scale: app.scale,
+        pets: app
+            .catalog
+            .iter()
+            .map(|found| {
+                (
+                    found.display_name.clone(),
+                    app.current_package.as_deref() == Some(found.package.as_path()),
+                )
+            })
+            .collect(),
+        built_in: app.current_package.is_none(),
+        auto_update: app.auto_update,
+        staged: app.staged.map(|version| version.to_string()),
+        checking: app.checking,
+        roaming: app.roaming,
+        avoiding: app.avoiding,
+        interactive: app.interactive,
+        visual: app.visual,
+        cursor_aware: app.cursor_aware,
+        agents: [
+            (
+                app.tokens[0].0,
+                installer::status(app.tokens[0].0, &app.tokens[0].1),
+                app.listening[0],
+            ),
+            (
+                app.tokens[1].0,
+                installer::status(app.tokens[1].0, &app.tokens[1].1),
+                app.listening[1],
+            ),
+        ],
+    };
+    state
+}
+
+/// Carry out whatever was picked from the tray menu.
+unsafe fn perform(hwnd: HWND, chosen: usize, app: &mut App, now: f64) {
+    match chosen {
+        tray::CMD_ROAMING => {
+            app.roaming = !app.roaming;
+            app.pet.set_roaming_enabled(app.roaming, now);
+            app.settings.set(settings::ROAMING, app.roaming);
+        }
+        tray::CMD_AVOID_POINTER => {
+            app.avoiding = !app.avoiding;
+            app.pet.set_pointer_avoidance_enabled(app.avoiding);
+            app.settings.set(settings::AVOID_POINTER, app.avoiding);
+        }
+        tray::CMD_INTERACTIONS => {
+            app.interactive = !app.interactive;
+            app.pet.set_interactions_enabled(app.interactive);
+            app.settings.set(settings::INTERACTIONS, app.interactive);
+        }
+        tray::CMD_VISUAL => {
+            app.visual = !app.visual;
+            app.settings.set(settings::VISUAL_PLACEMENT, app.visual);
+            if !app.visual {
+                // Drop what was captured, and the GPU resource
+                // that reads it, the moment consent ends.
+                app.capturer.release();
+                app.pet.set_luminance(None);
+            }
+        }
+        tray::CMD_CURSOR_AWARE => {
+            app.cursor_aware = !app.cursor_aware;
+            app.settings.set(settings::CURSOR_AWARENESS, app.cursor_aware);
+        }
+        tray::CMD_TUNING => tuning::show(app.pet.tuning()),
+        tray::CMD_UPDATE_CHECK => {
+            if !app.checking {
+                app.checking = true;
+                app.update_at = now + update::INTERVAL;
+                update::check(app.update_sender.clone(), true);
+            }
+        }
+        tray::CMD_UPDATE_AUTO => {
+            app.auto_update = !app.auto_update;
+            app.settings.set(settings::AUTO_UPDATE, app.auto_update);
+            // Turning it back on should not wait a day to matter.
+            if app.auto_update {
+                app.update_at = now;
+            }
+        }
+        tray::CMD_RELOAD_PETS => {
+            app.catalog = package::discover(&package::default_roots());
+            println!("{} pet package(s) found", app.catalog.len());
+        }
+        tray::CMD_PET_BUILT_IN => {
+            if let Some(asset) = roamling_pet::built_in_mochi() {
+                adopt(app, asset, None);
+            }
+        }
+        // The pet list, in the order the catalogue reports.
+        picked if picked >= tray::CMD_PET_BASE => {
+            let index = picked - tray::CMD_PET_BASE;
+            if let Some(found) = app.catalog.get(index) {
+                let path = found.package.clone();
+                match package::load(&path) {
+                    Ok(loaded) => {
+                        for warning in &loaded.warnings {
+                            println!("   pet  {warning}");
+                        }
+                        adopt(app, loaded.asset, Some(path));
+                    }
+                    Err(error) => {
+                        shell::warn(hwnd, localized("error.pet.load"), &error)
+                    }
+                }
+            }
+        }
+        tray::CMD_OPEN_PET_FOLDER => shell::open_pet_folder(),
+        tray::CMD_COPY_DIAGNOSTICS => {
+            let text = app.log.text(now);
+            if !shell::copy_to_clipboard(hwnd, &text) {
+                println!("could not put the diagnostics on the clipboard");
+            }
+        }
+        tray::CMD_ABOUT => shell::about(hwnd),
+        tray::CMD_VIEW_SOURCE => shell::view_source(),
+        // Agent ids live in blocks of ten from 100, below the
+        // pet list -- so this arm has to be bounded at both ends.
+        picked
+            if (tray::CMD_AGENT_BASE..tray::CMD_PET_BUILT_IN).contains(&picked) =>
+        {
+            let index = (picked - tray::CMD_AGENT_BASE) / tray::CMD_AGENT_STRIDE;
+            let action = (picked - tray::CMD_AGENT_BASE) % tray::CMD_AGENT_STRIDE;
+            if let Some((agent, token)) = app.tokens.get(index) {
+                let (agent, token) = (*agent, token.clone());
+                if action == tray::CMD_AGENT_TEST {
+                    test_reaction(app, agent, now);
+                } else {
+                    let removing = action == tray::CMD_AGENT_REMOVE;
+                    let copy = shell::agent_copy(agent);
+                    // It is the user's own config file, so they are
+                    // told what is about to be written to it before
+                    // anything is. `ShellPrompt.confirmation(for:)`.
+                    let (title, body) = if removing {
+                        (copy.remove_title, copy.remove_body)
+                    } else {
+                        (copy.install_title, copy.install_body)
+                    };
+                    if shell::confirm(hwnd, title, body) {
+                        let outcome = if removing {
+                            installer::remove(agent)
+                        } else {
+                            installer::install(agent, &token)
+                        };
+                        match outcome {
+                            Ok(()) => shell::report(
+                                hwnd,
+                                localized(if removing {
+                                    copy.removed
+                                } else {
+                                    copy.installed
+                                }),
+                                localized(if removing {
+                                    copy.removed_detail
+                                } else {
+                                    copy.installed_detail
+                                }),
+                            ),
+                            Err(error) => {
+                                shell::warn(hwnd, localized(copy.failure), &error)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // The Size list, in the order `SCALE_CHOICES` declares.
+        picked if picked >= tray::CMD_SCALE_BASE
+            && picked < tray::CMD_SCALE_BASE + tray::SCALE_CHOICES.len() =>
+        {
+            app.scale = tray::SCALE_CHOICES[picked - tray::CMD_SCALE_BASE].1;
+            app.settings.set(settings::SCALE, app.scale);
+            // `draw` notices the footprint changed and tells the
+            // core, which is what keeps the pet on screen when it
+            // grows next to an edge.
+        }
+        tray::CMD_QUIT => {
+            tray::remove(hwnd);
+            PostQuitMessage(0);
+        }
+        _ => {}
+    }
+}
+
 
 /// Windows re-enters this procedure from inside its own calls.
 ///
@@ -800,11 +1008,37 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
         PostQuitMessage(0);
         return LRESULT(0);
     }
+
+    // The tray menu is handled here rather than in `dispatch`, and the reason is
+    // the paragraph above. `TrackPopupMenu` runs a *nested message loop*: it
+    // does not return until the menu closes, and it pumps messages while it
+    // waits. Every timer tick during that arrives here -- and if the app were
+    // out of its cell, as it is for the whole of `dispatch`, each one would find
+    // nothing and fall through. The pet stood still for as long as the menu was
+    // open. So the state is read, put back, and only then is the menu shown.
+    if msg == tray::WM_TRAY
+        && matches!(lp.0 as u32, WM_RBUTTONUP | WM_LBUTTONUP | WM_CONTEXTMENU)
+    {
+        let state = APP.with(|slot| slot.borrow().as_ref().map(menu_state));
+        let Some(state) = state else {
+            return LRESULT(0);
+        };
+        let chosen = tray::show_menu(hwnd, state);
+        if chosen != 0 {
+            if let Some(mut app) = APP.with(|slot| slot.borrow_mut().take()) {
+                let now = app.started.elapsed().as_secs_f64();
+                perform(hwnd, chosen, &mut app, now);
+                APP.with(|slot| *slot.borrow_mut() = Some(app));
+            }
+        }
+        return LRESULT(0);
+    }
+
     let taken = APP.with(|slot| slot.borrow_mut().take());
     let Some(mut app) = taken else {
         return DefWindowProcW(hwnd, msg, wp, lp);
     };
-    let handled = dispatch(hwnd, msg, lp, &mut app);
+    let handled = dispatch(hwnd, msg, &mut app);
     APP.with(|slot| *slot.borrow_mut() = Some(app));
     if handled {
         LRESULT(0)
@@ -813,7 +1047,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
     }
 }
 
-unsafe fn dispatch(hwnd: HWND, msg: u32, lp: LPARAM, app: &mut App) -> bool {
+unsafe fn dispatch(hwnd: HWND, msg: u32, app: &mut App) -> bool {
     {
         let now = app.started.elapsed().as_secs_f64();
         match msg {
@@ -854,208 +1088,6 @@ unsafe fn dispatch(hwnd: HWND, msg: u32, lp: LPARAM, app: &mut App) -> bool {
                 let _ = ReleaseCapture();
                 let out = app.pet.pointer_up(point, was_dragged, now);
                 apply(hwnd, app, out);
-                true
-            }
-            // The tray forwards the raw mouse message in lParam.
-            tray::WM_TRAY
-                if matches!(lp.0 as u32, WM_RBUTTONUP | WM_LBUTTONUP | WM_CONTEXTMENU) =>
-            {
-                let coverage = app.resolver.coverage();
-                let names = |set: &[roamling_core::PetCapability]| {
-                    let mut names: Vec<String> = set
-                        .iter()
-                        .map(|c| roamling_core::capability_name(*c).to_string())
-                        .collect();
-                    names.sort();
-                    names
-                };
-                let state = tray::MenuState {
-                    pet_name: app.asset.display_name.clone(),
-                    covered: coverage.covered(),
-                    total: coverage.total(),
-                    substituted: names(&coverage.substituted),
-                    placeholder: names(&coverage.placeholder),
-                    scale: app.scale,
-                    pets: app
-                        .catalog
-                        .iter()
-                        .map(|found| {
-                            (
-                                found.display_name.clone(),
-                                app.current_package.as_deref() == Some(found.package.as_path()),
-                            )
-                        })
-                        .collect(),
-                    built_in: app.current_package.is_none(),
-                    auto_update: app.auto_update,
-                    staged: app.staged.map(|version| version.to_string()),
-                    checking: app.checking,
-                    roaming: app.roaming,
-                    avoiding: app.avoiding,
-                    interactive: app.interactive,
-                    visual: app.visual,
-                    cursor_aware: app.cursor_aware,
-                    agents: [
-                        (
-                            app.tokens[0].0,
-                            installer::status(app.tokens[0].0, &app.tokens[0].1),
-                            app.listening[0],
-                        ),
-                        (
-                            app.tokens[1].0,
-                            installer::status(app.tokens[1].0, &app.tokens[1].1),
-                            app.listening[1],
-                        ),
-                    ],
-                };
-                match tray::show_menu(hwnd, state) {
-                    tray::CMD_ROAMING => {
-                        app.roaming = !app.roaming;
-                        app.pet.set_roaming_enabled(app.roaming, now);
-                        app.settings.set(settings::ROAMING, app.roaming);
-                    }
-                    tray::CMD_AVOID_POINTER => {
-                        app.avoiding = !app.avoiding;
-                        app.pet.set_pointer_avoidance_enabled(app.avoiding);
-                        app.settings.set(settings::AVOID_POINTER, app.avoiding);
-                    }
-                    tray::CMD_INTERACTIONS => {
-                        app.interactive = !app.interactive;
-                        app.pet.set_interactions_enabled(app.interactive);
-                        app.settings.set(settings::INTERACTIONS, app.interactive);
-                    }
-                    tray::CMD_VISUAL => {
-                        app.visual = !app.visual;
-                        app.settings.set(settings::VISUAL_PLACEMENT, app.visual);
-                        if !app.visual {
-                            // Drop what was captured, and the GPU resource
-                            // that reads it, the moment consent ends.
-                            app.capturer.release();
-                            app.pet.set_luminance(None);
-                        }
-                    }
-                    tray::CMD_CURSOR_AWARE => {
-                        app.cursor_aware = !app.cursor_aware;
-                        app.settings.set(settings::CURSOR_AWARENESS, app.cursor_aware);
-                    }
-                    tray::CMD_TUNING => tuning::show(app.pet.tuning()),
-                    tray::CMD_UPDATE_CHECK => {
-                        if !app.checking {
-                            app.checking = true;
-                            app.update_at = now + update::INTERVAL;
-                            update::check(app.update_sender.clone(), true);
-                        }
-                    }
-                    tray::CMD_UPDATE_AUTO => {
-                        app.auto_update = !app.auto_update;
-                        app.settings.set(settings::AUTO_UPDATE, app.auto_update);
-                        // Turning it back on should not wait a day to matter.
-                        if app.auto_update {
-                            app.update_at = now;
-                        }
-                    }
-                    tray::CMD_RELOAD_PETS => {
-                        app.catalog = package::discover(&package::default_roots());
-                        println!("{} pet package(s) found", app.catalog.len());
-                    }
-                    tray::CMD_PET_BUILT_IN => {
-                        if let Some(asset) = roamling_pet::built_in_mochi() {
-                            adopt(app, asset, None);
-                        }
-                    }
-                    // The pet list, in the order the catalogue reports.
-                    picked if picked >= tray::CMD_PET_BASE => {
-                        let index = picked - tray::CMD_PET_BASE;
-                        if let Some(found) = app.catalog.get(index) {
-                            let path = found.package.clone();
-                            match package::load(&path) {
-                                Ok(loaded) => {
-                                    for warning in &loaded.warnings {
-                                        println!("   pet  {warning}");
-                                    }
-                                    adopt(app, loaded.asset, Some(path));
-                                }
-                                Err(error) => {
-                                    shell::warn(hwnd, localized("error.pet.load"), &error)
-                                }
-                            }
-                        }
-                    }
-                    tray::CMD_OPEN_PET_FOLDER => shell::open_pet_folder(),
-                    tray::CMD_COPY_DIAGNOSTICS => {
-                        let text = app.log.text(now);
-                        if !shell::copy_to_clipboard(hwnd, &text) {
-                            println!("could not put the diagnostics on the clipboard");
-                        }
-                    }
-                    tray::CMD_ABOUT => shell::about(hwnd),
-                    tray::CMD_VIEW_SOURCE => shell::view_source(),
-                    // Agent ids live in blocks of ten from 100, below the
-                    // pet list -- so this arm has to be bounded at both ends.
-                    picked
-                        if (tray::CMD_AGENT_BASE..tray::CMD_PET_BUILT_IN).contains(&picked) =>
-                    {
-                        let index = (picked - tray::CMD_AGENT_BASE) / tray::CMD_AGENT_STRIDE;
-                        let action = (picked - tray::CMD_AGENT_BASE) % tray::CMD_AGENT_STRIDE;
-                        if let Some((agent, token)) = app.tokens.get(index) {
-                            let (agent, token) = (*agent, token.clone());
-                            if action == tray::CMD_AGENT_TEST {
-                                test_reaction(app, agent, now);
-                            } else {
-                                let removing = action == tray::CMD_AGENT_REMOVE;
-                                let copy = shell::agent_copy(agent);
-                                // It is the user's own config file, so they are
-                                // told what is about to be written to it before
-                                // anything is. `ShellPrompt.confirmation(for:)`.
-                                let (title, body) = if removing {
-                                    (copy.remove_title, copy.remove_body)
-                                } else {
-                                    (copy.install_title, copy.install_body)
-                                };
-                                if shell::confirm(hwnd, title, body) {
-                                    let outcome = if removing {
-                                        installer::remove(agent)
-                                    } else {
-                                        installer::install(agent, &token)
-                                    };
-                                    match outcome {
-                                        Ok(()) => shell::report(
-                                            hwnd,
-                                            localized(if removing {
-                                                copy.removed
-                                            } else {
-                                                copy.installed
-                                            }),
-                                            localized(if removing {
-                                                copy.removed_detail
-                                            } else {
-                                                copy.installed_detail
-                                            }),
-                                        ),
-                                        Err(error) => {
-                                            shell::warn(hwnd, localized(copy.failure), &error)
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    // The Size list, in the order `SCALE_CHOICES` declares.
-                    picked if picked >= tray::CMD_SCALE_BASE
-                        && picked < tray::CMD_SCALE_BASE + tray::SCALE_CHOICES.len() =>
-                    {
-                        app.scale = tray::SCALE_CHOICES[picked - tray::CMD_SCALE_BASE].1;
-                        app.settings.set(settings::SCALE, app.scale);
-                        // `draw` notices the footprint changed and tells the
-                        // core, which is what keeps the pet on screen when it
-                        // grows next to an edge.
-                    }
-                    tray::CMD_QUIT => {
-                        tray::remove(hwnd);
-                        PostQuitMessage(0);
-                    }
-                    _ => {}
-                }
                 true
             }
             WM_DISPLAYCHANGE | WM_DPICHANGED => {
