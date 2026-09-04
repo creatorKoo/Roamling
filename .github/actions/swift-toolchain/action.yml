@@ -1,0 +1,53 @@
+# SPDX-FileCopyrightText: 2026 GooBeom Jeoung
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: Pick a Swift toolchain
+description: >
+  Selects the newest installed Xcode whose Swift can build Package.swift, and
+  says which one it picked.
+
+# The runner's default Xcode is whatever the image maintainers chose, and it
+# has been behind us: macos-14 tops out at Swift 6.0 and the package asks for
+# 6.2, so a release died at `package is using Swift tools version 6.2.0 but the
+# installed version is 5.10.0` -- eleven characters of which are the actual
+# problem.
+#
+# Pinning a version would fix it until the image drops that version, which the
+# images do. So this reads what the package asks for, takes the newest Xcode
+# that can answer, and prints both. When none can, it prints every Xcode it
+# found and what each one has, which is the list you need to choose a runner.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -euo pipefail
+        needed="$(sed -n 's|^// *swift-tools-version: *\([0-9][0-9.]*\).*|\1|p' Package.swift)"
+        if [ -z "$needed" ]; then
+          echo "::error::no swift-tools-version line in Package.swift"
+          exit 1
+        fi
+        echo "Package.swift asks for Swift $needed"
+
+        found=""
+        for app in $(ls -d /Applications/Xcode*.app 2>/dev/null | sort -Vr); do
+          swift="$app/Contents/Developer/usr/bin/swift"
+          [ -x "$swift" ] || continue
+          have="$("$swift" --version 2>/dev/null |
+            sed -n 's/.*Apple Swift version \([0-9][0-9.]*\).*/\1/p' | head -1)"
+          [ -n "$have" ] || continue
+          found="$found  $app -> Swift $have"$'\n'
+          # sort -V puts the lower one first, so if that is what we need, the
+          # one we have is at least as new.
+          if [ "$(printf '%s\n%s\n' "$needed" "$have" | sort -V | head -1)" = "$needed" ]; then
+            sudo xcode-select -s "$app/Contents/Developer"
+            echo "using $app (Swift $have)"
+            swift --version
+            exit 0
+          fi
+        done
+
+        echo "::error::no installed Xcode has Swift $needed. What this runner has:"
+        printf '%s' "$found"
+        echo "Newer toolchains come with newer images -- try a later runs-on."
+        exit 1

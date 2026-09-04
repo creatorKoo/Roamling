@@ -106,9 +106,11 @@ jobs:
           if-no-files-found: error
 
   macos:
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+
+      - uses: ./.github/actions/swift-toolchain
 
       - name: Work out the version
         id: version
