@@ -32,30 +32,30 @@ runs:
         echo "the runner's default is $(xcode-select -p)"
         swift --version 2>&1 | sed 's/^/  /' || true
 
+        # macOS ships bash 3.2, which is what a composite action's `bash` is,
+        # so no arrays with holes, no readarray, no ${a[@]} tricks. The paths
+        # the images use have no spaces in them.
         shopt -s nullglob
-        apps=(/Applications/Xcode*.app)
-        if [ ${#apps[@]} -eq 0 ]; then
+        if [ -z "$(echo /Applications/Xcode*.app)" ]; then
           echo "::error::no /Applications/Xcode*.app on this runner. /Applications holds:"
           ls -1 /Applications | sed 's/^/  /'
           exit 1
         fi
 
         # Newest first, so the first one that can build is the one we take.
-        readarray -t apps < <(printf '%s\n' "${apps[@]}" | sort -Vr)
-        report=""
-        for app in "${apps[@]}"; do
+        for app in $(printf '%s\n' /Applications/Xcode*.app | sort -Vr); do
           swift="$app/Contents/Developer/usr/bin/swift"
           if [ ! -x "$swift" ]; then
-            report="$report  $app -- no swift in it"$'\n'
+            echo "  $app -- no swift in it"
             continue
           fi
           have="$("$swift" --version 2>&1 |
             sed -n 's/.*Apple Swift version \([0-9][0-9.]*\).*/\1/p' | head -1)"
           if [ -z "$have" ]; then
-            report="$report  $app -- would not say its version"$'\n'
+            echo "  $app -- would not say its version"
             continue
           fi
-          report="$report  $app -- Swift $have"$'\n'
+          echo "  $app -- Swift $have"
           # sort -V puts the lower one first, so if what we need sorts first,
           # what this Xcode has is at least as new.
           if [ "$(printf '%s\n%s\n' "$needed" "$have" | sort -V | head -1)" = "$needed" ]; then
@@ -65,7 +65,6 @@ runs:
           fi
         done
 
-        echo "::error::no installed Xcode has Swift $needed. What this runner has:"
-        printf '%s' "$report"
+        echo "::error::none of the Xcodes listed above has Swift $needed."
         echo "Newer toolchains come with newer images -- try a later runs-on."
         exit 1
