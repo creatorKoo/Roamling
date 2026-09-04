@@ -1,0 +1,21 @@
+# SPDX-FileCopyrightText: 2026 GooBeom Jeoung
+# SPDX-License-Identifier: GPL-3.0-only
+[package]
+name = "roamling-update"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Deciding whether there is a new version, and proving it is ours."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Ed25519, which is what makes an updater safe without a code-signing
+# certificate. Pure Rust: no C, and the same crate answers on both platforms.
+# It hashes the message itself, so nothing here needs a separate digest.
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+
+[[bin]]
+name = "roamling-appcast"
+path = "src/bin/appcast.rs"

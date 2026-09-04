@@ -27,6 +27,7 @@ pub const VISUAL_PLACEMENT: &str = "roamling.visualPlacement";
 pub const CURSOR_AWARENESS: &str = "roamling.cursorAwareness";
 pub const SCALE: &str = "roamling.scale";
 pub const PET_PACKAGE_PATH: &str = "roamling.petPackagePath";
+pub const AUTO_UPDATE: &str = "roamling.autoUpdate";
 /// macOS keeps the whole tuning as one JSON blob under `roamling.runtimeTuning`,
 /// because `UserDefaults` can hold data. This file is flat text, so the eleven
 /// values get eleven sub-keys under the same name -- which also means the file

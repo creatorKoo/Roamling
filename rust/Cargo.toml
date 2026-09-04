@@ -1,11 +1,11 @@
 [workspace]
 resolver = "2"
-members = ["roamling-core", "roamling-agent", "roamling-pet", "roamling-win"]
+members = ["roamling-core", "roamling-agent", "roamling-pet", "roamling-update", "roamling-win"]
 # `roamling-win` is left out of the default set on purpose: it depends on the
 # `windows` crate, so a bare `cargo test` on macOS would try to build Win32
 # bindings and fail. `scripts/test.sh` runs that bare form. Build the shell
 # explicitly instead:  cargo build -p roamling-win
-default-members = ["roamling-core", "roamling-agent", "roamling-pet"]
+default-members = ["roamling-core", "roamling-agent", "roamling-pet", "roamling-update"]
 
 [workspace.package]
 version = "0.1.0"

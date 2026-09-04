@@ -2,9 +2,13 @@
 
 **A tiny companion that actually lives on your desktop.**
 
-Roamling is a native macOS companion runtime. Petdex-compatible creatures roam
-across your monitors, avoid your pointer, let you catch and drag them, and will
-eventually react to coding, games, media, and the rest of your desktop life.
+Roamling is a native companion runtime for macOS and Windows. Petdex-compatible
+creatures roam across your monitors, avoid your pointer, let you catch and drag
+them, and will eventually react to coding, games, media, and the rest of your
+desktop life.
+
+The decisions a pet makes live in one Rust core that both platforms share; each
+platform brings its own window, tray, and input. See `docs/windows.md`.
 
 > Cute first. Useful second. Never annoying.
 
@@ -104,6 +108,46 @@ Codex after installation and approve its hook trust prompt. The Codex receiver
 uses a separate authenticated `127.0.0.1` port and applies the same no-content-
 storage rule.
 
+## Windows
+
+Download `Roamling-Setup.exe` from the
+[latest release](https://github.com/creatorKoo/Roamling/releases/latest) and run
+it. It installs per user, into `%LOCALAPPDATA%\Programs\Roamling`, and never
+asks for administrator approval. `roamling.exe` from the same release is the
+portable form: one file, no runtime to install, nothing outside Windows' own
+DLLs.
+
+**The installer is not yet code-signed**, so Windows will show
+*"Windows protected your PC"* the first time. Choose **More info → Run anyway**.
+Signing is on the list; until then this is the honest state of it. Updates are
+not affected — Roamling replaces its own executable rather than re-running an
+installer, so the warning appears once, on first install.
+
+### Updates
+
+Roamling checks for a new version at startup and once a day, downloads it in the
+background, and puts it in place. **There is no dialog and no restart prompt**:
+the new version is simply the one that runs the next time Roamling starts. The
+tray menu says so quietly when one is waiting.
+
+Every release is signed with an Ed25519 key whose public half is compiled into
+the app, and both the version feed and the executable are checked against it
+before anything is written. A build that cannot verify a signature refuses to
+update rather than updating anyway. Turn the whole thing off with
+**Automatic Updates** in the tray menu.
+
+### Building on Windows
+
+There is no Swift here; the Windows build is Rust all the way down. Requires the
+[Rust toolchain](https://rustup.rs) and, for the installer,
+[Inno Setup 6](https://jrsoftware.org/isinfo.php).
+
+```powershell
+.\scripts\test.ps1        # core, pet, agent, update, and shell tests
+.\scripts\run.ps1         # stop, build, start -- a running copy locks its own exe
+.\scripts\run.ps1 -Debug  # the same, with a console for the state log
+```
+
 ## Repository guide
 
 ```text
@@ -112,6 +156,12 @@ Sources/RoamlingPet/    Petdex/Codex manifests, atlas runtime, fallbacks
 Sources/RoamlingSources/ activity adapters and local hook transport
 Sources/RoamlingMac/    AppKit display, pointer, overlay, and app runtime
 Sources/RoamlingApp/    executable entry point
+rust/roamling-core/     the pet's decisions, shared by both platforms
+rust/roamling-agent/    Claude Code and Codex hooks, normalization, receiver
+rust/roamling-pet/      sheet decoding, the built-in mascot, pet packages
+rust/roamling-update/   version feed parsing and release signature checking
+rust/roamling-win/      the Windows shell: window, tray, input, tick loop
+installer/roamling.iss  the Windows installer
 Tests/                  pure and loader tests
 docs/research.md        upstream/API research with source locations
 docs/architecture.md    boundaries, decisions, and milestone architecture

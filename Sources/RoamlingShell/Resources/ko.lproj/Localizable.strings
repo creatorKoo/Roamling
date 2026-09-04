@@ -92,3 +92,12 @@
 "visual.alert.title" = "빈 공간 배치를 켤까요?";
 "visual.alert.body" = "macOS가 화면 기록에서 Roamling을 허용할지 묻습니다. 허용하면 Roamling이 자리를 정할 때 크게 축소한 스냅샷을 한 장 찍고, 각 영역이 얼마나 복잡한지만 읽어 글자 위가 아닌 빈 곳에 앉습니다.\n\n글자를 인식하지 않고, 이미지를 보관하거나 디스크에 쓰거나 어디로도 보내지 않습니다. 허용한 뒤 macOS가 Roamling 재실행을 요구할 수 있습니다.";
 "visual.revoke.hint" = "시스템 설정 › 개인정보 보호 및 보안에서 끕니다";
+"menu.update.check" = "업데이트 확인";
+"menu.update.auto" = "자동 업데이트";
+"status.update.ready" = "업데이트 %@ 준비됨 — 다시 켜면 적용";
+"status.update.checking" = "업데이트 확인 중…";
+"result.update.upToDate" = "최신 버전입니다.";
+"result.update.upToDate.detail" = "지금 버전은 %@입니다.";
+"result.update.ready" = "업데이트 %@를 받았습니다.";
+"result.update.ready.detail" = "다음에 Roamling을 켜면 새 버전으로 실행됩니다. 따로 할 일은 없습니다.";
+"error.update.failed" = "업데이트를 확인하지 못했습니다";

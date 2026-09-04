@@ -28,6 +28,7 @@ mod sprite;
 mod strings;
 mod tray;
 mod tuning;
+mod update;
 
 use roamling_core::{
     look_frame_index, AnimationResolver, BehaviorState, DisplaySnapshot, InteractionOutput,
@@ -109,6 +110,16 @@ struct App {
     /// Whether each agent's endpoint actually bound, for the menu's second
     /// status line. A port in use means another copy of Roamling has it.
     listening: [bool; 2],
+    /// Whether to look for a new version on a timer. The check itself runs on
+    /// its own thread and reports back through the channel.
+    auto_update: bool,
+    update_events: std::sync::mpsc::Receiver<update::Report>,
+    update_sender: std::sync::mpsc::Sender<update::Report>,
+    /// When the next automatic check is due, and whether one is in flight.
+    update_at: f64,
+    checking: bool,
+    /// The version already swapped in and waiting for a restart.
+    staged: Option<roamling_update::Version>,
     /// Events waiting for their moment, with the time each is due. Only the
     /// test reaction uses this -- it is two events three seconds apart, and a
     /// timer thread for that would need a second way into the runtime.
@@ -207,6 +218,7 @@ fn main() -> Result<()> {
     let interactive = stored.bool(settings::INTERACTIONS, true);
     let visual = stored.bool(settings::VISUAL_PLACEMENT, false);
     let cursor_aware = stored.bool(settings::CURSOR_AWARENESS, false);
+    let auto_update = stored.bool(settings::AUTO_UPDATE, true);
     // Clamped to the range the menu offers, so a hand-edited settings file
     // cannot produce a pet too small to catch or too big to walk around.
     let scale = stored.number(settings::SCALE).unwrap_or(1.0).clamp(0.5, 2.0);
@@ -239,6 +251,11 @@ fn main() -> Result<()> {
     }
     let tokens: [(Agent, String); 2] = [tokens[0].clone(), tokens[1].clone()];
 
+    // Whatever a previous run swapped in. Deleted before anything else, and
+    // before the check that might stage another one.
+    update::clean_up();
+
+    let (update_sender, update_events) = std::sync::mpsc::channel();
     let (agent_sender, agent_events) = std::sync::mpsc::channel();
     let started = Instant::now();
     let mut receivers = Vec::new();
@@ -290,6 +307,14 @@ fn main() -> Result<()> {
             tokens,
             listening,
             deferred: Vec::new(),
+            auto_update,
+            update_events,
+            update_sender,
+            // Not at zero: the first seconds after launch are the busiest, and
+            // a network call there competes with getting the pet on screen.
+            update_at: 30.0,
+            checking: false,
+            staged: None,
             luminance_at: f64::NEG_INFINITY,
             settings: stored,
             last_state: BehaviorState::Idle,
@@ -387,6 +412,51 @@ fn tick(hwnd: HWND, app: &mut App) {
 
     // The core decides whether the caret is worth a synchronous round trip;
     // the shell decides whether the user allowed one at all.
+    // A finished update check, and the next one if it is due. Both are cheap
+    // when there is nothing to do, which is almost always.
+    for report in app.update_events.try_iter().collect::<Vec<_>>() {
+        app.checking = false;
+        match report.outcome {
+            update::Outcome::UpToDate => {
+                if report.asked {
+                    shell::report(
+                        hwnd,
+                        localized("result.update.upToDate"),
+                        &strings::localized_format(
+                            "result.update.upToDate.detail",
+                            &[&roamling_update::Version::current().to_string()],
+                        ),
+                    );
+                }
+            }
+            update::Outcome::Staged(version) => {
+                app.staged = Some(version);
+                println!("update {version} staged; it runs on the next launch");
+                if report.asked {
+                    shell::report(
+                        hwnd,
+                        &strings::localized_format(
+                            "result.update.ready",
+                            &[&version.to_string()],
+                        ),
+                        localized("result.update.ready.detail"),
+                    );
+                }
+            }
+            update::Outcome::Failed(error) => {
+                println!("update check failed: {error}");
+                if report.asked {
+                    shell::warn(hwnd, localized("error.update.failed"), &error);
+                }
+            }
+        }
+    }
+    if app.auto_update && !app.checking && now >= app.update_at {
+        app.update_at = now + update::INTERVAL;
+        app.checking = true;
+        update::check(app.update_sender.clone(), false);
+    }
+
     // Anything the tuning panel changed. It runs in this thread's message
     // loop but never reaches into the runtime -- see `tuning.rs`.
     if let Some(tuning) = tuning::take_pending() {
@@ -808,6 +878,9 @@ unsafe fn dispatch(hwnd: HWND, msg: u32, lp: LPARAM, app: &mut App) -> bool {
                         })
                         .collect(),
                     built_in: app.current_package.is_none(),
+                    auto_update: app.auto_update,
+                    staged: app.staged.map(|version| version.to_string()),
+                    checking: app.checking,
                     roaming: app.roaming,
                     avoiding: app.avoiding,
                     interactive: app.interactive,
@@ -857,6 +930,21 @@ unsafe fn dispatch(hwnd: HWND, msg: u32, lp: LPARAM, app: &mut App) -> bool {
                         app.settings.set(settings::CURSOR_AWARENESS, app.cursor_aware);
                     }
                     tray::CMD_TUNING => tuning::show(app.pet.tuning()),
+                    tray::CMD_UPDATE_CHECK => {
+                        if !app.checking {
+                            app.checking = true;
+                            app.update_at = now + update::INTERVAL;
+                            update::check(app.update_sender.clone(), true);
+                        }
+                    }
+                    tray::CMD_UPDATE_AUTO => {
+                        app.auto_update = !app.auto_update;
+                        app.settings.set(settings::AUTO_UPDATE, app.auto_update);
+                        // Turning it back on should not wait a day to matter.
+                        if app.auto_update {
+                            app.update_at = now;
+                        }
+                    }
                     tray::CMD_RELOAD_PETS => {
                         app.catalog = package::discover(&package::default_roots());
                         println!("{} pet package(s) found", app.catalog.len());

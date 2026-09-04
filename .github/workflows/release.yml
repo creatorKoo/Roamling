@@ -1,0 +1,108 @@
+# SPDX-FileCopyrightText: 2026 GooBeom Jeoung
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# Cuts a release when a `v*` tag is pushed.
+#
+# The one secret this needs is ROAMLING_UPDATE_SECRET_KEY: the Ed25519 key whose
+# public half is compiled into the app. Without it a release can still be built,
+# but nothing already installed will accept it -- see docs/windows.md, W7.
+#
+# macOS is not here yet. It joins when the Swift side adopts `roamling-update`;
+# a job that cannot be tested would only fail the first real release.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to build, without the v"
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Work out the version
+        id: version
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="${{ inputs.version }}"
+          else
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          # The binary reports its own version from Cargo.toml. If the tag says
+          # something else, the appcast offers a version the installed build
+          # will never believe it has reached -- and it updates on every check,
+          # forever. Cheaper to fail here.
+          declared=$(grep -m1 '^version' rust/Cargo.toml | cut -d'"' -f2)
+          if [ "$declared" != "$version" ]; then
+            echo "tag says $version but rust/Cargo.toml says $declared" >&2
+            exit 1
+          fi
+
+      - name: Test
+        shell: bash
+        working-directory: rust
+        run: |
+          cargo test --release
+          cargo test -p roamling-win
+
+      - name: Build
+        working-directory: rust
+        run: cargo build -p roamling-win --release
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { $iscc = "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" }
+          if (-not (Test-Path $iscc)) {
+            winget install --id JRSoftware.InnoSetup --silent `
+              --accept-package-agreements --accept-source-agreements --disable-interactivity
+            $iscc = "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+          }
+          & $iscc "/DAppVersion=${{ steps.version.outputs.version }}" installer\roamling.iss
+
+      - name: Sign the release
+        shell: bash
+        env:
+          ROAMLING_UPDATE_SECRET_KEY: ${{ secrets.ROAMLING_UPDATE_SECRET_KEY }}
+        run: |
+          if [ -z "$ROAMLING_UPDATE_SECRET_KEY" ]; then
+            echo "::error::ROAMLING_UPDATE_SECRET_KEY is not set; nothing already installed could accept this release"
+            exit 1
+          fi
+          version="${{ steps.version.outputs.version }}"
+          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${version}"
+          # The URL is the tagged one, not `latest`: the feed says which build it
+          # is describing, and `latest` would drift out from under the signature.
+          cargo run --manifest-path rust/Cargo.toml -q -p roamling-update \
+            --bin roamling-appcast -- sign "$version" \
+            "https://github.com/${GITHUB_REPOSITORY}/releases/tag/v${version}" \
+            "windows-x86_64=${base}/roamling.exe=rust/target/release/roamling.exe"
+          cat appcast.json
+
+      - name: Publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          gh release create "v${version}" \
+            --title "Roamling ${version}" \
+            --generate-notes \
+            rust/target/release/roamling.exe \
+            build/Roamling-Setup.exe \
+            appcast.json \
+            appcast.json.sig

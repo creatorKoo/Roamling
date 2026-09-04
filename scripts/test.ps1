@@ -30,11 +30,11 @@ function Step($name, [scriptblock] $body) {
     }
 }
 
-# The core's differential fixtures and the pet's sheet contract. This is the
-# workspace default set, so it is the same command the macOS test.sh runs --
-# roamling-win is excluded there because the `windows` crate cannot build on
-# macOS. See rust/Cargo.toml.
-Step "core + pet" { cargo test --release }
+# The core's differential fixtures, the pet's sheet contract, the agent
+# adapters and the update feed. This is the workspace default set, so it is the
+# same command the macOS test.sh runs -- roamling-win is excluded there because
+# the `windows` crate cannot build on macOS. See rust/Cargo.toml.
+Step "core, pet, agent, update" { cargo test --release }
 
 # The shell only builds on Windows, so it is named explicitly.
 Step "shell tests" { cargo test -p roamling-win }

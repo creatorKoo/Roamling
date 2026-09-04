@@ -1221,6 +1221,19 @@ Rust 실제     1파일 ·  2.1 MB · OS 밖 DLL 0개
 2. iscc roamling.iss  ->  Roamling-Setup.exe
 ```
 
+**그대로 됐다 (2026-09-04).** `installer/roamling.iss`가 Inno Setup 6.7.3에서 컴파일되고
+`build/Roamling-Setup.exe` 3.7 MB가 나온다(2.6 MB exe는 이미 LTO를 거쳐서 잘 안 줄고,
+나머지는 Inno 자기 부트스트랩이다). `[Files]`는 정말로 한 줄이다.
+
+두 가지를 스크립트가 더 한다. **설치·제거 전에 `taskkill /IM roamling.exe`** — 돌고 있는
+펫이 자기 exe를 잡고 있어서 덮어쓰기가 실패하는데, Inno의 기본 안내("닫아 주세요")는 창이
+없는 트레이 앱에 대고 할 말이 아니다. 그리고 **`[InstallDelete]`/`[UninstallDelete]`가
+`roamling.exe.old`와 `.new`를 지운다** — 업데이터가 만든 파일이라 설치 관리자는 모르는
+것들이다.
+
+**언어는 영어만 넣었다.** Inno Setup 6 공식 배포판에 한국어 `.isl`이 없다. 비공식 번역을
+저장소에 넣으면 진짜 문안의 출처인 두 `Localizable.strings`와 따로 관리할 파일이 하나 는다.
+
 콘솔은 `#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]`가 release에서만
 없애므로 링커 플래그도 필요 없다. 아이콘도 `.ico`를 싣지 않는다 — 트레이 아이콘은 macOS가
 쓰는 것과 같은 🐾 글리프를 `SM_CXSMICON` 크기에 맞춰 그때그때 그린다.
@@ -1235,12 +1248,11 @@ Rust 실제     1파일 ·  2.1 MB · OS 밖 DLL 0개
 **MSI/WiX는 쓰지 않는다** — 기업 배포 수요 없이 복잡도만 는다. **MSIX/Store도 아니다** —
 서명·심사·샌드박스 마찰이 이 단계에 맞지 않는다.
 
-#### 반드시 걸릴 함정 — `*.resources`
+#### ~~반드시 걸릴 함정 — `*.resources`~~ — D가 없앴다
 
-`CLAUDE.md`가 macOS에 대해 경고하는 그것이 Windows에서 그대로 재발한다. `build-app.sh`가
-`$BIN_DIR/*.bundle`을 복사하듯, Windows 설치 스크립트는 **`*.resources` 디렉터리**를
-복사해야 한다 — W0의 l10n 탐침에서 `L10nProbe_L10nProbe.resources`로 확인된 형태다.
-**빠지면 `Bundle.module`이 런타임에 trap한다.** 91개 UI 문자열과 Mochi 아틀라스가 거기 있다.
+이 절은 Swift 기준이었다. `Bundle.module`이 없어졌으므로 복사할 리소스 디렉터리도 없다 —
+문자열은 `include_str!`, 아틀라스는 `include_bytes!`로 exe 안에 있다. **`[Files]`는 한
+줄이다.**
 
 #### 서명
 
@@ -1273,16 +1285,90 @@ Velopack의 강점은 릴리스 파이프라인이 하나라는 것이다. **둘
   이 게이트는 지출 결정을 포함하므로 착수 전에 사용자에게 확인한다.
 - **Windows**: 서명이 없으면 **업데이트할 때마다** SmartScreen 경고를 보게 된다.
 
-**서명 없이 자동 업데이트를 먼저 붙이면 업데이트가 없느니만 못하다.** 사용자가 매번 경고를
-클릭하게 된다. 순서는 서명 → 업데이터다.
+~~**서명 없이 자동 업데이트를 먼저 붙이면 업데이트가 없느니만 못하다.** 사용자가 매번 경고를
+클릭하게 된다. 순서는 서명 → 업데이터다.~~
+
+**이 문단은 틀렸다 (2026-09-04 정정).** SmartScreen의 평판 검사를 부르는 것은 브라우저가
+붙이는 **Mark-of-the-Web**이다. 업데이터가 직접 받아서 exe를 덮어쓰면 MOTW가 붙지 않으므로
+**업데이트에는 경고가 뜨지 않는다.** 경고가 뜨는 것은 사람이 브라우저로 받는 **첫 설치**
+한 번뿐이다. 그래서 순서는 자유롭고, 실제로 W7을 먼저 했다.
 
 #### 제품 원칙과 충돌하지 않게
 
 업데이트 알림은 *Never annoying*이 금지하는 종류의 방해다. **백그라운드에서 조용히 받고 다음
-실행에 적용한다.** 모달을 띄우지 않고, 재시작을 요구하지 않는다. Sparkle이 이 모드를 지원한다.
+실행에 적용한다.** 모달을 띄우지 않고, 재시작을 요구하지 않는다.
 
 GPL-3.0이므로 배포하는 각 버전에 대응하는 소스를 계속 제공해야 한다 — 릴리스마다 태그를
 남기면 충족된다.
+
+#### 실제로 만든 것 (2026-09-04)
+
+**Sparkle + WinSparkle이 아니라 공유 Rust 업데이터로 갔다.** 근거는 이 저장소가 이미 지키는
+규칙이다 — *살아 있는 구현은 항상 1벌*. WinSparkle은 C DLL이라 W6이 방금 확인한 "파일 하나,
+OS 밖 DLL 0개"가 깨지고, 구현이 둘이 되고, 델타 업데이트는 2.5 MB짜리에 의미가 없다.
+
+```text
+rust/roamling-update/   버전 비교 · 매니페스트 파싱 · Ed25519 검증. 양 플랫폼 공유
+rust/roamling-win/update.rs   바이트 가져오기(WinHTTP) · 실행 중인 exe 교체
+```
+
+**HTTP에는 크레이트를 쓰지 않았다.** Windows는 `windows` 크레이트의 WinHTTP, macOS는
+URLSession이다. rustls/ureq를 넣으면 2.6 MB짜리 exe가 4 MB가 된다. 새로 늘어난 의존은
+`ed25519-dalek`뿐인데(**Windows CNG는 Ed25519를 노출하지 않는다**) 그건 어차피 양쪽이
+공유해야 하는 부분이다. Ed25519가 메시지를 스스로 해시하므로 SHA 크레이트도 필요 없다.
+
+##### 서명이 둘인 이유
+
+- **매니페스트 서명** (`appcast.json.sig`): 버전과 URL을 못 고치게 한다. 이게 없으면 피드를
+  쥔 쪽이 "9.9.9"라고 주장하면서 **진짜로 우리가 서명한 옛 아티팩트**를 가리킬 수 있고,
+  그 아티팩트 서명은 통과한다. 조용한 다운그레이드다.
+- **아티팩트 서명** (매니페스트 안에): 도착한 바이트가 우리가 낸 바이트인지.
+
+키를 못 읽는 빌드는 **업데이트를 거부한다.** 서명을 확인할 수 없는 업데이터가 그냥
+업데이트하는 것이 최악이다. `PUBLIC_KEY_HEX`가 전부 0이면 그 상태이고, 테스트가 그것도
+고정한다.
+
+##### 실행 중인 exe 교체
+
+Windows는 실행 중인 파일을 지우거나 덮어쓰지 못하지만 **이름은 바꿀 수 있다** — 잠금이
+이름이 아니라 내용에 걸리기 때문이다.
+
+```text
+roamling.exe -> roamling.exe.old      돌던 프로세스는 계속 돈다
+(새 바이트)   -> roamling.exe          다음 실행이 새 버전
+```
+
+헬퍼 프로세스도, 예약 작업도, 재시작 요구도 없다. 두 번째 rename이 실패하면 옛 파일을
+되돌린다 — 실행할 것이 하나도 남지 않는 것이 유일하게 치명적인 실패다. 테스트가 그
+되돌리기까지 고정한다. `scripts/run.ps1`이 존재하는 이유인 그 잠금의 정확한 해법이다.
+
+##### 피드는 GitHub 릴리스에 얹었다
+
+`/releases/latest/download/appcast.json`은 **항상 최신 릴리스의 자산으로 리다이렉트된다.**
+GitHub Pages도, 전용 브랜치도 필요 없고, 빌드를 올리는 그 CI 단계가 피드도 올린다. 매니페스트
+안의 아티팩트 URL은 **태그가 박힌 주소**다 — `latest`는 서명 아래에서 움직인다.
+
+##### 실측 (2026-09-04)
+
+- `roamling-appcast keygen` → `sign`(진짜 2.68 MB exe) → `verify`: 매니페스트·아티팩트 서명 통과.
+- 버전을 `0.2.0`에서 `9.9.9`로 고친 매니페스트 → 거부. 다른 키 → 거부. 다른 파일을 아티팩트로
+  → 크기에서 먼저 거부.
+- WinHTTP로 실제 HTTPS GET(호스트를 넘는 리다이렉트 포함) → 성공, 404 → 오류로 보고.
+  네트워크가 필요하므로 `#[ignore]`이고 `cargo test -p roamling-win -- --ignored`로 돈다.
+- 파일 교체와 되돌리기 → 임시 파일로 확인.
+- Inno Setup 6.7.3으로 `Roamling-Setup.exe` 3.7 MB 생성 성공.
+
+##### 남은 것 — 사람이 해야 하는 일
+
+1. `cargo run -p roamling-update --bin roamling-appcast -- keygen`을 **직접** 돌린다.
+   (에이전트가 돌리면 비밀키가 대화 기록에 남는다.)
+2. 공개키를 `roamling-update/src/lib.rs`의 `PUBLIC_KEY_HEX`에 붙인다.
+3. 비밀키를 GitHub 저장소 secret `ROAMLING_UPDATE_SECRET_KEY`에 넣는다.
+4. `rust/Cargo.toml`의 버전을 올리고 같은 번호로 태그를 민다. **워크플로가 태그와
+   Cargo.toml이 다르면 실패시킨다** — 다르면 설치된 빌드가 영원히 자기를 업데이트한다.
+
+macOS는 아직 붙지 않았다. Swift 쪽이 `roamling-update`를 uniffi로 가져다 쓰고 `.app` 교체와
+재실행 80줄을 쓰면 같은 피드에 줄 하나가 늘어난다.
 
 ## 5. 매핑 표에 더할 것
 

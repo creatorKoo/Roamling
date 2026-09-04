@@ -24,6 +24,12 @@ Windows에는 Swift가 없다 — 그쪽 빌드는 전부 Rust다.
 .\scripts\run.ps1 -Debug  # 같은 것의 debug 빌드. 콘솔에 상태 로그가 찍힌다
 ```
 
+릴리스는 `v*` 태그를 밀면 `.github/workflows/release.yml`이 만든다. **태그와
+`rust/Cargo.toml`의 버전이 다르면 워크플로가 실패한다** — 다르면 설치된 빌드가 영원히
+자기를 업데이트하기 때문이다. 자동 업데이트의 서명 키·피드 구조·수동으로 해야 할 일은
+`docs/windows.md`의 W7 절에 있다. **`PUBLIC_KEY_HEX`가 전부 0이면 업데이트는 꺼진 상태이고,
+그게 안전한 기본값이다** — 서명을 확인할 수 없는 빌드는 업데이트하지 않는다.
+
 **빌드한 뒤에는 앱을 다시 켠다.** 상주 펫이라 내려둔 채로 두지 않고, 실무적으로도
 **실행 중인 사본이 자기 `roamling.exe`를 잡고 있어** `cargo build`가 "액세스가 거부되었습니다"로
 실패한다. `run.ps1`이 그 셋을 묶어 둔 이유다.
@@ -84,6 +90,8 @@ rust/roamling-pet/   시트 디코딩(image 크레이트) · 내장 마스코트
                   옛 authored 시트와 fallback은 아직 Swift에 있다
 rust/roamling-agent/ RoamlingSources의 이식. 훅 payload 정규화 · 인증 loopback
                   수신기 · 훅 설치 제거. 제품별 payload는 이 크레이트를 안 나간다
+rust/roamling-update/ 버전 비교 · appcast 파싱 · Ed25519 검증. 양 플랫폼 공유이고,
+                  바이트 가져오기와 파일 교체만 셸이 한다
 rust/roamling-win/   Windows 셸. 코어를 rlib으로 직접 링크한다 — 이쪽은 FFI가 없다.
                   Win32 타입은 platform.rs를 넘지 않는다
 ```

@@ -43,6 +43,8 @@ pub const CMD_ABOUT: usize = 9;
 pub const CMD_VIEW_SOURCE: usize = 10;
 pub const CMD_TUNING: usize = 11;
 pub const CMD_RELOAD_PETS: usize = 12;
+pub const CMD_UPDATE_CHECK: usize = 13;
+pub const CMD_UPDATE_AUTO: usize = 14;
 /// The built-in mascot, then one id per discovered package.
 pub const CMD_PET_BUILT_IN: usize = 1_000;
 pub const CMD_PET_BASE: usize = 1_001;
@@ -294,6 +296,10 @@ pub struct MenuState {
     pub pets: Vec<(String, bool)>,
     /// Whether the built-in mascot is the one showing.
     pub built_in: bool,
+    pub auto_update: bool,
+    /// The version waiting for a restart, if a swap has already happened.
+    pub staged: Option<String>,
+    pub checking: bool,
     /// Each agent, whether its hook is installed, stale or absent, and whether
     /// its endpoint came up.
     pub agents: [(Agent, installer::Status, bool); 2],
@@ -511,6 +517,25 @@ unsafe fn build(state: &MenuState) -> Option<HMENU> {
         command(menu, CMD_COPY_DIAGNOSTICS, localized("menu.copyDiagnostics"));
         command(menu, CMD_RELOAD_PETS, localized("menu.reloadPets"));
         let _ = separator(menu);
+        // Quiet by design: a staged update reports itself with one line here
+        // and nothing else. No modal, no badge, no restart nag.
+        if let Some(version) = &state.staged {
+            caption(menu, &localized_format("status.update.ready", &[version]));
+        }
+        if state.checking {
+            caption(menu, localized("status.update.checking"));
+        } else {
+            command(menu, CMD_UPDATE_CHECK, localized("menu.update.check"));
+        }
+        let update_label = wide(localized("menu.update.auto"));
+        let _ = AppendMenuW(
+            menu,
+            MF_STRING | checked(state.auto_update),
+            CMD_UPDATE_AUTO,
+            PCWSTR(update_label.as_ptr()),
+        );
+
+        let _ = separator(menu);
         command(menu, CMD_ABOUT, localized("menu.about"));
         // The macOS About alert carries this as a second button. `MessageBoxW`
         // cannot relabel its buttons, so it is an item instead.
@@ -534,6 +559,9 @@ mod tests {
             scale: 1.0,
             pets: vec![("Installed One".into(), true), ("Installed Two".into(), false)],
             built_in: false,
+            auto_update: true,
+            staged: Some("0.2.0".into()),
+            checking: false,
             agents: [
                 (Agent::ClaudeCode, installer::Status::Installed, true),
                 (Agent::Codex, installer::Status::NotInstalled, false),
@@ -592,6 +620,8 @@ mod tests {
             CMD_QUIT,
             CMD_TUNING,
             CMD_RELOAD_PETS,
+            CMD_UPDATE_CHECK,
+            CMD_UPDATE_AUTO,
             CMD_PET_BUILT_IN,
             CMD_PET_BASE,
             CMD_PET_BASE + 1,

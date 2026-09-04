@@ -92,3 +92,12 @@
 "visual.alert.title" = "Enable empty-space placement?";
 "visual.alert.body" = "macOS will ask you to allow Roamling under Screen Recording. Roamling then takes one heavily downscaled snapshot when it needs a seat, and reads only how busy each area looks so the pet can settle on empty space instead of your text.\n\nIt does not recognise text, keep the image, write it to disk, or send it anywhere. macOS may require you to quit and reopen Roamling after granting this.";
 "visual.revoke.hint" = "Turn off in System Settings › Privacy & Security";
+"menu.update.check" = "Check for Updates";
+"menu.update.auto" = "Automatic Updates";
+"status.update.ready" = "Update %@ ready — restart to apply";
+"status.update.checking" = "Checking for updates…";
+"result.update.upToDate" = "Roamling is up to date.";
+"result.update.upToDate.detail" = "You are running version %@.";
+"result.update.ready" = "Update %@ is ready.";
+"result.update.ready.detail" = "It will be running the next time Roamling starts. Nothing else is needed.";
+"error.update.failed" = "Couldn’t check for updates";
