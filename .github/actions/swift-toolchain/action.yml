@@ -44,12 +44,12 @@ runs:
 
         # Newest first, so the first one that can build is the one we take.
         for app in $(printf '%s\n' /Applications/Xcode*.app | sort -Vr); do
-          swift="$app/Contents/Developer/usr/bin/swift"
-          if [ ! -x "$swift" ]; then
-            echo "  $app -- no swift in it"
-            continue
-          fi
-          have="$("$swift" --version 2>&1 |
+          # Asked through xcrun rather than by path. swift is not in
+          # Contents/Developer/usr/bin -- it lives in the toolchain under it,
+          # whose directory name is Xcode's business and not ours. Looking for
+          # it by hand reported every Xcode on the runner, 26.3 included, as
+          # having no Swift at all.
+          have="$(DEVELOPER_DIR="$app/Contents/Developer" /usr/bin/xcrun swift --version 2>&1 |
             sed -n 's/.*Apple Swift version \([0-9][0-9.]*\).*/\1/p' | head -1)"
           if [ -z "$have" ]; then
             echo "  $app -- would not say its version"
