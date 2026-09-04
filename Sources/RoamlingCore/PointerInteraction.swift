@@ -117,6 +117,22 @@ public struct PointerInteractionModel: Sendable {
     private var previousPointer: WorldPoint?
     private var previousDistance: Double?
     private var previousTimestamp: TimeInterval?
+    private var previousProximity: PointerProximity?
+    private var evadeStartedAt: TimeInterval?
+
+    /// How far past the radius the cursor has to go before an evade ends.
+    ///
+    /// One threshold for both starting and stopping is why the pet twitched:
+    /// evading is applied as a velocity for as long as the cursor is inside
+    /// the radius, so it stops the moment it is one pixel outside. At the
+    /// shipped speeds a tick moves the pet 3.7 points, which is enough to
+    /// cross that boundary and sit back down -- so it shuffled a couple of
+    /// pixels, over and over, and the walk cycle never played a full loop.
+    private static let evadeReleaseScale = 1.35
+
+    /// And a floor on how long an evade lasts, so the gait gets one turn even
+    /// when the cursor is snatched away.
+    private static let evadeMinimumDuration: TimeInterval = 0.4
 
     public init(configuration: PointerInteractionConfiguration = .init()) {
         self.configuration = configuration
@@ -126,6 +142,8 @@ public struct PointerInteractionModel: Sendable {
         previousPointer = nil
         previousDistance = nil
         previousTimestamp = nil
+        previousProximity = nil
+        evadeStartedAt = nil
     }
 
     public mutating func evaluate(
@@ -160,20 +178,39 @@ public struct PointerInteractionModel: Sendable {
             closingSpeed: closingSpeed
         )
 
-        let proximity: PointerProximity
+        let measured: PointerProximity
         if distance <= configuration.catchDistance,
            kinematics.speed >= configuration.catchPointerSpeed,
            closingSpeed >= configuration.catchClosingSpeed {
-            proximity = .catchable
+            measured = .catchable
         } else if distance <= configuration.fastEvadeDistance {
-            proximity = .fastEvade
+            measured = .fastEvade
         } else if distance <= configuration.slowEvadeDistance {
-            proximity = .slowEvade
+            measured = .slowEvade
         } else if distance <= configuration.awarenessDistance {
-            proximity = .watching
+            measured = .watching
         } else {
-            proximity = .far
+            measured = .far
         }
+
+        // An evade already under way is held until the cursor is well clear
+        // *and* the pet has been moving long enough to be worth watching.
+        // Reaching for the pet still wins: `.catchable` is not a retreat.
+        var proximity = measured
+        if let held = previousProximity, held == .slowEvade || held == .fastEvade,
+           measured == .far || measured == .watching {
+            let longEnough = evadeStartedAt.map { timestamp - $0 >= Self.evadeMinimumDuration }
+                ?? false
+            let wellClear = distance
+                > configuration.slowEvadeDistance * Self.evadeReleaseScale
+            if !(longEnough && wellClear) { proximity = held }
+        }
+        if proximity == .slowEvade || proximity == .fastEvade {
+            if evadeStartedAt == nil { evadeStartedAt = timestamp }
+        } else {
+            evadeStartedAt = nil
+        }
+        previousProximity = proximity
 
         var away = (pet - pointer).normalized
         if away.length < 0.001 {

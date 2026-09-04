@@ -102,12 +102,28 @@ impl PointerDecision {
     }
 }
 
+/// How far past the radius the cursor has to go before an evade ends.
+///
+/// One threshold for both starting and stopping is why the pet twitched:
+/// evading is applied as a velocity for as long as the cursor is inside the
+/// radius, so it stops the moment it is one pixel outside. At the shipped
+/// speeds a tick moves the pet 3.7 points, which is enough to cross that
+/// boundary and sit back down -- so it shuffled a couple of pixels, over and
+/// over, and the walk cycle never played a full loop.
+const EVADE_RELEASE_SCALE: f64 = 1.35;
+
+/// And a floor on how long an evade lasts, so the gait gets one turn even when
+/// the cursor is snatched away.
+const EVADE_MINIMUM_DURATION: f64 = 0.4;
+
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct PointerInteractionModel {
     configuration: PointerInteractionConfiguration,
     previous_pointer: Option<WorldPoint>,
     previous_distance: Option<f64>,
     previous_timestamp: Option<f64>,
+    previous_proximity: Option<PointerProximity>,
+    evade_started_at: Option<f64>,
 }
 
 impl PointerInteractionModel {
@@ -117,6 +133,8 @@ impl PointerInteractionModel {
             previous_pointer: None,
             previous_distance: None,
             previous_timestamp: None,
+            previous_proximity: None,
+            evade_started_at: None,
         }
     }
 
@@ -135,6 +153,8 @@ impl PointerInteractionModel {
         self.previous_pointer = None;
         self.previous_distance = None;
         self.previous_timestamp = None;
+        self.previous_proximity = None;
+        self.evade_started_at = None;
     }
 
     pub fn evaluate(
@@ -174,7 +194,7 @@ impl PointerInteractionModel {
             closing_speed,
         };
 
-        let proximity = if distance <= self.configuration.catch_distance
+        let measured = if distance <= self.configuration.catch_distance
             && kinematics.speed >= self.configuration.catch_pointer_speed
             && closing_speed >= self.configuration.catch_closing_speed
         {
@@ -188,6 +208,38 @@ impl PointerInteractionModel {
         } else {
             PointerProximity::Far
         };
+
+        // An evade already under way is held until the cursor is well clear
+        // *and* the pet has been moving long enough to be worth watching.
+        // Reaching for the pet still wins: `Catchable` is not a retreat.
+        let mut proximity = measured;
+        if matches!(
+            self.previous_proximity,
+            Some(PointerProximity::SlowEvade) | Some(PointerProximity::FastEvade)
+        ) && matches!(
+            measured,
+            PointerProximity::Far | PointerProximity::Watching
+        ) {
+            let long_enough = self
+                .evade_started_at
+                .is_some_and(|since| timestamp - since >= EVADE_MINIMUM_DURATION);
+            let well_clear =
+                distance > self.configuration.slow_evade_distance * EVADE_RELEASE_SCALE;
+            if !(long_enough && well_clear) {
+                proximity = self.previous_proximity.expect("checked just above");
+            }
+        }
+        if matches!(
+            proximity,
+            PointerProximity::SlowEvade | PointerProximity::FastEvade
+        ) {
+            if self.evade_started_at.is_none() {
+                self.evade_started_at = Some(timestamp);
+            }
+        } else {
+            self.evade_started_at = None;
+        }
+        self.previous_proximity = Some(proximity);
 
         // Straight away from the cursor; failing that, away from where the
         // cursor is heading; failing that, rightward, because standing still

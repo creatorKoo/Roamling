@@ -72,7 +72,12 @@ impl RuntimeTuning {
     pub fn bounds(key: RuntimeTuningKey, pointer_awareness: f64) -> (f64, f64) {
         match key {
             RuntimeTuningKey::WalkingSpeed => (20.0, 320.0),
-            RuntimeTuningKey::WanderPause => (2.0, 40.0),
+            // The ceiling moved with the default: 40 used to be the top of
+            // the track, so promoting it would have pinned the slider to the
+            // right-hand end. 78 leaves as much room above the default as the
+            // floor leaves below it, which is what the panel's centred-default
+            // rule needs.
+            RuntimeTuningKey::WanderPause => (2.0, 78.0),
             RuntimeTuningKey::CrossDisplayWanderChance => (0.0, 1.0),
             RuntimeTuningKey::IdleBeforeRest => (15.0, 600.0),
             RuntimeTuningKey::PointerAwarenessDistance => (140.0, 360.0),
@@ -213,11 +218,17 @@ impl RuntimeTuning {
         self.fast_evade_speed() * 0.55
     }
 
+    /// The two evade radii are fractions of the notice distance rather than
+    /// constants. As constants they made the slider a lie: raising it only
+    /// widened a `min` that already capped the evade radius at 100. The
+    /// fractions are the shipped values over the shipped default, so at 170
+    /// they are exactly 100 and 50 and the default pet is unchanged.
+    /// Multiplied before dividing, to round once and to match Swift.
     pub fn pointer_configuration(&self) -> PointerInteractionConfiguration {
         PointerInteractionConfiguration::new(
             self.pointer_awareness_distance,
-            100.0,
-            50.0,
+            self.pointer_awareness_distance * 100.0 / 170.0,
+            self.pointer_awareness_distance * 50.0 / 170.0,
             self.catch_arm_distance,
             self.slow_evade_speed(),
             self.fast_evade_speed(),
@@ -234,7 +245,7 @@ impl RuntimeTuning {
     }
 
     /// A deterministic random mapping keeps the pacing testable while avoiding
-    /// a metronomic pause. Standard tuning yields roughly 8.4...17.4 seconds.
+    /// a metronomic pause. Standard tuning yields roughly 28...58 seconds.
     pub fn wander_delay(&self, random_unit: f64) -> f64 {
         self.wander_pause * (0.7 + clamped(random_unit, 0.0, 1.0) * 0.75)
     }
@@ -244,7 +255,7 @@ impl Default for RuntimeTuning {
     fn default() -> Self {
         Self::new(
             160.0,
-            12.0,
+            40.0,
             0.46,
             170.0,
             74.0,

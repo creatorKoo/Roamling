@@ -1210,8 +1210,10 @@ func coreLogicTests() -> [LogicTest] {
             try expect(tuning.catchApproachSpeed == 150)
             try expect(tuning.catchWindow == 1.2)
             try expect(tuning.hitRegionScale == 1.3)
-            try expectNear(RuntimeTuning.standard.wanderDelay(randomUnit: 0), 8.4)
-            try expectNear(RuntimeTuning.standard.wanderDelay(randomUnit: 1), 17.4)
+            // The pause was promoted from 12 s to 40 after living with the pet,
+            // so the spread it maps to moved with it.
+            try expectNear(RuntimeTuning.standard.wanderDelay(randomUnit: 0), 28)
+            try expectNear(RuntimeTuning.standard.wanderDelay(randomUnit: 1), 58)
         },
         LogicTest(name: "saved tuning survives a field being added later") {
             // A blob written before gaitCadence existed. The synthesized decoder

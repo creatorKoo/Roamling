@@ -43,7 +43,10 @@ public struct RuntimeTuning: Codable, Equatable, Sendable {
 
     public init(
         walkingSpeed: Double = 160,
-        wanderPause: Double = 12,
+        // Promoted from 12 after two days of living with the pet on Windows.
+        // Twelve seconds between walks reads as restless on a screen you are
+        // working on; forty reads as a cat that has settled.
+        wanderPause: Double = 40,
         crossDisplayWanderChance: Double = 0.46,
         pointerAwarenessDistance: Double = 170,
         catchArmDistance: Double = 74,
@@ -223,11 +226,21 @@ public struct RuntimeTuning: Codable, Equatable, Sendable {
         RustCore.tuningSlowEvadeSpeed(walkingSpeed: walkingSpeed, evadeSpeedScale: evadeSpeedScale)
     }
 
+    /// The two evade radii are fractions of the notice distance rather than
+    /// constants.
+    ///
+    /// As constants they made the "notice distance" slider a lie: raising it
+    /// only widened a `min` that already capped the evade radius at 100, so the
+    /// pet noticed the cursor further away and still refused to move until it
+    /// was just as close. The fractions are the shipped values over the shipped
+    /// default, so at 170 they come out at exactly 100 and 50 and nothing about
+    /// the default pet changes. Multiplied before dividing: one rounding rather
+    /// than two, and the two languages have to agree bit for bit.
     public var pointerConfiguration: PointerInteractionConfiguration {
         PointerInteractionConfiguration(
             awarenessDistance: pointerAwarenessDistance,
-            slowEvadeDistance: 100,
-            fastEvadeDistance: 50,
+            slowEvadeDistance: pointerAwarenessDistance * 100 / 170,
+            fastEvadeDistance: pointerAwarenessDistance * 50 / 170,
             catchDistance: catchArmDistance,
             slowEvadeSpeed: slowEvadeSpeed,
             fastEvadeSpeed: fastEvadeSpeed,
@@ -237,7 +250,7 @@ public struct RuntimeTuning: Codable, Equatable, Sendable {
     }
 
     /// A deterministic random mapping keeps the pacing testable while avoiding
-    /// a metronomic pause. Standard tuning yields roughly 8.4...17.4 seconds.
+    /// a metronomic pause. Standard tuning yields roughly 28...58 seconds.
     public func wanderDelay(randomUnit: Double) -> TimeInterval {
         RustCore.tuningWanderDelay(wanderPause: wanderPause, randomUnit: randomUnit)
     }
