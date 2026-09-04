@@ -12,10 +12,14 @@
 //! The strings still come from the shared `.strings` files. See `strings.rs`.
 
 use crate::strings::localized;
-use roamling_pet::PetAsset;
+
 use windows::core::PCWSTR;
-use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
+use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
+    CreateCompatibleDC, CreateFontW, DeleteDC, DrawTextW, GetDC, ReleaseDC, SelectObject,
+    SetBkMode, SetTextColor, CLEARTYPE_QUALITY,
+    CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH, DT_CENTER, DT_NOCLIP, DT_SINGLELINE,
+    DT_VCENTER, FF_DONTCARE, FW_NORMAL, OUT_DEFAULT_PRECIS, TRANSPARENT,
     CreateBitmap, CreateDIBSection, DeleteObject, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS,
     HBITMAP,
 };
@@ -39,22 +43,25 @@ fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
-/// The pet's own face, rather than a stock application icon: the sheet is
-/// already decoded and the first idle cell is the character's approved look.
-fn icon_from_idle(asset: &PetAsset) -> Option<HICON> {
+
+/// The same mark the macOS menu bar shows.
+///
+/// `RoamlingAppDelegate` sets its status item's title to "🐾" and nothing else,
+/// so the tray gets the same glyph rather than a second, different idea of what
+/// Roamling looks like. It is drawn rather than shipped as an .ico so it lands
+/// on whatever size the shell asks for -- a tray icon is 16px at 100% and 24 at
+/// 150%, and a bitmap picked for one is wrong on the other.
+///
+/// GDI has no colour-emoji path, so the glyph is drawn white on black and the
+/// coverage becomes the alpha. That is what makes the antialiased edge survive:
+/// the shape is the alpha, the colour is chosen here.
+fn paw_icon() -> Option<HICON> {
     let side = unsafe { GetSystemMetrics(SM_CXSMICON) }.max(16);
-    let rect = asset.frame_rect(0)?;
-    let sheet = asset.sheet(rect.sheet)?;
-
-    // Fit the cell inside the square without stretching it; the cell is taller
-    // than it is wide, so this leaves transparent columns either side.
-    let fit = (side as f64 / rect.width as f64).min(side as f64 / rect.height as f64);
-    let draw_w = (rect.width as f64 * fit).round() as i32;
-    let draw_h = (rect.height as f64 * fit).round() as i32;
-    let left = (side - draw_w) / 2;
-    let top = (side - draw_h) / 2;
-
     unsafe {
+        let screen = GetDC(None);
+        let dc = CreateCompatibleDC(screen);
+        ReleaseDC(None, screen);
+
         let info = BITMAPINFO {
             bmiHeader: BITMAPINFOHEADER {
                 biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
@@ -68,42 +75,91 @@ fn icon_from_idle(asset: &PetAsset) -> Option<HICON> {
             ..Default::default()
         };
         let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
-        let colour = CreateDIBSection(None, &info, DIB_RGB_COLORS, &mut bits, None, 0).ok()?;
-        let pixels =
-            std::slice::from_raw_parts_mut(bits as *mut u8, (side * side * 4) as usize);
+        let Ok(bitmap) = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &mut bits, None, 0) else {
+            let _ = DeleteDC(dc);
+            return None;
+        };
+        SelectObject(dc, bitmap);
+        let pixels = std::slice::from_raw_parts_mut(bits as *mut u8, (side * side * 4) as usize);
         pixels.fill(0);
 
-        let stride = sheet.width * 4;
-        for y in 0..draw_h {
-            let source_y = rect.y + (y as usize * rect.height) / draw_h as usize;
-            for x in 0..draw_w {
-                let source_x = rect.x + (x as usize * rect.width) / draw_w as usize;
-                let from = source_y * stride + source_x * 4;
-                let to = (((y + top) * side + (x + left)) * 4) as usize;
-                pixels[to] = sheet.pixels[from + 2];
-                pixels[to + 1] = sheet.pixels[from + 1];
-                pixels[to + 2] = sheet.pixels[from];
-                pixels[to + 3] = sheet.pixels[from + 3];
-            }
+        // Slightly under the box: the glyph has its own side bearings and a
+        // paw drawn edge to edge reads as a smudge at sixteen pixels.
+        let face = wide("Segoe UI Emoji");
+        let font = CreateFontW(
+            -(side * 5 / 8),
+            0,
+            0,
+            0,
+            FW_NORMAL.0 as i32,
+            0,
+            0,
+            0,
+            DEFAULT_CHARSET.0 as u32,
+            OUT_DEFAULT_PRECIS.0 as u32,
+            CLIP_DEFAULT_PRECIS.0 as u32,
+            CLEARTYPE_QUALITY.0 as u32,
+            (DEFAULT_PITCH.0 | FF_DONTCARE.0) as u32,
+            PCWSTR(face.as_ptr()),
+        );
+        let previous = SelectObject(dc, font);
+        SetBkMode(dc, TRANSPARENT);
+        SetTextColor(dc, COLORREF(0x00FF_FFFF));
+        // `wide` appends the terminator Win32 strings want; `DrawTextW` takes a
+        // length instead, so the glyph goes in without one.
+        let mut glyph: Vec<u16> = "\u{1F43E}".encode_utf16().collect();
+        let mut box_ = RECT {
+            left: 0,
+            top: 0,
+            right: side,
+            bottom: side,
+        };
+        DrawTextW(
+            dc,
+            &mut glyph,
+            &mut box_,
+            DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOCLIP,
+        );
+        SelectObject(dc, previous);
+        let _ = DeleteObject(font);
+
+        // Coverage becomes alpha, premultiplied against the colour. Windows
+        // taskbars are light as often as dark, so this is the emoji's own warm
+        // brown rather than a flat black that vanishes on one of them.
+        let (r, g, b) = (0x6Du32, 0x4Cu32, 0x41u32);
+        for pixel in pixels.chunks_exact_mut(4) {
+            let coverage = pixel[0].max(pixel[1]).max(pixel[2]) as u32;
+            pixel[0] = (b * coverage / 255) as u8;
+            pixel[1] = (g * coverage / 255) as u8;
+            pixel[2] = (r * coverage / 255) as u8;
+            pixel[3] = coverage as u8;
         }
 
-        // A 32bpp icon carries its own alpha, so the mask is only there because
-        // the structure demands one. All zero means "let the colour through".
+        // A development affordance: the tray hides new icons behind the Windows
+        // 11 chevron, so there is no way to look at this one on screen.
+        if let Some(path) = std::env::var_os("ROAMLING_DUMP_ICON") {
+            let mut raw = (side as u32).to_le_bytes().to_vec();
+            raw.extend_from_slice(pixels);
+            let _ = std::fs::write(path, raw);
+        }
+
+        // A 32bpp icon carries its own alpha; the mask exists because the
+        // structure demands one, and all-zero means "let the colour through".
         let mask: HBITMAP = CreateBitmap(side, side, 1, 1, None);
         let mut icon_info = ICONINFO {
             fIcon: true.into(),
             xHotspot: 0,
             yHotspot: 0,
             hbmMask: mask,
-            hbmColor: colour,
+            hbmColor: bitmap,
         };
         let icon = CreateIconIndirect(&mut icon_info).ok();
         let _ = DeleteObject(mask);
-        let _ = DeleteObject(colour);
+        let _ = DeleteObject(bitmap);
+        let _ = DeleteDC(dc);
         icon
     }
 }
-
 fn data(hwnd: HWND) -> NOTIFYICONDATAW {
     NOTIFYICONDATAW {
         cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
@@ -116,11 +172,11 @@ fn data(hwnd: HWND) -> NOTIFYICONDATAW {
 /// Returns whether the shell accepted it. Windows 11 files new icons into the
 /// overflow flyout by default, so "registered" and "visible" are not the same
 /// thing -- the user pins it, or it lives behind the chevron.
-pub fn add(hwnd: HWND, asset: &PetAsset) -> bool {
+pub fn add(hwnd: HWND) -> bool {
     let mut entry = data(hwnd);
     entry.uFlags = NIF_MESSAGE | NIF_TIP | NIF_ICON;
     entry.uCallbackMessage = WM_TRAY;
-    if let Some(icon) = icon_from_idle(asset) {
+    if let Some(icon) = paw_icon() {
         entry.hIcon = icon;
     }
     let tip = wide("Roamling");

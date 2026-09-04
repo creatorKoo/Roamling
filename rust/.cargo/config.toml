@@ -1,0 +1,13 @@
+# SPDX-FileCopyrightText: 2026 GooBeom Jeoung
+# SPDX-License-Identifier: GPL-3.0-only
+
+# Link the C runtime statically on Windows.
+#
+# Without this the shell needs VCRUNTIME140.dll, which is usually present but
+# is not guaranteed on a clean machine -- and "usually" is the worst kind of
+# dependency for something a user downloads and double-clicks. Static makes the
+# exe answer only to DLLs that ship with Windows itself.
+#
+# macOS is untouched: this is keyed to the MSVC target.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

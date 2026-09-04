@@ -1010,19 +1010,29 @@ let focus = if !is_watching {
 
 ### W6 — 패키징
 
-10절의 실측(17파일 · 56.0 MB · zip 21.3 MB · 단일 파일 불가)이 이 게이트의 입력이다.
-
-**Inno Setup + per-user 설치.** `scripts/build-installer.ps1`이 `scripts/build-app.sh`의
-대응물이 된다:
+**10절의 입력은 이제 유효하지 않다.** 그것은 Swift 기준(17파일 · 56.0 MB · 단일 파일 불가)이고,
+D로 가면서 사라졌다. 실측 (2026-09-04):
 
 ```text
-1. swift build -c release -Xlinker /SUBSYSTEM:WINDOWS -Xlinker /ENTRY:mainCRTStartup
-2. exe + *.resources + 런타임 DLL 16개를 스테이징
-3. iscc roamling.iss  ->  Roamling-Setup.exe (약 21 MB)
+Swift 계획   17파일 · 56.0 MB · zip 21.3 MB · 단일 파일 불가
+Rust 실제     1파일 ·  2.1 MB · OS 밖 DLL 0개
 ```
 
-2번의 DLL 수집은 `dumpbin /dependents`를 재귀 순회해 실제로 쓰이는 것만 모은다. W0에서
-그 방법으로 56 MB 폴더를 만들어 **PATH에서 Swift를 지운 채 실행되는 것까지 확인했다.**
+**진짜 단일 파일이다.** `rust/.cargo/config.toml`이 MSVC 타깃에 `+crt-static`을 걸어
+`VCRUNTIME140.dll`까지 없앴다 — 그것은 대개 있지만 깨끗한 기계에 보장되지는 않고, 받아서
+더블클릭하는 것에 "대개"는 최악의 의존이다. 남은 것은 Windows 자체가 싣는 DLL뿐이다
+(`kernel32` · `user32` · `gdi32` · `dxgi` · `d3d11` · `dwmapi` · `shell32`).
+
+**그래서 W6이 크게 줄었다.** DLL 재귀 수집도, 스테이징도 필요 없다:
+
+```text
+1. cargo build -p roamling-win --release
+2. iscc roamling.iss  ->  Roamling-Setup.exe
+```
+
+콘솔은 `#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]`가 release에서만
+없애므로 링커 플래그도 필요 없다. 아이콘도 `.ico`를 싣지 않는다 — 트레이 아이콘은 macOS가
+쓰는 것과 같은 🐾 글리프를 `SM_CXSMICON` 크기에 맞춰 그때그때 그린다.
 
 **per-user 설치가 핵심 선택이다.** `%LOCALAPPDATA%\Programs\Roamling`에 깔면 **UAC 프롬프트가
 아예 뜨지 않고**, 자동시작도 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`이라 권한이

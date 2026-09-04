@@ -158,7 +158,7 @@ fn main() -> Result<()> {
     let player = PetAnimationPlayer::new(&resolver);
 
     let hwnd = create_window()?;
-    let tray_ok = tray::add(hwnd, &asset);
+    let tray_ok = tray::add(hwnd);
     APP.with(|slot| {
         *slot.borrow_mut() = Some(App {
             pet,
