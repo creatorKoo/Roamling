@@ -195,6 +195,17 @@ Windows는 **기본값과 같은 값을 저장하지 않고 지우도록** 고�
 업데이트해도 macOS가 같은 앱으로 보고 **권한이 유지된다.** ad-hoc이면 업데이트마다
 접근성·화면기록이 조용히 날아간다.
 
+**`.p12`는 키체인 접근이 내보낸 그대로 쓴다 — 다시 감싸지 않는다.** macos-14에서 재보니
+OpenSSL이 쓸 수 있는 형식 중 **`-legacy`만 `security import`가 받는다**(기본값도, AES +
+SHA-1 MAC도 거부된다). 그 legacy가 곧 키체인이 쓰는 형식이다. RC2-40이 약하다는 지적은
+맞지만 **답은 긴 암호지 다른 컨테이너가 아니다** — 바꿨다가 v0.3.0의 macOS 잡이
+`MAC verification failed`로 멈췄고, 그때 `openssl`은 같은 암호로 파일을 잘 열었다.
+`security`만 못 읽은 것이다.
+
+`.github/workflows/check-signing.yml`이 이 쌍을 **릴리스 없이** 시험한다
+(`gh workflow run check-signing.yml`). 빈 secret · 깨진 base64 · 틀린 암호 · 형식 불일치를
+구분해서 알려준다.
+
 `.p12`와 암호는 GitHub Secret(`MACOS_CERT_P12` · `MACOS_CERT_PASSWORD`)에 있고
 `.github/workflows/release.yml`의 macOS 잡이 임시 키체인에 넣어 서명한다. **`build-app.sh`는
 이제 identity 없이는 빌드를 거부한다**(`ROAMLING_ALLOW_ADHOC=1`로만 우회).

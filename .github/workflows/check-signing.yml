@@ -51,9 +51,19 @@ jobs:
 
           # Then the password, by itself, before the keychain is involved. This
           # separates "wrong password" from "keychain would not take it".
+          #
+          # Both ways, because the format matters here more than anywhere else.
+          # Keychain Access writes the old PKCS#12 encryption, which OpenSSL 3
+          # moved behind `-legacy` -- and that old format is the *only* one
+          # `security import` accepts. So a file that needs `-legacy` is the
+          # right file, and one that does not is the one that will fail below.
           if openssl pkcs12 -in "$RUNNER_TEMP/cert.p12" \
+              -passin env:MACOS_CERT_PASSWORD -noout -legacy 2>/dev/null; then
+            echo "password opens the file (legacy encryption, which is what security import wants)"
+          elif openssl pkcs12 -in "$RUNNER_TEMP/cert.p12" \
               -passin env:MACOS_CERT_PASSWORD -noout 2>/dev/null; then
-            echo "password opens the file"
+            echo "::warning::password opens the file, but it is not the legacy encryption"
+            echo "::warning::security import only reads what Keychain Access writes; expect it to refuse this"
           else
             echo "::error::MACOS_CERT_PASSWORD does not open MACOS_CERT_P12."
             echo "Check it locally against the same file:"
@@ -73,7 +83,13 @@ jobs:
           status=$?
           rm -f "$RUNNER_TEMP/cert.p12"
           if [ $status -ne 0 ]; then
-            echo "::error::the password is right but the keychain refused the file"
+            echo "::error::the password is right but the keychain refused the file."
+            echo "Measured on macos-14: of the ways OpenSSL can write a PKCS#12,"
+            echo "only the legacy one imports -- not the default, not AES with a"
+            echo "SHA-1 MAC. Re-export from Keychain Access, which writes exactly"
+            echo "that, and give it a long password: the old format's weakness is"
+            echo "a weak KDF, and a long password is the answer to that rather"
+            echo "than a container security cannot read."
             exit 1
           fi
 
