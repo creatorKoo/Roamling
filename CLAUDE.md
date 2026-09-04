@@ -56,6 +56,20 @@ XCTest 대신 dependency-free executable harness를 쓴다. Command Line Tools�
 compiler/SDK mismatch가 나면 두 script 모두 `ROAMLING_SWIFT_SDK=/path/to/MacOSX.sdk`
 로 우회한다. 새 Swift 파일에는 기존 파일과 같은 2줄 SPDX 헤더를 넣는다.
 
+## 마크는 하나다 — 🐾
+
+메뉴바 status item의 title, Windows 트레이 아이콘, macOS 앱 아이콘이 **같은 글리프**를 쓴다.
+셋 다 **그려서** 쓴다 — 비트맵을 넣어 두면 요청된 크기와 어긋난다.
+
+- macOS 메뉴바: `RoamlingAppDelegate`가 title에 `"🐾"`
+- Windows 트레이: `tray.rs`의 `paw_icon()`이 GDI로 그린다
+- macOS 앱 아이콘: `scripts/build-icon.sh` → `assets/Roamling.icns` (커밋됨)
+
+앱 아이콘만 파일이어야 해서 커밋한다. 마크를 바꾸면 `build-icon.sh`를 다시 돌린다.
+**글리프의 실제 잉크를 재서 맞춘다** — 폰트 크기를 고르면 side bearing을 추측하게 되고,
+추측하면 여백만 넓고 발바닥은 작아진다. 그리고 **크기마다 따로 그린다**: 1024를 줄이면
+16px에서 발가락이 뭉갠다. 작은 크기일수록 여백을 줄이고 마크를 키운다.
+
 ## 사용자에게 보이는 문자열
 
 menu, alert, tuning panel copy는 전부 `Sources/RoamlingShell/Resources/{en,ko}.lproj/
