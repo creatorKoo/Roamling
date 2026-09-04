@@ -3,12 +3,25 @@
 #
 # Cuts a release when a `v*` tag is pushed.
 #
-# The one secret this needs is ROAMLING_UPDATE_SECRET_KEY: the Ed25519 key whose
-# public half is compiled into the app. Without it a release can still be built,
-# but nothing already installed will accept it -- see docs/windows.md, W7.
+# Three secrets:
 #
-# macOS is not here yet. It joins when the Swift side adopts `roamling-update`;
-# a job that cannot be tested would only fail the first real release.
+#   ROAMLING_UPDATE_SECRET_KEY  the Ed25519 key whose public half is compiled
+#                               into both apps. Without it a release can still
+#                               be built, but nothing already installed will
+#                               accept it -- see docs/windows.md, W7.
+#   MACOS_CERT_P12              the signing certificate, base64 of a .p12.
+#   MACOS_CERT_PASSWORD         its password.
+#
+# The macOS certificate is self-signed rather than a Developer ID, which is a
+# decision with a cost attached: a first download is blocked until the user
+# goes to System Settings and says to open it anyway. What it buys is the thing
+# that matters more, which is that the designated requirement stays pinned to
+# the certificate instead of the binary's hash -- so an update is the same app
+# to macOS and the user keeps the permissions they granted.
+#
+# The two builds run in parallel and a third job signs one appcast covering
+# both. It has to be one: the manifest is signed as a whole, so two jobs each
+# writing their own would leave whichever published last as the only feed.
 
 name: Release
 
@@ -74,8 +87,120 @@ jobs:
           }
           & $iscc "/DAppVersion=${{ steps.version.outputs.version }}" installer\roamling.iss
 
-      - name: Sign the release
+      # Staged flat first. `upload-artifact` keeps whatever directory the
+      # listed paths have in common, so uploading them where they were built
+      # would put the exe under `rust/target/release/` in the artifact and the
+      # publish job would not find it where it looks.
+      - name: Stage
         shell: bash
+        run: |
+          mkdir -p dist
+          cp rust/target/release/roamling.exe dist/
+          cp build/Roamling-Setup.exe dist/
+
+      - name: Hand the build on
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*
+          if-no-files-found: error
+
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Work out the version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            version="${{ inputs.version }}"
+          else
+            version="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          # Both files have to agree with the tag. `rust/Cargo.toml` is what
+          # the updater compares against, and `Support/Info.plist` is what the
+          # About box shows; either one drifting is a bug a user sees.
+          declared=$(grep -m1 '^version' rust/Cargo.toml | cut -d'"' -f2)
+          plist=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' \
+            Support/Info.plist)
+          if [ "$declared" != "$version" ] || [ "$plist" != "$version" ]; then
+            echo "tag says $version, Cargo.toml says $declared, Info.plist says $plist" >&2
+            exit 1
+          fi
+
+      - name: Import the signing certificate
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          if [ -z "$MACOS_CERT_P12" ]; then
+            echo "::error::MACOS_CERT_P12 is not set; this build would be ad-hoc" >&2
+            exit 1
+          fi
+          keychain="$RUNNER_TEMP/roamling.keychain-db"
+          # The keychain exists for this job only, so its password is worth
+          # nothing outside it and is never written down.
+          keychain_password="$(openssl rand -base64 24)"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 900 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          echo "$MACOS_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" \
+            -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
+          rm -f "$RUNNER_TEMP/cert.p12"
+          # Without this, codesign stops to ask for permission to use the key,
+          # and a headless runner has nobody to ask.
+          security set-key-partition-list -S apple-tool:,apple: \
+            -k "$keychain_password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+          security find-identity -v -p codesigning "$keychain"
+
+      - name: Test
+        run: ./scripts/test.sh
+
+      - name: Build
+        env:
+          ROAMLING_CODESIGN_IDENTITY: Roamling
+        run: ./scripts/build-app.sh release
+
+      - name: Package
+        run: ./scripts/build-dmg.sh "${{ steps.version.outputs.version }}"
+
+      # Both are already in `build/`, which is the directory they have in
+      # common, so they arrive at the top of the artifact.
+      - name: Hand the build on
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: |
+            build/Roamling-${{ steps.version.outputs.version }}.dmg
+            build/Roamling-${{ steps.version.outputs.version }}.zip
+          if-no-files-found: error
+
+  publish:
+    needs: [windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Work out the version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Sign the release
         env:
           ROAMLING_UPDATE_SECRET_KEY: ${{ secrets.ROAMLING_UPDATE_SECRET_KEY }}
         run: |
@@ -87,14 +212,23 @@ jobs:
           base="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${version}"
           # The URL is the tagged one, not `latest`: the feed says which build it
           # is describing, and `latest` would drift out from under the signature.
+          #
+          # macOS updates from the zip rather than the dmg. Replacing a running
+          # app out of a disk image means a mount point and an unmount that can
+          # fail with the volume busy; a zip is bytes in and a bundle out.
+          #
+          # Only arm64 is listed, because only arm64 is built. An Intel Mac has
+          # no entry and will be told it is up to date rather than handed
+          # something it cannot run. Covering it means a universal build --
+          # both Rust targets and `lipo` -- and is not done yet.
           cargo run --manifest-path rust/Cargo.toml -q -p roamling-update \
             --bin roamling-appcast -- sign "$version" \
             "https://github.com/${GITHUB_REPOSITORY}/releases/tag/v${version}" \
-            "windows-x86_64=${base}/roamling.exe=rust/target/release/roamling.exe"
+            "windows-x86_64=${base}/roamling.exe=artifacts/roamling.exe" \
+            "macos-arm64=${base}/Roamling-${version}.zip=artifacts/Roamling-${version}.zip"
           cat appcast.json
 
       - name: Publish
-        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -102,7 +236,9 @@ jobs:
           gh release create "v${version}" \
             --title "Roamling ${version}" \
             --generate-notes \
-            rust/target/release/roamling.exe \
-            build/Roamling-Setup.exe \
+            artifacts/roamling.exe \
+            artifacts/Roamling-Setup.exe \
+            "artifacts/Roamling-${version}.dmg" \
+            "artifacts/Roamling-${version}.zip" \
             appcast.json \
             appcast.json.sig
