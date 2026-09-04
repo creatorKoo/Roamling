@@ -80,7 +80,7 @@ jobs:
           version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Support/Info.plist)"
           hdiutil attach "build/Roamling-$version.dmg" -readonly -nobrowse -mountpoint /tmp/arranged
           test -f /tmp/arranged/.DS_Store
-          test -f /tmp/arranged/.background/background.tiff
+          test -f /tmp/arranged/.background/background.png
           hdiutil detach /tmp/arranged -quiet
           echo "the window has its picture and its layout"
 

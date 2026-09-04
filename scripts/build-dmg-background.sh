@@ -22,12 +22,8 @@ swiftc -O -o "$WORK/render" \
   "$REPOSITORY_DIR/assets/dmg/render-dmg-background.swift" -framework AppKit
 "$WORK/render" "$WORK"
 
-# One file with both resolutions in it. Finder picks the right one per display,
-# and a folder holding two loose PNGs would need the .DS_Store to name both.
-tiffutil -cathidpicheck "$WORK/dmg-background.png" "$WORK/dmg-background@2x.png" \
-  -out "$REPOSITORY_DIR/assets/dmg-background.tiff" >/dev/null
-
-echo "Built $REPOSITORY_DIR/assets/dmg-background.tiff"
+cp "$WORK/dmg-background.png" "$REPOSITORY_DIR/assets/dmg-background.png"
+echo "Built $REPOSITORY_DIR/assets/dmg-background.png"
 
 if ! command -v uv >/dev/null 2>&1; then
   echo "uv is required to write the .DS_Store (https://docs.astral.sh/uv/)." >&2
@@ -42,7 +38,7 @@ hdiutil create -size 8m -fs APFS -volname "Roamling" -type UDIF -ov "$SCRATCH" >
 hdiutil attach "$SCRATCH" -noverify -noautoopen -nobrowse >/dev/null
 trap 'hdiutil detach /Volumes/Roamling -quiet 2>/dev/null || true; rm -rf "$WORK"' EXIT
 mkdir -p /Volumes/Roamling/.background
-cp "$REPOSITORY_DIR/assets/dmg-background.tiff" /Volumes/Roamling/.background/background.tiff
+cp "$REPOSITORY_DIR/assets/dmg-background.png" /Volumes/Roamling/.background/background.png
 
 uv run --quiet --with ds-store --with mac-alias \
   python "$REPOSITORY_DIR/assets/dmg/write-ds-store.py" \

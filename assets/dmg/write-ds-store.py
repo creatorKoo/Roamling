@@ -26,10 +26,16 @@ VOLUME = "/Volumes/Roamling"
 # Kept in step with assets/dmg/render-dmg-background.swift, which draws the
 # arrow between these two points. The lists have to agree or it points at
 # nothing.
-WINDOW = (200, 120, 840, 520)   # left, top, right, bottom -- 640 x 400 of content
+# left, top, right, bottom of the *frame*, not the content. Finder takes the
+# title bar out of this -- 27 points -- and then the path bar too if the reader
+# has it on, which is a setting a disk image cannot reach. Asking for 400 left
+# 341 to draw in and cut the captions off the bottom, so this asks for the
+# content it wants plus the title bar, and the picture keeps its last 60 points
+# empty for the path bar to eat.
+WINDOW = (200, 120, 840, 548)   # 640 x 428 of frame -> 400 of content, bare
 ICON_SIZE = 112
-POSITIONS = {"Roamling.app": (160, 185), "Applications": (480, 185)}
-BACKGROUND = ".background/background.tiff"
+POSITIONS = {"Roamling.app": (160, 165), "Applications": (480, 165)}
+BACKGROUND = ".background/background.png"
 
 
 def main(output):

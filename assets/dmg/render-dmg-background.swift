@@ -1,8 +1,20 @@
 import AppKit
 
-// The picture behind the disk image window. It says one thing -- put the app in
-// Applications -- and says it with an arrow, because the two icons Finder draws
-// on top of it are the sentence and this is only the verb between them.
+// The picture behind the disk image window. It says two things: drag the app
+// across, and expect the first launch to be refused.
+//
+// One resolution, deliberately. Finder draws this a point per pixel from the
+// top left of the window and does not scale it, so the image size is the
+// layout, and a two-page hidpi TIFF only gave it a second size to disagree
+// about. Softness on a window seen once is the cheaper problem.
+//
+// Everything sits in the top 340. The window height in the .DS_Store is the
+// *frame* -- title bar included -- and Finder then takes another 30-odd points
+// for the path bar if the reader has it switched on, which is a Finder-wide
+// setting no disk image can override. Measured on a window asking for 400: 27
+// points of title bar, 32 of path bar, 341 of content, and three lines of
+// caption drawn below all of it. So the bottom of this picture is padding, and
+// padding is what gets cut.
 //
 // The slots are empty on purpose. Finder puts Roamling.app over the left one and
 // the Applications alias over the right one, and anything drawn underneath shows
@@ -15,8 +27,8 @@ import AppKit
 // Kept in step with `scripts/build-dmg.sh`, which tells Finder where to put the
 // icons. The two lists have to agree or the arrow points at nothing.
 let canvas = NSSize(width: 640, height: 400)
-let appSlot = CGPoint(x: 160, y: 185)      // Finder coordinates: y down from the top
-let applicationsSlot = CGPoint(x: 480, y: 185)
+let appSlot = CGPoint(x: 160, y: 165)      // Finder coordinates: y down from the top
+let applicationsSlot = CGPoint(x: 480, y: 165)
 
 // The same warm cream as the app icon, so the window a user meets first and the
 // icon they end up with are recognisably one thing.
@@ -74,29 +86,44 @@ func render(scale: CGFloat) -> NSBitmapImageRep {
     point.close()
     point.fill()
 
-    // Under the arrow rather than under an icon, where Finder writes the names.
-    let caption = NSAttributedString(
-        string: "Drag Roamling into Applications",
-        attributes: [
-            .font: NSFont.systemFont(ofSize: 15, weight: .medium),
-            .foregroundColor: ink.withAlphaComponent(0.62)
-        ]
+    // Below the icons, where Finder has stopped writing names.
+    //
+    // The second and third lines are the one thing a person cannot work out
+    // from the window: the app is signed with a certificate Apple has never
+    // seen, so the first launch is refused outright and the only way through is
+    // a switch in System Settings. Without this the app looks broken, which is
+    // a worse first impression than an extra line of text.
+    func caption(_ text: String, size points: CGFloat, alpha: CGFloat, atY y: CGFloat) {
+        let line = NSAttributedString(
+            string: text,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: points, weight: points > 13 ? .medium : .regular),
+                .foregroundColor: ink.withAlphaComponent(alpha)
+            ]
+        )
+        let measured = line.size()
+        line.draw(at: CGPoint(
+            x: (canvas.width - measured.width) / 2,
+            y: flipped(CGPoint(x: 0, y: y)).y - measured.height
+        ))
+    }
+    caption("Drag Roamling into Applications", size: 15, alpha: 0.62, atY: 270)
+    caption(
+        "First launch is refused \u{2014} System Settings \u{203A} Privacy & Security \u{203A} Open Anyway",
+        size: 11.5, alpha: 0.44, atY: 298
     )
-    let size = caption.size()
-    caption.draw(at: CGPoint(
-        x: (canvas.width - size.width) / 2,
-        y: flipped(CGPoint(x: 0, y: 300)).y
-    ))
+    caption(
+        "첫 실행은 차단됩니다 \u{2014} 시스템 설정 \u{203A} 개인정보 보호 및 보안 \u{203A} 그래도 열기",
+        size: 11.5, alpha: 0.44, atY: 316
+    )
 
     NSGraphicsContext.restoreGraphicsState()
     return rep
 }
 
 let directory = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "."
-for (scale, name) in [(CGFloat(1), "dmg-background.png"), (CGFloat(2), "dmg-background@2x.png")] {
-    guard let data = render(scale: scale).representation(using: .png, properties: [:]) else {
-        fatalError("could not encode \(name)")
-    }
-    try! data.write(to: URL(fileURLWithPath: "\(directory)/\(name)"))
-    print("wrote \(name)")
+guard let data = render(scale: 1).representation(using: .png, properties: [:]) else {
+    fatalError("could not encode the background")
 }
+try! data.write(to: URL(fileURLWithPath: "\(directory)/dmg-background.png"))
+print("wrote dmg-background.png")

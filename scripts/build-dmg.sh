@@ -92,8 +92,8 @@ xattr -cr "$MOUNT_POINT/Roamling.app"
 # release runner does not have, or two Python packages a release should not
 # need to fetch.
 mkdir -p "$MOUNT_POINT/.background"
-cp "$REPOSITORY_DIR/assets/dmg-background.tiff" \
-  "$MOUNT_POINT/.background/background.tiff"
+cp "$REPOSITORY_DIR/assets/dmg-background.png" \
+  "$MOUNT_POINT/.background/background.png"
 cp "$REPOSITORY_DIR/assets/dmg/DS_Store" "$MOUNT_POINT/.DS_Store"
 # Verified where it will actually be read from, which is the only place the
 # stamp shows up.
