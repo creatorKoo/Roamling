@@ -147,15 +147,31 @@ Ed25519 서명)까지 실물로 돈다. 첫 릴리스 `v0.2.0`이 나가 있고 
 347포인트 밖에 있었다 — AppKit에서 불가능한 상황이고, 하필 착지가 방해받지 않는 유일한
 거리였다. 그래서 A1의 버그를 트레이스가 잡지 못하고 있었다.
 
-### 남은 것 — 자동 업데이트의 macOS 절반 (지출 결정 대기)
+### D. 자동 업데이트 macOS 절반 — 2026-09-04 완료
 
-`rust/roamling-update`가 결정 로직을 다 들고 있고 양 플랫폼 공유다. macOS가 할 일은
-uniffi로 그것을 가져다 쓰고 `.app` 교체와 재실행을 쓰는 것 — 대략 80줄이다. 그러면
-`.github/workflows/release.yml`에 mac 잡 한 개가 붙고 같은 appcast에 줄 하나가 는다.
+`rust/roamling-update`의 결정 로직을 uniffi로 가져다 쓰고, 이 기계에 닿는 셋만 Swift가
+한다: URLSession으로 받고, `ditto`로 풀고, 번들을 바꾼다. **macOS는 실행 중인 앱을 바꿀 수
+있다** — 프로세스가 경로가 아니라 inode를 들고 있어서, 번들을 치우고 새것을 놓아도 계속
+돈다. Windows가 이름을 바꿔 다음 실행에 넘기는 것과 여기서 갈린다.
 
-**막는 것은 코드가 아니라 서명이다.** 배포 가능한 `.app`은 Developer ID 서명 + notarize가
-필요하고 그건 **Apple Developer Program 연 $99**가 있어야 나온다. 빌드와 테스트를 CI에서
-돌리는 것은 공개 저장소라 무료다. 자세한 것은 `docs/windows.md` W7.
+쓰기 전에 두 번 증명한다: Ed25519 서명이 "우리 바이트"를, `codesign --verify --deep
+--strict`가 "macOS가 실행에 동의함"을 말한다.
+
+**서명은 자체 서명 인증서로 간다 (Developer ID 아님).** 대가는 첫 다운로드가 막히는 것 —
+사용자가 시스템 설정 → 개인정보 보호 및 보안에서 "그래도 열기"를 한 번 눌러야 한다.
+얻는 것이 더 크다: designated requirement가 cdhash가 아니라 **인증서**에 고정되므로
+업데이트해도 macOS가 같은 앱으로 보고 **권한이 유지된다.** ad-hoc이면 업데이트마다
+접근성·화면기록이 조용히 날아간다.
+
+`.p12`와 암호는 GitHub Secret(`MACOS_CERT_P12` · `MACOS_CERT_PASSWORD`)에 있고
+`.github/workflows/release.yml`의 macOS 잡이 임시 키체인에 넣어 서명한다. **`build-app.sh`는
+이제 identity 없이는 빌드를 거부한다**(`ROAMLING_ALLOW_ADHOC=1`로만 우회).
+
+배포물은 둘이다 — 사람이 받는 `.dmg`(Applications 심볼릭 링크로 드래그드롭), 업데이터가
+받는 `.zip`. **arm64만 빌드한다**: Intel Mac은 피드에 항목이 없어 "최신"이라는 답을 받고,
+실행 못 할 것을 받지는 않는다. 덮으려면 universal 빌드(두 Rust 타깃 + `lipo`)가 필요하다.
+
+Apple Developer Program 연 $99는 **여전히 안 냈다.** 내면 첫 다운로드 마찰이 사라진다.
 
 포팅 규칙은 그대로다: **살아 있는 구현은 항상 1벌.** Swift 원본은 대조군으로 Core에
 남아 있고(`MovementController` · `PlacementDirector` · `AttentionModel` 등), 단위마다
