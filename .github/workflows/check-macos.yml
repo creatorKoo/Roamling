@@ -1,19 +1,20 @@
 # SPDX-FileCopyrightText: 2026 GooBeom Jeoung
 # SPDX-License-Identifier: GPL-3.0-only
 #
-# Answers one question -- do MACOS_CERT_P12 and MACOS_CERT_PASSWORD go
-# together -- without cutting a release to find out.
+# Everything the release's macOS job does, except publish.
 #
-# The release workflow used to be the only place that touched them, so the only
-# way to test a change to either was to publish, and a wrong password came back
-# as `MAC verification failed during PKCS12 import` eleven minutes into a run
-# whose Windows half had already succeeded.
+# The release workflow was the only place any of this ran, so the only way to
+# test a change was to cut a release -- and the first attempt stopped at `MAC
+# verification failed during PKCS12 import`, eleven minutes in, on a run whose
+# Windows half had already finished.
 #
-# Nothing here is published and nothing secret is printed. The certificate's
-# name is, because a certificate's subject is public by definition -- it is in
-# every signature it has ever made.
+# So: the certificate, then the tests, then the build, then the packaging, and
+# a look at what came out. Nothing is uploaded and no tag is touched.
+#
+# Nothing secret is printed. The certificate's name is, because a certificate's
+# subject is public by definition -- it is in every signature it has ever made.
 
-name: Check signing
+name: Check macOS
 
 on: workflow_dispatch
 
@@ -21,6 +22,8 @@ jobs:
   macos:
     runs-on: macos-14
     steps:
+      - uses: actions/checkout@v4
+
       - name: Check the certificate and its password
         env:
           MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
@@ -77,6 +80,10 @@ jobs:
           keychain="$RUNNER_TEMP/check.keychain-db"
           keychain_password="$(openssl rand -base64 24)"
           security create-keychain -p "$keychain_password" "$keychain"
+          # Long enough to outlast the build below. The default relocks, and a
+          # locked keychain fails the sign three steps later with an error that
+          # says nothing about locking.
+          security set-keychain-settings -lut 3600 "$keychain"
           security unlock-keychain -p "$keychain_password" "$keychain"
           security import "$RUNNER_TEMP/cert.p12" -k "$keychain" \
             -P "$MACOS_CERT_PASSWORD" -T /usr/bin/codesign
@@ -123,3 +130,46 @@ jobs:
             *"certificate leaf"*) echo "pinned to the certificate -- this is what a release needs" ;;
             *) echo "::error::signed ad-hoc, which would reset the user's permissions on every update"; exit 1 ;;
           esac
+          # Left in the search list for the steps below, which are the release's
+          # own and must find the identity the same way.
+          echo "keychain=$keychain" >> "$GITHUB_ENV"
+
+      - name: Test
+        run: ./scripts/test.sh
+
+      - name: Build
+        env:
+          ROAMLING_CODESIGN_IDENTITY: Roamling
+        run: ./scripts/build-app.sh release
+
+      - name: Package
+        run: ./scripts/build-dmg.sh "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Support/Info.plist)"
+
+      - name: Look at what came out
+        run: |
+          set -e
+          version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' Support/Info.plist)"
+          ls -lh "build/Roamling-$version.dmg" "build/Roamling-$version.zip"
+
+          # The dmg is what a person installs, so it is checked the way a person
+          # opens it: mounted and dragged out. What is asked of the copy is that
+          # its seal survived the round trip -- hdiutil stamps the bundle with a
+          # Finder attribute on the way in, which broke the signature until
+          # build-dmg.sh started stripping it inside the mounted image.
+          #
+          # Not spctl. A self-signed certificate is not one Gatekeeper knows, so
+          # the first launch needs right-click -> Open however well this signs.
+          # That is the cost of not paying Apple, and it is separate from the
+          # thing being tested here.
+          hdiutil attach "build/Roamling-$version.dmg" -readonly -nobrowse -mountpoint /tmp/dmg
+          test -L /tmp/dmg/Applications
+          cp -R /tmp/dmg/Roamling.app "$RUNNER_TEMP/dragged.app"
+          hdiutil detach /tmp/dmg -quiet
+          codesign --verify --deep --strict "$RUNNER_TEMP/dragged.app"
+          codesign -d -r- "$RUNNER_TEMP/dragged.app" 2>&1 |
+            sed -n 's/^#* *designated => /dragged out of the dmg: /p'
+
+          # And the zip, which is what the updater unpacks.
+          ditto -x -k "build/Roamling-$version.zip" "$RUNNER_TEMP/unzipped"
+          codesign --verify --deep --strict "$RUNNER_TEMP/unzipped/Roamling.app"
+          echo "the zip the updater would install verifies too"
