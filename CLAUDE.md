@@ -81,6 +81,8 @@ RoamlingMac/      AppKit display, pointer, overlay, 메뉴 렌더러, app delega
 RoamlingApp/      entry point
 rust/roamling-pet/   시트 디코딩(image 크레이트)과 내장 마스코트. makeStandardMochi의
                   이식이고, 옛 authored 시트와 fallback은 아직 Swift에 있다
+rust/roamling-agent/ RoamlingSources의 이식. 훅 payload 정규화 · 인증 loopback
+                  수신기 · 훅 설치 제거. 제품별 payload는 이 크레이트를 안 나간다
 rust/roamling-win/   Windows 셸. 코어를 rlib으로 직접 링크한다 — 이쪽은 FFI가 없다.
                   Win32 타입은 platform.rs를 넘지 않는다
 ```

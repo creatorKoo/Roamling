@@ -479,6 +479,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
+name = "roamling-agent"
+version = "0.1.0"
+dependencies = [
+ "roamling-core",
+ "serde_json",
+]
+
+[[package]]
 name = "roamling-core"
 version = "0.1.0"
 dependencies = [
@@ -497,6 +505,7 @@ dependencies = [
 name = "roamling-win"
 version = "0.1.0"
 dependencies = [
+ "roamling-agent",
  "roamling-core",
  "roamling-pet",
  "windows",

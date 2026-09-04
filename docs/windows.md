@@ -980,8 +980,10 @@ Window / Focus / Capture. 5절 참조.
 | provider | 구현 | 도달 가능 |
 |---|---|---|
 | **Capture** (빈 공간) | ✅ DXGI Duplication | ✅ 실측으로 확인 |
-| **Focus** (캐럿) | ✅ `focus.rs`, `GetGUIThreadInfo` | ❌ **불려지지 않는다** |
+| **Focus** (캐럿) | ✅ `focus.rs`, `GetGUIThreadInfo` | ✅ **W5b로 열렸다** — 아래 |
 | **Window** | ❌ | — 소비자가 없다 |
+
+*아래 진단은 W5b 이전 상태다. Focus 행은 W5b 절이 뒤집는다.*
 
 **둘의 공백이 같은 뿌리다: `RoamlingSources`(agent 연동)가 아직 이식되지 않았다.**
 
@@ -1001,12 +1003,85 @@ let focus = if !is_watching {
 `windowProvider.currentActivityLocationHint()`이고, 그 값은 `CompanionEvent`에 붙는다 —
 이벤트가 없으면 붙일 곳이 없다.
 
-**그래서 트레이 메뉴에는 "커서 인식"이 없다.** 코드는 `focus.rs`에 있고 설정 키도 있지만,
-켜도 아무 일이 일어나지 않는 토글을 보여주는 것은 거짓 약속이다. `RoamlingSources`가
-오면 그때 메뉴에 넣는다.
+**그래서 트레이 메뉴에는 "커서 인식"이 없었다.** 코드는 `focus.rs`에 있고 설정 키도
+있었지만, 켜도 아무 일이 일어나지 않는 토글을 보여주는 것은 거짓 약속이다. 같은 날
+`RoamlingSources`가 왔고, 그래서 지금은 메뉴에 있다.
 
 `Capture`는 다르다 — `luminance_requests`는 배회와 배치 과정에서 나오므로 agent 없이도
 돈다. 로그에서 실제로 확인했다.
+
+#### W5b — agent 연동 (`rust/roamling-agent`, 2026-09-04)
+
+`RoamlingSources`의 이식이다. 위 진단이 "Focus와 Window가 같은 뿌리에서 막혀 있다"고
+적은 그 뿌리를 치운다. 세 조각이고 macOS와 같은 분할이다.
+
+| 모듈 | Swift 원본 | 하는 일 |
+|---|---|---|
+| `normalize.rs` | `ClaudeCodeEventNormalizer` · `CodexEventNormalizer` | 훅 payload -> `CompanionEvent` |
+| `receiver.rs` | `LoopbackHookReceiver` | 인증된 loopback 엔드포인트 |
+| `installer.rs` | `ClaudeCodeHookInstaller` · `CodexHookInstaller` | 사용자 설정에 훅을 쓰고 지우기 |
+
+**계약은 그대로 옮겼다.** 포트는 Claude Code 47831 · Codex 47832, 헤더는
+`X-Roamling-Token`, 토큰은 macOS와 같은 설정 키(`roamling.claudeCodeHookToken` /
+`roamling.codexHookToken`)에 저장된다. 토큰이 매번 새로 생기면 이미 설치된 훅 명령이
+전부 조용히 깨지므로, 24자 이상이면 있던 것을 재사용한다.
+
+**프라이버시 선은 코드에 있다.** 디코더는 `session_id` · `hook_event_name` ·
+`tool_name` · `notification_type` 넷만 읽는다. 프롬프트·트랜스크립트·도구 입출력은
+읽는 코드 자체가 없으므로 나중에 실수로 새어 나갈 자리가 없다.
+
+세 가지가 Windows에서만 다르다.
+
+- **소켓.** macOS는 Apple `Network` 프레임워크를 피하려고 BSD 소켓을 직접 썼다.
+  여기서는 `std::net::TcpListener`다. 스레드 하나가 accept하고 채널로 넘기며, 틱이
+  `try_iter`로 비운다 — 런타임은 여전히 메시지 루프 한 스레드에서만 돈다.
+- **훅 명령.** `curl.exe`는 Windows 10 1803부터 System32에 있다. 리다이렉션만
+  `>NUL 2>&1`이고 나머지는 같다. 실패는 삼킨다 — 꺼져 있는 동반자가 훅 오류를
+  띄우면 안 된다.
+- **설정 경로.** `%USERPROFILE%\.claude\settings.json`,
+  `%USERPROFILE%\.codex\hooks.json`.
+
+##### 실측 — 훅에서 애니메이션까지 (debug 빌드 로그)
+
+`curl.exe`로 한 세션을 흉내 내 다섯 이벤트를 보냈다. 잠들어 있던 펫이 깨서 축하까지
+간다.
+
+```text
+listening for Claude Code on 127.0.0.1:47831
+listening for Codex on 127.0.0.1:47832
+    2.5s  Sit -> Sleep
+   43.1s  agent ActivityStarted "claude-code:probe"   <- SessionStart
+   44.1s  agent ActivityStarted "claude-code:probe"   <- UserPromptSubmit
+   45.1s  agent HighIntensity   "claude-code:probe"   <- PreToolUse(Edit)
+   46.1s  agent Positive        "claude-code:probe"   <- PostToolUse
+   46.6s  agent Achievement     "claude-code:probe"   <- Stop
+   46.6s  Sleep -> Wake       Stretch
+   48.4s  Stretch -> Celebrate  Celebrate
+```
+
+인증도 같이 쟀다: 올바른 토큰 204 · 틀린 토큰 401 · 틀린 경로 404.
+
+**PowerShell로 프로브하지 말 것.** PS 5.1은 네이티브 exe 인자에서 큰따옴표를 벗겨
+JSON을 망가뜨린다. 엔드포인트는 payload를 못 읽어도 204를 돌려주므로(설계상 그렇다)
+성공한 것처럼 보인다. `curl.exe`는 bash에서 부른다.
+
+##### 메뉴
+
+에이전트마다 하위 메뉴 하나 — 상태 줄 · 설치/복구 · 제거. `ShellMenu.agentItems`와
+같은 모양이고 문자열도 같은 키를 읽는다(`status.hooks.*`, `action.install` 등).
+명령 id는 100부터 10칸씩 블록으로 나눠서, 고른 항목이 어느 에이전트인지 두 번째
+표를 찾지 않고 안다.
+
+**설치는 사용자가 메뉴에서 누를 때만 일어난다.** 사용자의 파일이므로 우리 표시가
+없는 것은 읽고 그대로 되쓰고, 첫 설치 때 `.roamling-backup`을 한 번 남기고, 제거는
+우리 표시가 붙은 핸들러만 뺀다.
+
+##### 이것이 연 것
+
+- **캐럿.** `is_watching`이 참이 될 수 있으므로 `focus.rs`가 실제로 불린다. 트레이의
+  "커서 인식" 토글이 되살아났다.
+- **작업 자리.** 이벤트에 붙는 위치 힌트의 소비자가 생겼다. 다만 창 provider는 아직
+  없어서 힌트는 비어 있다 — W5의 마지막 남은 조각이다.
 
 ### W6 — 패키징
 

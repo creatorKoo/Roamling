@@ -6,12 +6,13 @@
 //! macOS puts this in the menu bar and builds it from `ShellMenu`, which holds
 //! the tree as data. That module is Swift, so this one carries its own small
 //! tree for now -- only the items whose actions exist on Windows today. The
-//! rest of `ShellMenu` (pets, agents, tuning, diagnostics) arrives with the
-//! features it drives.
+//! rest of `ShellMenu` (pets, tuning, diagnostics) arrives with the features it
+//! drives.
 //!
 //! The strings still come from the shared `.strings` files. See `strings.rs`.
 
 use crate::strings::localized;
+use roamling_agent::{installer, Agent};
 
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, POINT, RECT, WPARAM};
@@ -36,9 +37,14 @@ pub const CMD_ROAMING: usize = 1;
 pub const CMD_AVOID_POINTER: usize = 2;
 pub const CMD_INTERACTIONS: usize = 3;
 pub const CMD_VISUAL: usize = 4;
-/// Reserved. See the note in `show_menu` for why nothing offers it yet.
 pub const CMD_CURSOR_AWARE: usize = 5;
 pub const CMD_QUIT: usize = 6;
+/// One block of ids per agent, so the handler can tell which one was picked
+/// without a second lookup table.
+pub const CMD_AGENT_BASE: usize = 100;
+pub const CMD_AGENT_STRIDE: usize = 10;
+pub const CMD_AGENT_INSTALL: usize = 0;
+pub const CMD_AGENT_REMOVE: usize = 1;
 
 fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
@@ -259,12 +265,15 @@ pub fn remove(hwnd: HWND) {
 
 /// What the checkmarks show. A struct rather than five bools in a row, which
 /// is the shape that eventually gets one of them silently swapped.
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct MenuState {
+    /// Each agent, and whether its hook is installed, stale, or absent.
+    pub agents: [(Agent, installer::Status); 2],
     pub roaming: bool,
     pub avoiding: bool,
     pub interactive: bool,
     pub visual: bool,
+    pub cursor_aware: bool,
 }
 
 /// Show the menu and return the chosen command, or 0.
@@ -283,14 +292,62 @@ pub fn show_menu(hwnd: HWND, state: MenuState) -> usize {
             (checked(state.avoiding), CMD_AVOID_POINTER, "menu.avoidPointer"),
             (checked(state.interactive), CMD_INTERACTIONS, "menu.catchDrag"),
             (checked(state.visual), CMD_VISUAL, "menu.visualPlacement"),
-            // "커서 인식"은 여기 없다. 코드는 focus.rs 에 있지만 코어가 캐럿을
-            // 묻는 것은 펫이 어떤 창을 보고 있을 때뿐이고, 그 상태는 agent
-            // 이벤트로만 시작된다. RoamlingSources 가 이식되기 전까지 이 토글은
-            // 아무것도 하지 않으므로, 있는 척하지 않는다.
+            (checked(state.cursor_aware), CMD_CURSOR_AWARE, "menu.accessibility"),
         ] {
             let label = wide(localized(key));
             let _ = AppendMenuW(menu, MF_STRING | flag, id, PCWSTR(label.as_ptr()));
         }
+
+        // One submenu per agent, the same shape `ShellMenu.agentItems` builds:
+        // a status line that cannot be clicked, then install-or-repair, then
+        // remove once there is something to remove.
+        for (index, (agent, status)) in state.agents.iter().enumerate() {
+            let Ok(submenu) = CreatePopupMenu() else { continue };
+            let base = CMD_AGENT_BASE + index * CMD_AGENT_STRIDE;
+
+            let status_label = wide(localized(match status {
+                installer::Status::Installed => "status.hooks.installed",
+                installer::Status::NeedsRepair => "status.hooks.needsRepair",
+                installer::Status::NotInstalled => "status.hooks.notInstalled",
+            }));
+            let _ = AppendMenuW(
+                submenu,
+                MF_STRING | MF_DISABLED | MF_GRAYED,
+                0,
+                PCWSTR(status_label.as_ptr()),
+            );
+            let _ = AppendMenuW(submenu, MF_SEPARATOR, 0, PCWSTR::null());
+
+            let action = wide(localized(if *status == installer::Status::NotInstalled {
+                "action.install"
+            } else {
+                "action.repair"
+            }));
+            let _ = AppendMenuW(
+                submenu,
+                MF_STRING,
+                base + CMD_AGENT_INSTALL,
+                PCWSTR(action.as_ptr()),
+            );
+            if *status != installer::Status::NotInstalled {
+                let remove = wide(localized("action.remove"));
+                let _ = AppendMenuW(
+                    submenu,
+                    MF_STRING,
+                    base + CMD_AGENT_REMOVE,
+                    PCWSTR(remove.as_ptr()),
+                );
+            }
+
+            let name = wide(agent.display_name());
+            let _ = AppendMenuW(
+                menu,
+                MF_STRING | MF_POPUP,
+                submenu.0 as usize,
+                PCWSTR(name.as_ptr()),
+            );
+        }
+
         let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
         let quit = wide(localized("menu.quit"));
         let _ = AppendMenuW(menu, MF_STRING, CMD_QUIT, PCWSTR(quit.as_ptr()));

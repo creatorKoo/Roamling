@@ -30,6 +30,7 @@ use roamling_core::{
     look_frame_index, AnimationResolver, BehaviorState, DisplaySnapshot, InteractionOutput,
     PetAnimationPlayer, PetRuntime, RuntimeTuning, TickInput, WorldPoint, WorldSize,
 };
+use roamling_agent::{installer, Agent, Receiver};
 use roamling_pet::PetAsset;
 use settings::Settings;
 use sprite::Surface;
@@ -74,11 +75,21 @@ struct App {
     /// Windows has no permission prompt for either of these, so consent is a
     /// setting instead -- and both start off. `docs/windows.md` section 6.
     visual: bool,
-    /// Read from settings and honoured by the tick, but nothing turns it on:
-    /// the core only asks for a caret while watching a window, and that starts
-    /// with an agent event. See the note in `tray::show_menu`.
+    /// Whether the caret may be read. Reachable now that agent events exist --
+    /// the core only asks for a caret while watching a window, and that watch
+    /// starts with one.
     cursor_aware: bool,
     capturer: capture::Capturer,
+    /// The two loopback endpoints, and the channel their threads post to. This
+    /// is what makes the pet notice anyone working -- without it the caret and
+    /// the work seat are both unreachable. `docs/windows.md` W5b.
+    ///
+    /// Held, never read: dropping a `Receiver` stops its listener, so the field
+    /// is what keeps the endpoints open for as long as the app runs.
+    #[allow(dead_code)]
+    receivers: Vec<Receiver>,
+    agent_events: std::sync::mpsc::Receiver<roamling_core::CompanionEvent>,
+    tokens: [(Agent, String); 2],
     /// When the last luminance readback happened, for the interval the core asks for.
     luminance_at: f64,
     settings: Settings,
@@ -157,6 +168,45 @@ fn main() -> Result<()> {
     let resolver = AnimationResolver::new(asset.tracks.clone(), asset.behavior_mappings.clone());
     let player = PetAnimationPlayer::new(&resolver);
 
+    // One token per agent, kept in settings under the same keys the macOS
+    // runtime writes. It has to survive restarts: the hook command in the
+    // user's own config carries a copy, so a fresh token every launch would
+    // silently break every install.
+    let mut stored = stored;
+    let mut tokens = Vec::new();
+    for agent in [Agent::ClaudeCode, Agent::Codex] {
+        let key = roamling_agent::token_key(agent);
+        let token = match stored.text(key) {
+            Some(existing) if existing.len() >= 24 => existing,
+            _ => {
+                let fresh = roamling_agent::make_token();
+                stored.set(key, &fresh);
+                fresh
+            }
+        };
+        tokens.push((agent, token));
+    }
+    let tokens: [(Agent, String); 2] = [tokens[0].clone(), tokens[1].clone()];
+
+    let (agent_sender, agent_events) = std::sync::mpsc::channel();
+    let started = Instant::now();
+    let mut receivers = Vec::new();
+    for (agent, token) in &tokens {
+        // A port already in use means another copy of Roamling is running.
+        // Losing one endpoint is not worth refusing to start over.
+        match Receiver::start(*agent, token.clone(), started, agent_sender.clone()) {
+            Ok(receiver) => {
+                println!(
+                    "listening for {} on 127.0.0.1:{}",
+                    agent.display_name(),
+                    agent.port()
+                );
+                receivers.push(receiver);
+            }
+            Err(error) => println!("{} endpoint unavailable: {error}", agent.display_name()),
+        }
+    }
+
     let hwnd = create_window()?;
     let tray_ok = tray::add(hwnd);
     APP.with(|slot| {
@@ -166,7 +216,7 @@ fn main() -> Result<()> {
             resolver,
             player,
             displays,
-            started: Instant::now(),
+            started,
             surface: None,
             drawn: None,
             drag_from: None,
@@ -178,6 +228,9 @@ fn main() -> Result<()> {
             visual,
             cursor_aware,
             capturer: capture::Capturer::default(),
+            receivers,
+            agent_events,
+            tokens,
             luminance_at: f64::NEG_INFINITY,
             settings: stored,
             last_state: BehaviorState::Idle,
@@ -253,6 +306,14 @@ fn tick(hwnd: HWND, app: &mut App) {
     // for. MVP 0 has no focus provider, so the answer is thrown away.
     // The core decides whether the round trip is worth paying for; the shell
     // decides whether the user allowed it at all.
+    // Whatever the endpoints took while the loop was elsewhere. Draining here
+    // rather than on the listener thread keeps the runtime single-threaded.
+    let pending: Vec<_> = app.agent_events.try_iter().collect();
+    for event in pending {
+        println!("{:7.1}s  agent {:?} {:?}", now, event.kind, event.source_id);
+        app.pet.handle_activity_event(event, now);
+    }
+
     let wants_focus = app.pet.begin_tick(now) && app.cursor_aware;
     let queried = if wants_focus { focus::focus() } else { None };
 
@@ -538,6 +599,11 @@ unsafe fn dispatch(hwnd: HWND, msg: u32, lp: LPARAM, app: &mut App) -> bool {
                     avoiding: app.avoiding,
                     interactive: app.interactive,
                     visual: app.visual,
+                    cursor_aware: app.cursor_aware,
+                    agents: [
+                        (app.tokens[0].0, installer::status(app.tokens[0].0, &app.tokens[0].1)),
+                        (app.tokens[1].0, installer::status(app.tokens[1].0, &app.tokens[1].1)),
+                    ],
                 };
                 match tray::show_menu(hwnd, state) {
                     tray::CMD_ROAMING => {
@@ -568,6 +634,22 @@ unsafe fn dispatch(hwnd: HWND, msg: u32, lp: LPARAM, app: &mut App) -> bool {
                     tray::CMD_CURSOR_AWARE => {
                         app.cursor_aware = !app.cursor_aware;
                         app.settings.set(settings::CURSOR_AWARENESS, app.cursor_aware);
+                    }
+                    // Agent ids live in blocks of ten from 100.
+                    picked if picked >= tray::CMD_AGENT_BASE => {
+                        let index = (picked - tray::CMD_AGENT_BASE) / tray::CMD_AGENT_STRIDE;
+                        let action = (picked - tray::CMD_AGENT_BASE) % tray::CMD_AGENT_STRIDE;
+                        if let Some((agent, token)) = app.tokens.get(index) {
+                            let outcome = if action == tray::CMD_AGENT_REMOVE {
+                                installer::remove(*agent)
+                            } else {
+                                installer::install(*agent, token)
+                            };
+                            match outcome {
+                                Ok(()) => println!("{} hooks updated", agent.display_name()),
+                                Err(error) => println!("{}: {error}", agent.display_name()),
+                            }
+                        }
                     }
                     tray::CMD_QUIT => {
                         tray::remove(hwnd);

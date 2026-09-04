@@ -1,0 +1,14 @@
+# SPDX-FileCopyrightText: 2026 GooBeom Jeoung
+# SPDX-License-Identifier: GPL-3.0-only
+[package]
+name = "roamling-agent"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Claude Code and Codex activity: the loopback receiver, the event normalizers, and the hook installers."
+
+[dependencies]
+roamling-core = { path = "../roamling-core" }
+# Only for reading a handful of lifecycle fields out of a hook payload, and for
+# merging into the user's own config without dropping what else is in it.
+serde_json = "1"

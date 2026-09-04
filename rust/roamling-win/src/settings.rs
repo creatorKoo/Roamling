@@ -55,6 +55,10 @@ impl Settings {
         }
     }
 
+    pub fn text(&self, key: &str) -> Option<String> {
+        self.values.get(key).cloned()
+    }
+
     pub fn number(&self, key: &str) -> Option<f64> {
         self.values.get(key)?.parse().ok()
     }

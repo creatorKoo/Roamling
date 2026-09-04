@@ -12,6 +12,7 @@ description = "Windows shell: window, tray, input, and the tick loop around the 
 # no FFI at all. See docs/windows.md, "양 플랫폼이 붙는 방식이 다르다".
 roamling-core = { path = "../roamling-core" }
 roamling-pet = { path = "../roamling-pet" }
+roamling-agent = { path = "../roamling-agent" }
 
 [dependencies.windows]
 version = "0.58"
