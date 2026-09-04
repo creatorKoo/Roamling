@@ -175,14 +175,19 @@ private func recordTraceSession() throws -> String {
     runtime.petOverlayPointerDown(at: platform.pointer.position)
     record("grab")
     run(0.5, "held")
+    // The fake pointer is moved with the drag, which it was not before. AppKit
+    // has no way to drag a window without the cursor going with it, and a
+    // recording where it does not is a recording of something that cannot
+    // happen -- it left the cursor 347 points away at the moment of release,
+    // which is the one distance at which the landing is undisturbed.
     for index in 0..<40 {
         clock.advance(step)
-        runtime.petOverlayPointerDragged(
-            to: WorldPoint(x: 300 + Double(index) * 12, y: 400),
-            distance: Double(index) * 12
-        )
+        let held = WorldPoint(x: 300 + Double(index) * 12, y: 400)
+        platform.pointer.position = held
+        runtime.petOverlayPointerDragged(to: held, distance: Double(index) * 12)
         record("drag")
     }
+    platform.pointer.position = WorldPoint(x: 780, y: 400)
     runtime.petOverlayPointerUp(at: WorldPoint(x: 780, y: 400), wasDragged: true)
     platform.pointer.primaryButtonDown = false
     record("drop")
