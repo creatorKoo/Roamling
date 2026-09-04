@@ -87,6 +87,10 @@ public enum ShellPrompt {
         let removed: String
         let installedDetail: String
         let removedDetail: String
+        /// What went wrong is named by the agent, not by whichever one was
+        /// written first: a failed Codex install used to say "Couldn't update
+        /// Claude Code settings", which points at the wrong file.
+        let failure: String
 
         static func forAgent(_ id: String) -> AgentCopy? {
             switch id {
@@ -99,7 +103,8 @@ public enum ShellPrompt {
                     installed: "result.claude.installed",
                     removed: "result.claude.removed",
                     installedDetail: "result.detail.claude",
-                    removedDetail: "result.detail.claude"
+                    removedDetail: "result.detail.claude",
+                    failure: "error.claude.settings"
                 )
             case "codex":
                 AgentCopy(
@@ -110,7 +115,8 @@ public enum ShellPrompt {
                     installed: "result.codex.installed",
                     removed: "result.codex.removed",
                     installedDetail: "result.detail.codex.installed",
-                    removedDetail: "result.detail.codex.removed"
+                    removedDetail: "result.detail.codex.removed",
+                    failure: "error.codex.hooks"
                 )
             default:
                 nil
@@ -118,10 +124,14 @@ public enum ShellPrompt {
         }
     }
 
-    public static var about: AlertModel {
+    /// The version is passed in rather than read here: on macOS it lives in
+    /// `Support/Info.plist` and on Windows in the crate, and neither is
+    /// something this module should know how to open.
+    public static func about(version: String) -> AlertModel {
         AlertModel(
             title: "Roamling",
-            body: localized("alert.about.body"),
+            body: localizedFormat("about.version", version)
+                + "\n\n" + localized("alert.about.body"),
             buttons: [localized("button.ok"), localized("menu.viewSource")]
         )
     }
@@ -131,14 +141,15 @@ public enum ShellPrompt {
     static func integrationResult(
         _ result: Result<Void, Error>,
         success: String,
-        detail: String
+        detail: String,
+        failure: String
     ) -> AlertModel {
         switch result {
         case .success:
             AlertModel(title: success, body: detail, buttons: [])
         case let .failure(error):
             AlertModel(
-                title: localized("error.claude.settings"),
+                title: localized(failure),
                 body: error.localizedDescription,
                 buttons: [],
                 isWarning: true
@@ -162,7 +173,11 @@ public enum ShellPrompt {
 /// platform's, and the platform asks `ShellPrompt.confirmation(for:)` first.
 @MainActor
 public enum ShellController {
-    public static func perform(_ action: MenuAction, runtime: RoamlingRuntime) -> ShellEffect {
+    public static func perform(
+        _ action: MenuAction,
+        runtime: RoamlingRuntime,
+        version: String
+    ) -> ShellEffect {
         switch action {
         case let .selectBuiltInPet(kind):
             runtime.useBuiltInPet(kind)
@@ -192,7 +207,8 @@ public enum ShellController {
             return .presentThenRebuild(ShellPrompt.integrationResult(
                 agent.install(),
                 success: localized(copy.installed),
-                detail: localized(copy.installedDetail)
+                detail: localized(copy.installedDetail),
+                failure: copy.failure
             ))
         case let .removeAgent(id):
             guard let agent = runtime.agentIntegration(id: id),
@@ -200,7 +216,8 @@ public enum ShellController {
             return .presentThenRebuild(ShellPrompt.integrationResult(
                 agent.remove(),
                 success: localized(copy.removed),
-                detail: localized(copy.removedDetail)
+                detail: localized(copy.removedDetail),
+                failure: copy.failure
             ))
         case let .testAgentReaction(id):
             runtime.testAgentReaction(id: id)
@@ -219,7 +236,7 @@ public enum ShellController {
             runtime.reloadCatalog()
             return .rebuildMenu
         case .showAbout:
-            return .present(ShellPrompt.about)
+            return .present(ShellPrompt.about(version: version))
         case .quit:
             return .quit
         }

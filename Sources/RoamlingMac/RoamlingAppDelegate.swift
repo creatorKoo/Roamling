@@ -111,7 +111,14 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
            present(confirmation) != 0 {
             return
         }
-        apply(ShellController.perform(action, runtime: runtime))
+        apply(ShellController.perform(action, runtime: runtime, version: Self.version))
+    }
+
+    /// The shipped version, from `Support/Info.plist`. `build-app.sh` copies
+    /// that file into the bundle, and `rust/Cargo.toml` is what it follows.
+    private static var version: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+            ?? "0.0.0"
     }
 
     private func apply(_ effect: ShellEffect) {
@@ -159,7 +166,7 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
 
     /// The one alert whose second button does something.
     private func handle(_ alert: AlertModel, chosen: Int) {
-        if alert == ShellPrompt.about, chosen == 1 {
+        if alert == ShellPrompt.about(version: Self.version), chosen == 1 {
             apply(.openLink(ShellPrompt.sourceURL))
         }
     }

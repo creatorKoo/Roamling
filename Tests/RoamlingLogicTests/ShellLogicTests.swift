@@ -12,6 +12,60 @@ import RoamlingShell
 /// tests it has ever had.
 func shellLogicTests() -> [LogicTest] {
     [
+        LogicTest(name: "a failed install names the agent that failed") {
+            // The failure title was hard-coded to Claude Code, so a Codex
+            // install that went wrong said "Couldn't update Claude Code
+            // settings" -- pointing the user at a file that was never touched.
+            try MainActor.assumeIsolated {
+                for (id, expected) in [
+                    ("claude-code", "error.claude.settings"),
+                    ("codex", "error.codex.hooks")
+                ] {
+                    let agent = FailingAgent(id: id)
+                    let platform = FakePlatform(
+                        display: DisplaySnapshot(
+                            id: "1", name: "test",
+                            frame: WorldRect(x: 0, y: 0, width: 1440, height: 900),
+                            visibleFrame: WorldRect(x: 0, y: 25, width: 1440, height: 850),
+                            scale: 2
+                        ),
+                        worldTop: 900
+                    )
+                    let suite = try makeTestDefaults()
+                    defer { suite.discard() }
+                    let runtime = RoamlingRuntime(
+                        services: platform.services,
+                        agents: [agent],
+                        defaults: suite.defaults,
+                        catalog: PetCatalog(roots: []),
+                        clock: { 0 }
+                    )
+                    let effect = ShellController.perform(
+                        .installAgent(id: id), runtime: runtime, version: "1.2.3"
+                    )
+                    guard case let .presentThenRebuild(alert) = effect else {
+                        throw LogicTestFailure(
+                            message: "expected an alert for \(id), got \(effect)",
+                            file: #filePath, line: #line
+                        )
+                    }
+                    try expect(
+                        alert.title == localized(expected),
+                        "\(id) reported \(alert.title), expected \(localized(expected))"
+                    )
+                    try expect(alert.isWarning, "a failure should read as one")
+                }
+            }
+        },
+        LogicTest(name: "the about box says which build it is") {
+            try MainActor.assumeIsolated {
+                let alert = ShellPrompt.about(version: "9.8.7")
+                try expect(
+                    alert.body.hasPrefix(localizedFormat("about.version", "9.8.7")),
+                    "the version is not the first line: \(alert.body.prefix(40))"
+                )
+            }
+        },
         LogicTest(name: "the menu offers every pet and marks the one in use") {
             try MainActor.assumeIsolated {
                 let harness = try RuntimeHarness()
@@ -37,7 +91,7 @@ func shellLogicTests() -> [LogicTest] {
                     )
                 }
                 let other = try require(BuiltInPetKind.allCases.first { $0 != runtime.selectedBuiltInPet })
-                _ = ShellController.perform(.selectBuiltInPet(other), runtime: runtime)
+                _ = ShellController.perform(.selectBuiltInPet(other), runtime: runtime, version: "1.2.3")
                 let after = try require(submenu(named: localized("menu.pet"), in: ShellMenu.items(for: runtime)))
                 let nowChecked = after.first { item in
                     if case let .check(action, isOn) = item.content {
@@ -55,7 +109,7 @@ func shellLogicTests() -> [LogicTest] {
                 let runtime = harness.runtime
 
                 for choice in ShellMenu.scaleChoices {
-                    _ = ShellController.perform(.setScale(choice.value), runtime: runtime)
+                    _ = ShellController.perform(.setScale(choice.value), runtime: runtime, version: "1.2.3")
                     try expect(
                         abs(runtime.scale - choice.value) < 0.001,
                         "\(choice.label) was offered but the runtime settled on \(runtime.scale)"
@@ -84,7 +138,7 @@ func shellLogicTests() -> [LogicTest] {
                 for (action, title, read) in switches {
                     for _ in 0..<2 {
                         let before = read()
-                        _ = ShellController.perform(action, runtime: runtime)
+                        _ = ShellController.perform(action, runtime: runtime, version: "1.2.3")
                         try expect(read() != before, "\(title) did not change")
                         let item = try require(
                             ShellMenu.items(for: runtime).first { $0.title == title },

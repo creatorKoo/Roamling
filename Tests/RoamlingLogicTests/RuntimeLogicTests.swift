@@ -490,6 +490,28 @@ func stuckTravelLogicTests() -> [LogicTest] {
 /// An agent whose events the test pushes by hand, so a scenario can be written
 /// as the sequence of things an agent actually said.
 @MainActor
+/// An integration that cannot be installed, so the failure copy can be read.
+final class FailingAgent: AgentIntegration {
+    let id: String
+    let displayName = "Failing"
+    var installationStatus: AgentIntegrationStatus = .notInstalled
+    var receiverState: ActivityReceiverState = .stopped
+
+    struct Refused: Error, LocalizedError {
+        var errorDescription: String? { "refused" }
+    }
+
+    init(id: String) { self.id = id }
+
+    func makeEventStream() -> AsyncStream<CompanionEvent> {
+        AsyncStream { $0.finish() }
+    }
+    func startReceiving() throws {}
+    func stopReceiving() {}
+    func install() -> Result<Void, Error> { .failure(Refused()) }
+    func remove() -> Result<Void, Error> { .failure(Refused()) }
+}
+
 final class FakeAgent: AgentIntegration {
     let id = "fake-agent"
     let displayName = "Fake"
