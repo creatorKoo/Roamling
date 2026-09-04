@@ -34,6 +34,11 @@ public enum ShellEffect: Sendable {
     case reveal(URL)
     case openLink(URL)
     case copyToClipboard(String)
+    /// Go and look for a new version. The platform owns the fetching and the
+    /// swapping; what this module owns is when to offer it and how it reads.
+    case checkForUpdates
+    /// Remember the choice and stop or start the timer.
+    case setAutomaticUpdates(Bool)
     case quit
 }
 
@@ -157,6 +162,36 @@ public enum ShellPrompt {
         }
     }
 
+    /// What a check the user asked for comes back with. A background check
+    /// that finds nothing says nothing, so this is only ever shown on request
+    /// or when there is something to report.
+    public static func updateResult(
+        upToDate current: String
+    ) -> AlertModel {
+        AlertModel(
+            title: localized("result.update.upToDate"),
+            body: localizedFormat("result.update.upToDate.detail", current),
+            buttons: []
+        )
+    }
+
+    public static func updateStaged(version: String) -> AlertModel {
+        AlertModel(
+            title: localizedFormat("result.update.ready", version),
+            body: localized("result.update.ready.detail"),
+            buttons: []
+        )
+    }
+
+    public static func updateFailure(_ detail: String) -> AlertModel {
+        AlertModel(
+            title: localized("error.update.failed"),
+            body: detail,
+            buttons: [],
+            isWarning: true
+        )
+    }
+
     static func petLoadFailure(_ error: Error) -> AlertModel {
         AlertModel(
             title: localized("error.pet.load"),
@@ -235,6 +270,10 @@ public enum ShellController {
         case .reloadPets:
             runtime.reloadCatalog()
             return .rebuildMenu
+        case .checkForUpdates:
+            return .checkForUpdates
+        case .toggleAutomaticUpdates:
+            return .setAutomaticUpdates(!ShellMenu.automaticUpdates)
         case .showAbout:
             return .present(ShellPrompt.about(version: version))
         case .quit:

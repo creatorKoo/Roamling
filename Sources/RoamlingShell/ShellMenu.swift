@@ -24,6 +24,8 @@ public enum MenuAction: Equatable, Sendable {
     case openPetFolder
     case copyDiagnostics
     case reloadPets
+    case checkForUpdates
+    case toggleAutomaticUpdates
     case showAbout
     case quit
 }
@@ -62,6 +64,29 @@ public struct MenuItem: Sendable {
 /// a screen -- which the AppKit version could not be.
 @MainActor
 public enum ShellMenu {
+    /// What the update row says, and whether the timer is on. Both are set by
+    /// the platform, because fetching and remembering are the platform's and
+    /// this module only says how they read.
+    public static var updateStatus: UpdateStatus = .idle
+    public static var automaticUpdates = true
+
+    public enum UpdateStatus: Equatable, Sendable {
+        case idle
+        case checking
+        case staged(version: String)
+    }
+
+    private static var updateItem: MenuItem {
+        switch updateStatus {
+        case .idle:
+            MenuItem(localized("menu.update.check"), .command(.checkForUpdates))
+        case .checking:
+            MenuItem(localized("status.update.checking"), .caption)
+        case let .staged(version):
+            MenuItem(localizedFormat("status.update.ready", version), .caption)
+        }
+    }
+
     public static func items(for runtime: RoamlingRuntime) -> [MenuItem] {
         var items: [MenuItem] = [
             MenuItem(localizedFormat("menu.title", runtime.petDisplayName), .caption),
@@ -97,6 +122,14 @@ public enum ShellMenu {
             MenuItem(localized("menu.copyDiagnostics"), .command(.copyDiagnostics)),
             MenuItem(localized("menu.reloadPets"), .command(.reloadPets), shortcut: "r"),
             .separator,
+            // A staged update replaces the offer to look for one: there is
+            // nothing more to do, and saying so is more useful than a button
+            // that would find the same answer again.
+            updateItem,
+            MenuItem(
+                localized("menu.update.auto"),
+                .check(.toggleAutomaticUpdates, isOn: automaticUpdates)
+            ),
             MenuItem(localized("menu.about"), .command(.showAbout)),
             MenuItem(localized("menu.quit"), .command(.quit), shortcut: "q")
         ]

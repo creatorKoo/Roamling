@@ -26,7 +26,10 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         self.runtime = runtime
         runtime.start()
         runtime.repairAgentIntegrationsIfNeeded()
+        UserDefaults.standard.register(defaults: [Self.automaticUpdatesKey: true])
+        ShellMenu.automaticUpdates = UserDefaults.standard.bool(forKey: Self.automaticUpdatesKey)
         setupMenuBar()
+        scheduleUpdateChecks()
 
         // Starts the complete AppKit lifecycle for automated packaging checks,
         // then exits cleanly without needing a synthetic user interaction.
@@ -121,6 +124,62 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
             ?? "0.0.0"
     }
 
+    /// The updater lives here rather than in the runtime: fetching bytes and
+    /// replacing a bundle are this platform's, and the decisions inside them
+    /// are already shared with Windows in `roamling-update`.
+    private let updater = MacUpdater()
+    private var updateTimer: Timer?
+
+    private static let automaticUpdatesKey = "roamling.automaticUpdates"
+
+    /// A day. A desktop pet checking more often than that is spending the
+    /// user's battery to find out nothing, which `docs/battery.md` would have
+    /// something to say about.
+    private static let updateInterval: TimeInterval = 24 * 60 * 60
+
+    /// Runs the first check a little after launch rather than during it: the
+    /// pet appearing is what the user is waiting for, and a network round trip
+    /// is not part of that.
+    private func scheduleUpdateChecks() {
+        updateTimer?.invalidate()
+        updateTimer = nil
+        guard ShellMenu.automaticUpdates else { return }
+        let timer = Timer(timeInterval: Self.updateInterval, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.checkForUpdates(asked: false) }
+        }
+        updateTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
+            guard let self, ShellMenu.automaticUpdates else { return }
+            self.checkForUpdates(asked: false)
+        }
+    }
+
+    /// - Parameter asked: whether the user asked. A background check that finds
+    ///   nothing is silent, which is what `Never annoying` requires of
+    ///   something that runs on a timer all day.
+    private func checkForUpdates(asked: Bool) {
+        ShellMenu.updateStatus = .checking
+        rebuildMenu()
+        updater.check(asked: asked) { [weak self] outcome in
+            guard let self else { return }
+            switch outcome {
+            case let .upToDate(current):
+                ShellMenu.updateStatus = .idle
+                self.rebuildMenu()
+                if asked { self.apply(.present(ShellPrompt.updateResult(upToDate: current))) }
+            case let .staged(version):
+                ShellMenu.updateStatus = .staged(version: version)
+                self.rebuildMenu()
+                self.apply(.present(ShellPrompt.updateStaged(version: version)))
+            case let .failed(detail):
+                ShellMenu.updateStatus = .idle
+                self.rebuildMenu()
+                if asked { self.apply(.present(ShellPrompt.updateFailure(detail))) }
+            }
+        }
+    }
+
     private func apply(_ effect: ShellEffect) {
         switch effect {
         case .none:
@@ -147,6 +206,13 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
             let pasteboard = NSPasteboard.general
             pasteboard.clearContents()
             pasteboard.setString(text, forType: .string)
+        case .checkForUpdates:
+            checkForUpdates(asked: true)
+        case let .setAutomaticUpdates(enabled):
+            ShellMenu.automaticUpdates = enabled
+            UserDefaults.standard.set(enabled, forKey: Self.automaticUpdatesKey)
+            scheduleUpdateChecks()
+            rebuildMenu()
         case .quit:
             NSApp.terminate(nil)
         }

@@ -12,6 +12,73 @@ import RoamlingShell
 /// tests it has ever had.
 func shellLogicTests() -> [LogicTest] {
     [
+        LogicTest(name: "the update row says what it is doing") {
+            try MainActor.assumeIsolated {
+                let harness = try RuntimeHarness()
+                defer { harness.tearDown() }
+                defer { ShellMenu.updateStatus = .idle }
+
+                @MainActor func titles() -> [String] {
+                    ShellMenu.items(for: harness.runtime).map(\.title)
+                }
+
+                ShellMenu.updateStatus = .idle
+                try expect(
+                    titles().contains(localized("menu.update.check")),
+                    "no way to check for updates"
+                )
+
+                // A check under way, and one already found, both replace the
+                // offer: there is nothing more for the user to do, and a button
+                // that would find the same answer again is worse than a
+                // sentence saying so.
+                ShellMenu.updateStatus = .checking
+                try expect(titles().contains(localized("status.update.checking")))
+                try expect(!titles().contains(localized("menu.update.check")))
+
+                ShellMenu.updateStatus = .staged(version: "9.9.9")
+                try expect(
+                    titles().contains(localizedFormat("status.update.ready", "9.9.9"))
+                )
+            }
+        },
+        LogicTest(name: "automatic updates can be turned off") {
+            // An app that updates itself with no way to stop it is worse than
+            // one that does not update at all.
+            try MainActor.assumeIsolated {
+                let harness = try RuntimeHarness()
+                defer { harness.tearDown() }
+                defer { ShellMenu.automaticUpdates = true }
+
+                for enabled in [true, false] {
+                    ShellMenu.automaticUpdates = enabled
+                    let row = try require(
+                        ShellMenu.items(for: harness.runtime)
+                            .first { $0.title == localized("menu.update.auto") }
+                    )
+                    guard case let .check(action, isOn) = row.content else {
+                        throw LogicTestFailure(
+                            message: "the row is not a checkbox: \(row.content)",
+                            file: #filePath, line: #line
+                        )
+                    }
+                    try expect(isOn == enabled, "the checkmark does not follow the setting")
+                    try expect(action == .toggleAutomaticUpdates)
+
+                    // Toggling asks the platform to remember the opposite.
+                    let effect = ShellController.perform(
+                        action, runtime: harness.runtime, version: "1.2.3"
+                    )
+                    guard case let .setAutomaticUpdates(next) = effect else {
+                        throw LogicTestFailure(
+                            message: "toggling produced \(effect)",
+                            file: #filePath, line: #line
+                        )
+                    }
+                    try expect(next == !enabled, "toggling did not flip the setting")
+                }
+            }
+        },
         LogicTest(name: "a failed install names the agent that failed") {
             // The failure title was hard-coded to Claude Code, so a Codex
             // install that went wrong said "Couldn't update Claude Code

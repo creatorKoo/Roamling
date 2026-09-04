@@ -12,6 +12,11 @@ crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
 uniffi = { version = "0.32", features = ["cli"] }
+# The update decisions -- is it newer, is it ours -- are shared with Windows.
+# They come in through here because this is the crate the macOS app already
+# links, and a second uniffi surface would mean a second set of bindings for
+# four functions.
+roamling-update = { path = "../roamling-update" }
 
 [[bin]]
 name = "uniffi-bindgen"
