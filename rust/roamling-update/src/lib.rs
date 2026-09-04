@@ -38,7 +38,7 @@ use std::fmt;
 /// that as "not configured" rather than as a key: an updater that cannot check
 /// a signature must refuse to update, not update anyway.
 pub const PUBLIC_KEY_HEX: &str =
-    "0000000000000000000000000000000000000000000000000000000000000000";
+    "7b5ba73b8f9ed5b718d72a587393ad0e16e06fabec92242f4fa058c889050c6e";
 
 /// Which artifact in the manifest belongs to the machine this is running on.
 pub const PLATFORM: &str = if cfg!(target_os = "windows") {
