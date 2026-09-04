@@ -217,10 +217,12 @@ jobs:
           # app out of a disk image means a mount point and an unmount that can
           # fail with the volume busy; a zip is bytes in and a bundle out.
           #
-          # Only arm64 is listed, because only arm64 is built. An Intel Mac has
-          # no entry and will be told it is up to date rather than handed
-          # something it cannot run. Covering it means a universal build --
-          # both Rust targets and `lipo` -- and is not done yet.
+          # arm64 only, on purpose. Intel Macs are not a target: covering them
+          # means a universal build -- both Rust targets, both Swift slices and
+          # `lipo` over the result -- for machines Apple stopped selling in
+          # 2023. An Intel Mac finds no entry here and is told it is up to date
+          # rather than handed something it cannot run, which is the right
+          # answer for a platform we do not ship to.
           cargo run --manifest-path rust/Cargo.toml -q -p roamling-update \
             --bin roamling-appcast -- sign "$version" \
             "https://github.com/${GITHUB_REPOSITORY}/releases/tag/v${version}" \

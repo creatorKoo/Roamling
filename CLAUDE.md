@@ -168,8 +168,13 @@ Ed25519 서명)까지 실물로 돈다. 첫 릴리스 `v0.2.0`이 나가 있고 
 이제 identity 없이는 빌드를 거부한다**(`ROAMLING_ALLOW_ADHOC=1`로만 우회).
 
 배포물은 둘이다 — 사람이 받는 `.dmg`(Applications 심볼릭 링크로 드래그드롭), 업데이터가
-받는 `.zip`. **arm64만 빌드한다**: Intel Mac은 피드에 항목이 없어 "최신"이라는 답을 받고,
-실행 못 할 것을 받지는 않는다. 덮으려면 universal 빌드(두 Rust 타깃 + `lipo`)가 필요하다.
+받는 `.zip`.
+
+**Intel Mac은 지원하지 않기로 했다 (2026-09-04).** arm64만 빌드한다. 덮으려면 universal
+빌드가 필요한데 — Rust 두 타깃 · Swift 두 슬라이스 · `lipo` — Apple이 2023년에 판매를
+끝낸 기계를 위한 값이다. Intel Mac은 피드에 항목이 없어 **"최신"이라는 답을 받고**, 실행
+못 할 것을 받지는 않는다. 되돌리려면 `build-rust-core.sh`와 `build-app.sh` 양쪽에 타깃을
+추가하고 워크플로의 appcast 줄에 `macos-x86_64`를 더한다.
 
 Apple Developer Program 연 $99는 **여전히 안 냈다.** 내면 첫 다운로드 마찰이 사라진다.
 

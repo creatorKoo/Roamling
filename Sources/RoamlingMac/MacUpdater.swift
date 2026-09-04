@@ -48,6 +48,17 @@ public final class MacUpdater {
         /// Downloaded, verified and swapped in. Takes effect on the next launch.
         case staged(version: String)
         case failed(String)
+
+        /// Whether a check nobody asked for should keep this to itself. Finding
+        /// nothing is not news, and neither is a network that was not there.
+        /// Something staged always gets said: the user will be running a
+        /// different version next launch and deserves to know why.
+        public var isQuiet: Bool {
+            switch self {
+            case .upToDate, .failed: true
+            case .staged: false
+            }
+        }
     }
 
     /// The version already staged, if a check has found one this session. The
@@ -61,29 +72,34 @@ public final class MacUpdater {
         self.session = session
     }
 
-    /// - Parameter asked: whether the user asked. A background check that finds
-    ///   nothing is silent; one the user asked for always answers.
-    public func check(asked: Bool, then report: @escaping @MainActor (Outcome) -> Void) {
+    /// Always reports, whatever the answer.
+    ///
+    /// It used to stay quiet when a background check found nothing, which
+    /// conflated two different things: not showing an alert, and not saying
+    /// what happened. The caller had already put the menu into its "checking"
+    /// state and was relying on this to take it back out, so a silent answer
+    /// left that row saying "Checking for updates…" for the rest of the
+    /// session -- and since that row replaces the button, there was nothing
+    /// left to press. Whether to *interrupt* the user is the caller's decision
+    /// and is made against `Outcome`, not here.
+    public func check(then report: @escaping @MainActor (Outcome) -> Void) {
         guard !isChecking else { return }
         isChecking = true
         Task { [weak self] in
+            // Deliberately off the main actor. Unpacking runs `ditto` and
+            // `codesign` and waits for them, and waiting for a process on the
+            // thread that draws the pet would stop the pet.
             let outcome = await Self.run()
-            guard let self else { return }
-            self.isChecking = false
-            if case let .staged(version) = outcome { self.staged = version }
-            switch outcome {
-            case .upToDate where !asked:
-                // Silence is the whole point of a background check.
-                break
-            case .failed where !asked:
-                break
-            default:
+            await MainActor.run {
+                guard let self else { return }
+                self.isChecking = false
+                if case let .staged(version) = outcome { self.staged = version }
                 report(outcome)
             }
         }
     }
 
-    private static func run() async -> Outcome {
+    private nonisolated static func run() async -> Outcome {
         let current = updateCurrentVersion()
         do {
             let manifest = try await fetch(feed, limit: maximumFeedBytes)
@@ -114,7 +130,7 @@ public final class MacUpdater {
         }
     }
 
-    private static func fetch(_ url: URL, limit: Int) async throws -> Data {
+    private nonisolated static func fetch(_ url: URL, limit: Int) async throws -> Data {
         var request = URLRequest(url: url)
         request.timeoutInterval = 30
         let (data, response) = try await URLSession.shared.data(for: request)
@@ -128,7 +144,7 @@ public final class MacUpdater {
     }
 
     /// Puts a verified archive in place of the running app.
-    private static func stage(_ archive: Data) throws {
+    private nonisolated static func stage(_ archive: Data) throws {
         let bundle = Bundle.main.bundleURL
         let parent = bundle.deletingLastPathComponent()
         let work = parent.appendingPathComponent(".Roamling-update", isDirectory: true)
@@ -167,7 +183,7 @@ public final class MacUpdater {
         }
     }
 
-    private static func run(_ path: String, _ arguments: [String]) throws {
+    private nonisolated static func run(_ path: String, _ arguments: [String]) throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: path)
         process.arguments = arguments

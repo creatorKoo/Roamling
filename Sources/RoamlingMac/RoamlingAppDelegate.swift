@@ -161,21 +161,26 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
     private func checkForUpdates(asked: Bool) {
         ShellMenu.updateStatus = .checking
         rebuildMenu()
-        updater.check(asked: asked) { [weak self] outcome in
+        updater.check { [weak self] outcome in
             guard let self else { return }
+            // The menu is put right whatever happened. Only whether to
+            // interrupt the user depends on who asked.
             switch outcome {
-            case let .upToDate(current):
+            case .upToDate, .failed:
                 ShellMenu.updateStatus = .idle
-                self.rebuildMenu()
-                if asked { self.apply(.present(ShellPrompt.updateResult(upToDate: current))) }
             case let .staged(version):
                 ShellMenu.updateStatus = .staged(version: version)
-                self.rebuildMenu()
+            }
+            self.rebuildMenu()
+
+            guard asked || !outcome.isQuiet else { return }
+            switch outcome {
+            case let .upToDate(current):
+                self.apply(.present(ShellPrompt.updateResult(upToDate: current)))
+            case let .staged(version):
                 self.apply(.present(ShellPrompt.updateStaged(version: version)))
             case let .failed(detail):
-                ShellMenu.updateStatus = .idle
-                self.rebuildMenu()
-                if asked { self.apply(.present(ShellPrompt.updateFailure(detail))) }
+                self.apply(.present(ShellPrompt.updateFailure(detail)))
             }
         }
     }
