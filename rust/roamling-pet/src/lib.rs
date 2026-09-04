@@ -69,6 +69,9 @@ pub struct FrameRect {
 }
 
 pub struct PetAsset {
+    /// What the menu calls it. `BuiltInPetKind.mochi.displayName` on the Swift
+    /// side; a package's manifest supplies it once the catalogue exists.
+    pub display_name: String,
     pub atlas: PetImage,
     pub extension_atlas: Option<PetImage>,
     pub frame_width: usize,
@@ -253,6 +256,7 @@ pub fn built_in_mochi() -> Option<PetAsset> {
     }
 
     Some(PetAsset {
+        display_name: "Mochi".to_string(),
         atlas,
         extension_atlas,
         frame_width: CELL_WIDTH,

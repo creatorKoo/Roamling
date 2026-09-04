@@ -5,13 +5,13 @@
 //!
 //! macOS puts this in the menu bar and builds it from `ShellMenu`, which holds
 //! the tree as data. That module is Swift, so this one carries its own small
-//! tree for now -- only the items whose actions exist on Windows today. The
-//! rest of `ShellMenu` (pets, tuning, diagnostics) arrives with the features it
-//! drives.
+//! tree for now, in the same order and with the same words. What is missing is
+//! what the shell cannot do yet: the installed-pet list needs the catalogue,
+//! and "Behavior Tuning" needs a panel.
 //!
 //! The strings still come from the shared `.strings` files. See `strings.rs`.
 
-use crate::strings::localized;
+use crate::strings::{localized, localized_format};
 use roamling_agent::{installer, Agent};
 
 use windows::core::PCWSTR;
@@ -39,12 +39,19 @@ pub const CMD_INTERACTIONS: usize = 3;
 pub const CMD_VISUAL: usize = 4;
 pub const CMD_CURSOR_AWARE: usize = 5;
 pub const CMD_QUIT: usize = 6;
+pub const CMD_OPEN_PET_FOLDER: usize = 7;
+pub const CMD_COPY_DIAGNOSTICS: usize = 8;
+pub const CMD_ABOUT: usize = 9;
+pub const CMD_VIEW_SOURCE: usize = 10;
+/// One id per entry in `SCALE_CHOICES`, in that order.
+pub const CMD_SCALE_BASE: usize = 20;
 /// One block of ids per agent, so the handler can tell which one was picked
 /// without a second lookup table.
 pub const CMD_AGENT_BASE: usize = 100;
 pub const CMD_AGENT_STRIDE: usize = 10;
 pub const CMD_AGENT_INSTALL: usize = 0;
 pub const CMD_AGENT_REMOVE: usize = 1;
+pub const CMD_AGENT_TEST: usize = 2;
 
 fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
@@ -263,17 +270,61 @@ pub fn remove(hwnd: HWND) {
     }
 }
 
-/// What the checkmarks show. A struct rather than five bools in a row, which
-/// is the shape that eventually gets one of them silently swapped.
+/// What the menu shows. A struct rather than a row of bools, which is the shape
+/// that eventually gets one of them silently swapped.
 #[derive(Clone)]
 pub struct MenuState {
-    /// Each agent, and whether its hook is installed, stale, or absent.
-    pub agents: [(Agent, installer::Status); 2],
+    /// The pet's own name, for the caption line.
+    pub pet_name: String,
+    /// How many of the sixteen capabilities the sheet answers for, and which
+    /// ones are borrowed or missing. A package that declares one animation
+    /// renders it for every state, and from outside that looks like a pet whose
+    /// behaviour is broken rather than one whose sheet is thin. Say which.
+    pub covered: usize,
+    pub total: usize,
+    pub substituted: Vec<String>,
+    pub placeholder: Vec<String>,
+    /// The user's own size multiplier, on top of the display's scale.
+    pub scale: f64,
+    /// Each agent, whether its hook is installed, stale or absent, and whether
+    /// its endpoint came up.
+    pub agents: [(Agent, installer::Status, bool); 2],
     pub roaming: bool,
     pub avoiding: bool,
     pub interactive: bool,
     pub visual: bool,
     pub cursor_aware: bool,
+}
+
+/// The sizes the menu offers, matching `ShellMenu.scaleChoices`.
+pub const SCALE_CHOICES: [(&str, f64); 4] =
+    [("0.75x", 0.75), ("1.0x", 1.0), ("1.25x", 1.25), ("1.5x", 1.5)];
+
+/// A line that reports rather than commands. AppKit draws these disabled and so
+/// does Win32, which is the whole reason a caption cannot be clicked by mistake.
+unsafe fn caption(menu: HMENU, text: &str) {
+    let label = wide(text);
+    let _ = AppendMenuW(
+        menu,
+        MF_STRING | MF_DISABLED | MF_GRAYED,
+        0,
+        PCWSTR(label.as_ptr()),
+    );
+}
+
+unsafe fn command(menu: HMENU, id: usize, text: &str) {
+    let label = wide(text);
+    let _ = AppendMenuW(menu, MF_STRING, id, PCWSTR(label.as_ptr()));
+}
+
+unsafe fn attach(parent: HMENU, submenu: HMENU, title: &str) {
+    let label = wide(title);
+    let _ = AppendMenuW(
+        parent,
+        MF_STRING | MF_POPUP,
+        submenu.0 as usize,
+        PCWSTR(label.as_ptr()),
+    );
 }
 
 /// Show the menu and return the chosen command, or 0.
@@ -287,70 +338,135 @@ pub fn show_menu(hwnd: HWND, state: MenuState) -> usize {
             return 0;
         };
         let checked = |on: bool| if on { MF_CHECKED } else { MF_UNCHECKED };
+        let separator = |menu| AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
+
+        caption(menu, &localized_format("menu.title", &[&state.pet_name]));
+        let _ = separator(menu);
+
+        // Pet. Only the built-in for now -- installed packages arrive with the
+        // catalogue -- but the coverage lines are real, read off the resolver.
+        if let Ok(pets) = CreatePopupMenu() {
+            let label = localized_format("menu.pet.builtin", &[&state.pet_name]);
+            let name = wide(&label);
+            let _ = AppendMenuW(
+                pets,
+                MF_STRING | MF_CHECKED | MF_DISABLED | MF_GRAYED,
+                0,
+                PCWSTR(name.as_ptr()),
+            );
+            let _ = separator(pets);
+            caption(
+                pets,
+                &localized_format(
+                    "menu.pet.coverage",
+                    &[&state.covered.to_string(), &state.total.to_string()],
+                ),
+            );
+            if !state.substituted.is_empty() {
+                caption(
+                    pets,
+                    &localized_format("menu.pet.substituted", &[&state.substituted.join(", ")]),
+                );
+            }
+            if !state.placeholder.is_empty() {
+                caption(
+                    pets,
+                    &localized_format("menu.pet.placeholder", &[&state.placeholder.join(", ")]),
+                );
+            }
+            attach(menu, pets, localized("menu.pet"));
+        }
+
+        // Size.
+        if let Ok(sizes) = CreatePopupMenu() {
+            for (index, (label, value)) in SCALE_CHOICES.iter().enumerate() {
+                let text = wide(label);
+                let _ = AppendMenuW(
+                    sizes,
+                    MF_STRING | checked((state.scale - value).abs() < 0.01),
+                    CMD_SCALE_BASE + index,
+                    PCWSTR(text.as_ptr()),
+                );
+            }
+            attach(menu, sizes, localized("menu.size"));
+        }
+        let _ = separator(menu);
+
         for (flag, id, key) in [
             (checked(state.roaming), CMD_ROAMING, "menu.roaming"),
             (checked(state.avoiding), CMD_AVOID_POINTER, "menu.avoidPointer"),
             (checked(state.interactive), CMD_INTERACTIONS, "menu.catchDrag"),
-            (checked(state.visual), CMD_VISUAL, "menu.visualPlacement"),
-            (checked(state.cursor_aware), CMD_CURSOR_AWARE, "menu.accessibility"),
         ] {
             let label = wide(localized(key));
             let _ = AppendMenuW(menu, MF_STRING | flag, id, PCWSTR(label.as_ptr()));
         }
 
         // One submenu per agent, the same shape `ShellMenu.agentItems` builds:
-        // a status line that cannot be clicked, then install-or-repair, then
-        // remove once there is something to remove.
-        for (index, (agent, status)) in state.agents.iter().enumerate() {
+        // two status lines that cannot be clicked, then install-or-repair,
+        // remove once there is something to remove, and a test reaction.
+        for (index, (agent, status, listening)) in state.agents.iter().enumerate() {
             let Ok(submenu) = CreatePopupMenu() else { continue };
             let base = CMD_AGENT_BASE + index * CMD_AGENT_STRIDE;
 
-            let status_label = wide(localized(match status {
-                installer::Status::Installed => "status.hooks.installed",
-                installer::Status::NeedsRepair => "status.hooks.needsRepair",
-                installer::Status::NotInstalled => "status.hooks.notInstalled",
-            }));
-            let _ = AppendMenuW(
+            caption(
                 submenu,
-                MF_STRING | MF_DISABLED | MF_GRAYED,
-                0,
-                PCWSTR(status_label.as_ptr()),
+                localized(match status {
+                    installer::Status::Installed => "status.hooks.installed",
+                    installer::Status::NeedsRepair => "status.hooks.needsRepair",
+                    installer::Status::NotInstalled => "status.hooks.notInstalled",
+                }),
             );
-            let _ = AppendMenuW(submenu, MF_SEPARATOR, 0, PCWSTR::null());
-
-            let action = wide(localized(if *status == installer::Status::NotInstalled {
-                "action.install"
-            } else {
-                "action.repair"
-            }));
-            let _ = AppendMenuW(
+            // Two states, not four: the endpoint either bound at launch or it
+            // did not. There is no async start to be "starting" during, and it
+            // is only stopped when the app is going away.
+            caption(
                 submenu,
-                MF_STRING,
+                localized(if *listening {
+                    "status.receiver.ready"
+                } else {
+                    "status.receiver.unavailable"
+                }),
+            );
+            let _ = separator(submenu);
+
+            command(
+                submenu,
                 base + CMD_AGENT_INSTALL,
-                PCWSTR(action.as_ptr()),
+                localized(if *status == installer::Status::NotInstalled {
+                    "action.install"
+                } else {
+                    "action.repair"
+                }),
             );
             if *status != installer::Status::NotInstalled {
-                let remove = wide(localized("action.remove"));
-                let _ = AppendMenuW(
-                    submenu,
-                    MF_STRING,
-                    base + CMD_AGENT_REMOVE,
-                    PCWSTR(remove.as_ptr()),
-                );
+                command(submenu, base + CMD_AGENT_REMOVE, localized("action.remove"));
             }
-
-            let name = wide(agent.display_name());
-            let _ = AppendMenuW(
-                menu,
-                MF_STRING | MF_POPUP,
-                submenu.0 as usize,
-                PCWSTR(name.as_ptr()),
-            );
+            command(submenu, base + CMD_AGENT_TEST, localized("action.testReaction"));
+            attach(menu, submenu, agent.display_name());
         }
 
-        let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
-        let quit = wide(localized("menu.quit"));
-        let _ = AppendMenuW(menu, MF_STRING, CMD_QUIT, PCWSTR(quit.as_ptr()));
+        // On macOS these two are submenus reporting an OS permission the app
+        // can only ask for. Windows grants both outright -- there is no prompt
+        // to route the user to -- so consent is the checkmark itself, and a
+        // submenu wrapping a single toggle would say less, not more.
+        // `docs/windows.md` section 6.
+        for (flag, id, key) in [
+            (checked(state.cursor_aware), CMD_CURSOR_AWARE, "menu.accessibility"),
+            (checked(state.visual), CMD_VISUAL, "menu.visualPlacement"),
+        ] {
+            let label = wide(localized(key));
+            let _ = AppendMenuW(menu, MF_STRING | flag, id, PCWSTR(label.as_ptr()));
+        }
+
+        let _ = separator(menu);
+        command(menu, CMD_OPEN_PET_FOLDER, localized("menu.openPetFolder"));
+        command(menu, CMD_COPY_DIAGNOSTICS, localized("menu.copyDiagnostics"));
+        let _ = separator(menu);
+        command(menu, CMD_ABOUT, localized("menu.about"));
+        // The macOS About alert carries this as a second button. `MessageBoxW`
+        // cannot relabel its buttons, so it is an item instead.
+        command(menu, CMD_VIEW_SOURCE, localized("menu.viewSource"));
+        command(menu, CMD_QUIT, localized("menu.quit"));
 
         let mut cursor = POINT::default();
         let _ = GetCursorPos(&mut cursor);

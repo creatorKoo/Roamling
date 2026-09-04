@@ -25,6 +25,7 @@ pub const HAS_POSITION: &str = "roamling.position.exists";
 /// here, so the setting *is* the consent. Both default off.
 pub const VISUAL_PLACEMENT: &str = "roamling.visualPlacement";
 pub const CURSOR_AWARENESS: &str = "roamling.cursorAwareness";
+pub const SCALE: &str = "roamling.scale";
 
 pub struct Settings {
     values: BTreeMap<String, String>,

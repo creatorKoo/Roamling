@@ -18,10 +18,12 @@
 //! overlay needs. See `docs/windows.md`, section 9.
 
 mod capture;
+mod diagnostics;
 mod duplication;
 mod focus;
 mod platform;
 mod settings;
+mod shell;
 mod sprite;
 mod strings;
 mod tray;
@@ -67,6 +69,12 @@ struct App {
     dragged: bool,
     /// What `SetTimer` is currently armed at, so it is only re-armed on change.
     tick_ms: u32,
+    /// The user's own size multiplier, multiplied into the display's scale.
+    /// `runtime.scale` on the macOS side, and the same settings key.
+    scale: f64,
+    /// What changed and when, for "Copy Diagnostics". Fed from the core's
+    /// per-tick `diagnostics`, which keeps nothing itself.
+    log: diagnostics::DiagnosticsLog,
     /// The runtime takes these but does not hand them back, so the menu keeps
     /// its own copy of what it last set.
     roaming: bool,
@@ -90,6 +98,13 @@ struct App {
     receivers: Vec<Receiver>,
     agent_events: std::sync::mpsc::Receiver<roamling_core::CompanionEvent>,
     tokens: [(Agent, String); 2],
+    /// Whether each agent's endpoint actually bound, for the menu's second
+    /// status line. A port in use means another copy of Roamling has it.
+    listening: [bool; 2],
+    /// Events waiting for their moment, with the time each is due. Only the
+    /// test reaction uses this -- it is two events three seconds apart, and a
+    /// timer thread for that would need a second way into the runtime.
+    deferred: Vec<(f64, roamling_core::CompanionEvent)>,
     /// When the last luminance readback happened, for the interval the core asks for.
     luminance_at: f64,
     settings: Settings,
@@ -159,6 +174,9 @@ fn main() -> Result<()> {
     let interactive = stored.bool(settings::INTERACTIONS, true);
     let visual = stored.bool(settings::VISUAL_PLACEMENT, false);
     let cursor_aware = stored.bool(settings::CURSOR_AWARENESS, false);
+    // Clamped to the range the menu offers, so a hand-edited settings file
+    // cannot produce a pet too small to catch or too big to walk around.
+    let scale = stored.number(settings::SCALE).unwrap_or(1.0).clamp(0.5, 2.0);
 
     let mut pet = PetRuntime::new(start, RuntimeTuning::default(), seed);
     pet.set_displays(displays.clone());
@@ -191,7 +209,8 @@ fn main() -> Result<()> {
     let (agent_sender, agent_events) = std::sync::mpsc::channel();
     let started = Instant::now();
     let mut receivers = Vec::new();
-    for (agent, token) in &tokens {
+    let mut listening = [false; 2];
+    for (index, (agent, token)) in tokens.iter().enumerate() {
         // A port already in use means another copy of Roamling is running.
         // Losing one endpoint is not worth refusing to start over.
         match Receiver::start(*agent, token.clone(), started, agent_sender.clone()) {
@@ -202,6 +221,7 @@ fn main() -> Result<()> {
                     agent.port()
                 );
                 receivers.push(receiver);
+                listening[index] = true;
             }
             Err(error) => println!("{} endpoint unavailable: {error}", agent.display_name()),
         }
@@ -222,6 +242,8 @@ fn main() -> Result<()> {
             drag_from: None,
             dragged: false,
             tick_ms: 0,
+            scale,
+            log: diagnostics::DiagnosticsLog::new(),
             roaming,
             avoiding,
             interactive,
@@ -231,6 +253,8 @@ fn main() -> Result<()> {
             receivers,
             agent_events,
             tokens,
+            listening,
+            deferred: Vec::new(),
             luminance_at: f64::NEG_INFINITY,
             settings: stored,
             last_state: BehaviorState::Idle,
@@ -302,24 +326,32 @@ fn create_window() -> Result<HWND> {
 fn tick(hwnd: HWND, app: &mut App) {
     let now = app.started.elapsed().as_secs_f64();
 
-    // The core decides whether an accessibility round trip is worth paying
-    // for. MVP 0 has no focus provider, so the answer is thrown away.
-    // The core decides whether the round trip is worth paying for; the shell
-    // decides whether the user allowed it at all.
     // Whatever the endpoints took while the loop was elsewhere. Draining here
     // rather than on the listener thread keeps the runtime single-threaded.
-    let pending: Vec<_> = app.agent_events.try_iter().collect();
+    let mut pending: Vec<_> = app.agent_events.try_iter().collect();
+    // Anything the test reaction left for later, once its moment has come.
+    let mut still_waiting = Vec::new();
+    for (due, event) in std::mem::take(&mut app.deferred) {
+        if due <= now {
+            pending.push(event);
+        } else {
+            still_waiting.push((due, event));
+        }
+    }
+    app.deferred = still_waiting;
     for event in pending {
         println!("{:7.1}s  agent {:?} {:?}", now, event.kind, event.source_id);
         app.pet.handle_activity_event(event, now);
     }
 
+    // The core decides whether the caret is worth a synchronous round trip;
+    // the shell decides whether the user allowed one at all.
     let wants_focus = app.pet.begin_tick(now) && app.cursor_aware;
     let queried = if wants_focus { focus::focus() } else { None };
 
     let pointer = platform::pointer();
     let position = app.pet.position();
-    let scale = scale_under(app, position);
+    let scale = render_scale(app, position);
     let half_width = BASE_WIDTH * scale / 2.0;
     let half_height = BASE_HEIGHT * scale / 2.0;
 
@@ -349,6 +381,11 @@ fn tick(hwnd: HWND, app: &mut App) {
             output.position.y
         );
         app.last_state = output.state;
+    }
+    // The core clears these every tick and keeps nothing; whoever wants a
+    // history keeps one. Only transitions survive -- see `diagnostics.rs`.
+    for (category, message) in &output.diagnostics {
+        app.log.record(category, message, now);
     }
 
     app.player.set_capability(&app.resolver, output.capability);
@@ -434,6 +471,43 @@ fn remember(app: &mut App, position: WorldPoint) {
     app.settings.set(settings::HAS_POSITION, true);
 }
 
+/// "Test Reaction": a turn starting, then finishing three seconds later.
+///
+/// Ported from `RoamlingRuntime.testAgentReaction`, including the pause -- the
+/// point is to show the whole arc, and an achievement on its own looks like a
+/// twitch. macOS schedules the second half on the main queue; here it goes in
+/// `deferred` and the tick picks it up, which keeps the runtime single-threaded.
+fn test_reaction(app: &mut App, agent: Agent, now: f64) {
+    use roamling_core::{CompanionEvent, CompanionEventKind, UserContext};
+
+    let source = format!("{}:test", agent.id());
+    let make = |kind, at: f64| {
+        let mut event = CompanionEvent::new(
+            format!("{source}:{kind:?}:{at}"),
+            source.clone(),
+            at,
+            kind,
+            0.55,
+            None,
+        );
+        event.context = Some(UserContext::Working);
+        event
+    };
+    let started = make(CompanionEventKind::ActivityStarted, now);
+    let finished = make(CompanionEventKind::Achievement, now + 3.0);
+    println!("{:7.1}s  test reaction for {}", now, agent.display_name());
+    app.pet.handle_activity_event(started, now);
+    app.deferred.push((now + 3.0, finished));
+}
+
+/// How big to draw: the display's own scale, times the user's choice.
+///
+/// The display half is what keeps the pet the same physical size across a
+/// mixed-DPI seam; the user half is the Size menu.
+fn render_scale(app: &App, position: WorldPoint) -> f64 {
+    scale_under(app, position) * app.scale
+}
+
 /// The scale of whichever display the pet is standing on, so it stays the same
 /// physical size as it crosses a mixed-DPI seam.
 fn scale_under(app: &App, position: WorldPoint) -> f64 {
@@ -510,7 +584,7 @@ fn apply(hwnd: HWND, app: &mut App, output: InteractionOutput) {
     }
     if output.render {
         app.player.set_capability(&app.resolver, output.capability);
-        let scale = scale_under(app, output.position);
+        let scale = render_scale(app, output.position);
         draw(hwnd, app, output.position, scale);
     }
 }
@@ -594,15 +668,38 @@ unsafe fn dispatch(hwnd: HWND, msg: u32, lp: LPARAM, app: &mut App) -> bool {
             tray::WM_TRAY
                 if matches!(lp.0 as u32, WM_RBUTTONUP | WM_LBUTTONUP | WM_CONTEXTMENU) =>
             {
+                let coverage = app.resolver.coverage();
+                let names = |set: &[roamling_core::PetCapability]| {
+                    let mut names: Vec<String> = set
+                        .iter()
+                        .map(|c| roamling_core::capability_name(*c).to_string())
+                        .collect();
+                    names.sort();
+                    names
+                };
                 let state = tray::MenuState {
+                    pet_name: app.asset.display_name.clone(),
+                    covered: coverage.covered(),
+                    total: coverage.total(),
+                    substituted: names(&coverage.substituted),
+                    placeholder: names(&coverage.placeholder),
+                    scale: app.scale,
                     roaming: app.roaming,
                     avoiding: app.avoiding,
                     interactive: app.interactive,
                     visual: app.visual,
                     cursor_aware: app.cursor_aware,
                     agents: [
-                        (app.tokens[0].0, installer::status(app.tokens[0].0, &app.tokens[0].1)),
-                        (app.tokens[1].0, installer::status(app.tokens[1].0, &app.tokens[1].1)),
+                        (
+                            app.tokens[0].0,
+                            installer::status(app.tokens[0].0, &app.tokens[0].1),
+                            app.listening[0],
+                        ),
+                        (
+                            app.tokens[1].0,
+                            installer::status(app.tokens[1].0, &app.tokens[1].1),
+                            app.listening[1],
+                        ),
                     ],
                 };
                 match tray::show_menu(hwnd, state) {
@@ -635,21 +732,45 @@ unsafe fn dispatch(hwnd: HWND, msg: u32, lp: LPARAM, app: &mut App) -> bool {
                         app.cursor_aware = !app.cursor_aware;
                         app.settings.set(settings::CURSOR_AWARENESS, app.cursor_aware);
                     }
+                    tray::CMD_OPEN_PET_FOLDER => shell::open_pet_folder(),
+                    tray::CMD_COPY_DIAGNOSTICS => {
+                        let text = app.log.text(now);
+                        if !shell::copy_to_clipboard(hwnd, &text) {
+                            println!("could not put the diagnostics on the clipboard");
+                        }
+                    }
+                    tray::CMD_ABOUT => shell::about(hwnd),
+                    tray::CMD_VIEW_SOURCE => shell::view_source(),
                     // Agent ids live in blocks of ten from 100.
                     picked if picked >= tray::CMD_AGENT_BASE => {
                         let index = (picked - tray::CMD_AGENT_BASE) / tray::CMD_AGENT_STRIDE;
                         let action = (picked - tray::CMD_AGENT_BASE) % tray::CMD_AGENT_STRIDE;
                         if let Some((agent, token)) = app.tokens.get(index) {
-                            let outcome = if action == tray::CMD_AGENT_REMOVE {
-                                installer::remove(*agent)
+                            let agent = *agent;
+                            if action == tray::CMD_AGENT_TEST {
+                                test_reaction(app, agent, now);
                             } else {
-                                installer::install(*agent, token)
-                            };
-                            match outcome {
-                                Ok(()) => println!("{} hooks updated", agent.display_name()),
-                                Err(error) => println!("{}: {error}", agent.display_name()),
+                                let outcome = if action == tray::CMD_AGENT_REMOVE {
+                                    installer::remove(agent)
+                                } else {
+                                    installer::install(agent, token)
+                                };
+                                match outcome {
+                                    Ok(()) => println!("{} hooks updated", agent.display_name()),
+                                    Err(error) => println!("{}: {error}", agent.display_name()),
+                                }
                             }
                         }
+                    }
+                    // The Size list, in the order `SCALE_CHOICES` declares.
+                    picked if picked >= tray::CMD_SCALE_BASE
+                        && picked < tray::CMD_SCALE_BASE + tray::SCALE_CHOICES.len() =>
+                    {
+                        app.scale = tray::SCALE_CHOICES[picked - tray::CMD_SCALE_BASE].1;
+                        app.settings.set(settings::SCALE, app.scale);
+                        // `draw` notices the footprint changed and tells the
+                        // core, which is what keeps the pet on screen when it
+                        // grows next to an edge.
                     }
                     tray::CMD_QUIT => {
                         tray::remove(hwnd);
