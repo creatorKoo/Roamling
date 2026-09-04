@@ -573,16 +573,31 @@ fn refresh_luminance(app: &mut App, requests: &[roamling_core::LuminanceRequest]
         if capture.unchanged {
             "unchanged".to_string()
         } else {
-            capture
-                .field
-                .as_ref()
-                .map_or("nothing".to_string(), |f| format!("{}x{}", f.columns, f.rows))
+            capture.field.as_ref().map_or("nothing".to_string(), |f| {
+                // 0.02 is the scorer's "fully busy" reference. Anything well
+                // under it is a field too flat for the seat picker to tell
+                // text from bare desktop.
+                let min = f.samples.iter().cloned().fold(f64::INFINITY, f64::min);
+                let max = f.samples.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+                let mean = f.samples.iter().sum::<f64>() / f.samples.len() as f64;
+                format!(
+                    "{}x{}  gradient {:.4}  min {:.3} max {:.3} mean {:.3}",
+                    f.columns,
+                    f.rows,
+                    capture::mean_gradient(f),
+                    min,
+                    max,
+                    mean
+                )
+            })
         }
     );
     // An unchanged screen still has the luminance it had, so the previous
-    // field stays. Replacing it with `None` would throw away a good answer.
-    if !capture.unchanged {
-        app.pet.set_luminance(capture.field);
+    // field stays. Replacing it with `None` would throw away a good answer --
+    // and a duplication error took that path too, so a moment's trouble with
+    // the GPU used to cost the pet everything it knew about the screen.
+    if let Some(field) = capture.field {
+        app.pet.set_luminance(Some(field));
     }
 }
 

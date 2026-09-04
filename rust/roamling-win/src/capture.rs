@@ -169,6 +169,40 @@ fn average(pixels: &[u8], width: usize, height: usize, stride: usize, rows: usiz
         .collect()
 }
 
+/// The statistic the seat scorer actually uses, over the whole field.
+///
+/// `VisualEmptiness` scores a region by the mean difference between
+/// neighbouring cells, against a reference of 0.02 -- a figure calibrated on
+/// macOS against rendered terminal output. Printing the same number here is the
+/// only way to tell a field that is too flat to judge from a scorer that is
+/// judging it wrongly.
+pub fn mean_gradient(field: &roamling_core::LuminanceField) -> f64 {
+    let mut total = 0.0;
+    let mut count = 0usize;
+    for row in 0..field.rows {
+        for column in 0..field.columns {
+            let Some(value) = field.sample(column as i64, row as i64) else { continue };
+            if column + 1 < field.columns {
+                if let Some(right) = field.sample(column as i64 + 1, row as i64) {
+                    total += (right - value).abs();
+                    count += 1;
+                }
+            }
+            if row + 1 < field.rows {
+                if let Some(below) = field.sample(column as i64, row as i64 + 1) {
+                    total += (below - value).abs();
+                    count += 1;
+                }
+            }
+        }
+    }
+    if count == 0 {
+        0.0
+    } else {
+        total / count as f64
+    }
+}
+
 /// Whether there is anything to look at.
 ///
 /// A locked workstation switches the input desktop to Winlogon's secure one.
@@ -251,6 +285,31 @@ mod tests {
             "written and bare paper differ by only {}",
             bare - inked
         );
+    }
+
+    /// The instrument that found the black-frame bug, so it gets its own guard:
+    /// a flat field has no gradient at all, and the seat scorer reads exactly
+    /// that as a perfectly empty screen.
+    #[test]
+    fn a_flat_field_has_no_gradient_and_a_checkerboard_has_all_of_it() {
+        let flat = roamling_core::LuminanceField::new(
+            roamling_core::WorldRect::new(0.0, 0.0, 100.0, 100.0),
+            4,
+            4,
+            vec![0.0; 16],
+        )
+        .expect("field");
+        assert_eq!(mean_gradient(&flat), 0.0);
+
+        let checker: Vec<f64> = (0..16).map(|i| ((i / 4 + i % 4) % 2) as f64).collect();
+        let busy = roamling_core::LuminanceField::new(
+            roamling_core::WorldRect::new(0.0, 0.0, 100.0, 100.0),
+            4,
+            4,
+            checker,
+        )
+        .expect("field");
+        assert_eq!(mean_gradient(&busy), 1.0);
     }
 
     /// The old cap, reproduced, to show it was not a theoretical loss: stepping

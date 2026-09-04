@@ -206,6 +206,21 @@ impl Duplication {
             }
             self.holding = true;
 
+            // A frame can arrive carrying nothing but a pointer move, and the
+            // very first one after `DuplicateOutput` carries nothing at all --
+            // the surface is whatever was in that memory, which is zeroes.
+            // `LastPresentTime` is how the API says so: zero means the desktop
+            // image was not updated, so there is nothing here to read.
+            //
+            // Reading it anyway produced an all-black field, and an all-black
+            // field has no gradient and no spread -- which the seat scorer
+            // reads as a *perfectly empty screen* and the pet takes as
+            // permission to sit anywhere, including on the user's text. Every
+            // capture session began with one.
+            if info.LastPresentTime == 0 {
+                return Ok(false);
+            }
+
             let Some(resource) = resource else {
                 return Err(());
             };
