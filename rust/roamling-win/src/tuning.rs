@@ -155,17 +155,68 @@ fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
+/// The authored value for this row, which is what the middle of the track means.
+fn anchor(row: &Row, tuning: &RuntimeTuning) -> f64 {
+    let (lower, upper) = tuning.limits(row.key);
+    let default = RuntimeTuning::default().get(row.key);
+    default.clamp(lower.min(upper), upper.max(lower))
+}
+
+/// Half the track. The two halves have the same number of notches, so the
+/// authored value lands exactly on the middle one.
+///
+/// The bounds are not symmetric around the defaults -- the notice distance
+/// runs 140 to 360 around a default of 170, so a straight linear track puts
+/// "normal" a seventh of the way from the left and every adjustment looks like
+/// a large one. Splitting the track at the default costs nothing and makes the
+/// centre mean "what the pet was designed to do", with slower and faster the
+/// same distance away in each direction.
+///
+/// The side with the wider span keeps the authored step; the narrower side ends
+/// up finer than it, which is only ever more precision than was asked for.
+fn half_notches(row: &Row, tuning: &RuntimeTuning) -> i32 {
+    let (lower, upper) = tuning.limits(row.key);
+    let middle = anchor(row, tuning);
+    let below = ((middle - lower) / row.step).abs();
+    let above = ((upper - middle) / row.step).abs();
+    (below.max(above).round() as i32).max(1)
+}
+
 /// How many notches this row's trackbar has, and where a value sits on it.
 fn positions(row: &Row, tuning: &RuntimeTuning) -> (i32, i32) {
+    let half = half_notches(row, tuning);
     let (lower, upper) = tuning.limits(row.key);
-    let notches = (((upper - lower) / row.step).round() as i32).max(1);
-    let at = (((tuning.get(row.key) - lower) / row.step).round() as i32).clamp(0, notches);
-    (notches, at)
+    let middle = anchor(row, tuning);
+    let value = tuning.get(row.key);
+
+    let at = if value <= middle {
+        let span = middle - lower;
+        if span > 0.0 {
+            ((value - lower) / span * f64::from(half)).round() as i32
+        } else {
+            0
+        }
+    } else {
+        let span = upper - middle;
+        if span > 0.0 {
+            half + ((value - middle) / span * f64::from(half)).round() as i32
+        } else {
+            half * 2
+        }
+    };
+    (half * 2, at.clamp(0, half * 2))
 }
 
 fn value_at(row: &Row, tuning: &RuntimeTuning, position: i32) -> f64 {
-    let (lower, _) = tuning.limits(row.key);
-    lower + f64::from(position) * row.step
+    let half = half_notches(row, tuning);
+    let (lower, upper) = tuning.limits(row.key);
+    let middle = anchor(row, tuning);
+    let position = position.clamp(0, half * 2);
+    if position <= half {
+        lower + (middle - lower) * f64::from(position) / f64::from(half)
+    } else {
+        middle + (upper - middle) * f64::from(position - half) / f64::from(half)
+    }
 }
 
 /// Opens the panel, or brings it back to the front if it is already up.
@@ -644,7 +695,51 @@ mod tests {
             // And the ends of the trackbar are the ends of the range.
             let (lower, upper) = tuning.limits(row.key);
             assert!((value_at(&row, &tuning, 0) - lower).abs() < 1e-9);
-            assert!(value_at(&row, &tuning, notches) >= upper - row.step);
+            assert!((value_at(&row, &tuning, notches) - upper).abs() < 1e-9);
+        }
+    }
+
+    /// The reason the track is split: every slider starts in the middle, so
+    /// "centre" reads as the authored behaviour and the two directions are
+    /// symmetric even where the bounds are not.
+    #[test]
+    fn a_default_sits_exactly_in_the_middle() {
+        let tuning = RuntimeTuning::default();
+        for item in items() {
+            let Item::Slider(row) = item else { continue };
+            let (notches, at) = positions(&row, &tuning);
+            assert_eq!(
+                at * 2,
+                notches,
+                "{} starts at {at} of {notches}, not the middle",
+                row.title
+            );
+            // And the middle notch gives the default back exactly, so opening
+            // the panel and closing it cannot drift the pet off its defaults.
+            assert_eq!(value_at(&row, &tuning, notches / 2), tuning.get(row.key));
+        }
+    }
+
+    /// Moving one notch either side of centre has to actually change the value,
+    /// or the middle would be a dead zone the user cannot get out of by dragging.
+    #[test]
+    fn the_notches_either_side_of_centre_are_distinct() {
+        let tuning = RuntimeTuning::default();
+        for item in items() {
+            let Item::Slider(row) = item else { continue };
+            let (notches, middle) = positions(&row, &tuning);
+            let centre = value_at(&row, &tuning, middle);
+            assert!(
+                value_at(&row, &tuning, middle - 1) < centre,
+                "{} does not go lower",
+                row.title
+            );
+            assert!(
+                value_at(&row, &tuning, middle + 1) > centre,
+                "{} does not go higher",
+                row.title
+            );
+            assert_eq!(notches, middle * 2);
         }
     }
 
