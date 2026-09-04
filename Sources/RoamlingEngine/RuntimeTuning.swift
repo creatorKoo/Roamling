@@ -123,6 +123,27 @@ public struct RuntimeTuning: Codable, Equatable, Sendable {
 
     public static let standard = RuntimeTuning()
 
+    /// The values that sit somewhere other than where they ship.
+    ///
+    /// This is what gets written down, and nothing else. Recording all eleven
+    /// -- which persistence used to do -- freezes whichever defaults happened
+    /// to be current when the file was written, because a stored value beats a
+    /// default. The wander pause went from 12 to 40 and Windows kept walking
+    /// every twelve seconds for exactly that reason, on a file that "Reset
+    /// Defaults" had created.
+    ///
+    /// Equality is exact and can be. A slider nobody moved holds a copy of the
+    /// authored number, and one that was moved and put back lands on it through
+    /// the same clamps `standard` came through.
+    public var changesFromStandard: [RuntimeTuningKey: Double] {
+        let authored = RuntimeTuning.standard
+        var changed: [RuntimeTuningKey: Double] = [:]
+        for key in RuntimeTuningKey.allCases where self[key] != authored[key] {
+            changed[key] = self[key]
+        }
+        return changed
+    }
+
     /// What `init` will clamp this value to, given the rest of this tuning.
     ///
     /// An instance method because one bound moves: `catchArmDistance` cannot

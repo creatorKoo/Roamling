@@ -615,11 +615,35 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         defaults.set(true, forKey: DefaultsKey.hasPosition)
     }
 
+    /// Writes down the values the user moved and forgets the rest.
+    ///
+    /// Writing all eleven meant that opening the panel once sealed a machine
+    /// off from every later change to any of them -- a stored value wins, so
+    /// whichever defaults were current that day became permanent. It was
+    /// "Reset Defaults" that wrote the file, which put the most careful users
+    /// furthest out of reach.
+    ///
+    /// The stored form is the same JSON object as before with the untouched
+    /// keys left out, so nothing needs migrating in either direction: the
+    /// decoder already fills a missing key from the default, which is what it
+    /// was written to do when a field is added, and a full object from an older
+    /// build still reads here.
     private func persistRuntimeTuning() {
-        guard let data = try? JSONEncoder().encode(tuning) else { return }
+        let changed = tuning.changesFromStandard
+        guard !changed.isEmpty else {
+            // Removed rather than stored empty. A key that is gone lets the
+            // default answer, which is the whole point, and this is where
+            // "Reset Defaults" lands.
+            defaults.removeObject(forKey: DefaultsKey.runtimeTuning)
+            return
+        }
+        var stored: [String: Double] = [:]
+        for (key, value) in changed { stored[key.rawValue] = value }
+        guard let data = try? JSONEncoder().encode(stored) else { return }
         defaults.set(data, forKey: DefaultsKey.runtimeTuning)
     }
 
+    /// Reads whatever is there -- every key, some of them, or none.
     private static func loadRuntimeTuning(defaults: UserDefaults) -> RuntimeTuning {
         guard let data = defaults.data(forKey: DefaultsKey.runtimeTuning),
               let decoded = try? JSONDecoder().decode(RuntimeTuning.self, from: data) else {
