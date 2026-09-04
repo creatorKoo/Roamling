@@ -464,8 +464,8 @@ public enum MascotPetFactory {
         // WebP keeps the nine-row Mochi atlas under a megabyte and half the
         // size of the equivalent PNG, and ImageIO decodes both.
         let resourceURL = ["png", "webp"].lazy.compactMap { ext in
-            Bundle.module.url(forResource: name, withExtension: ext, subdirectory: "BuiltInPets")
-                ?? Bundle.module.url(forResource: name, withExtension: ext)
+            petResourceBundle.url(forResource: name, withExtension: ext, subdirectory: "BuiltInPets")
+                ?? petResourceBundle.url(forResource: name, withExtension: ext)
         }.first
         guard let resourceURL,
               let decoded = images.decode(contentsOf: resourceURL) else { return nil }
