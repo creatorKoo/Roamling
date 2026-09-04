@@ -179,8 +179,6 @@ private struct RuntimeTuningView: View {
                 style: .multiplier
             )
             Divider()
-            // Parked here until the real options window exists; this panel is
-            // the only surface that can carry it today.
             Text(localized("tuning.section.advanced"))
                 .font(.headline)
             TuningSliderRow(

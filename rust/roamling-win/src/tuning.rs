@@ -106,7 +106,6 @@ fn items() -> Vec<Item> {
         slider("tuning.catchWindow", K::CatchWindow, 0.05, Unit::SecondsDecimal),
         slider("tuning.hitRegion", K::HitRegionScale, 0.01, Unit::Multiplier),
         Item::Note("tuning.pointerNote"),
-        // Parked here until a real options window exists, exactly as on macOS.
         Item::Section("tuning.section.advanced"),
         slider("tuning.gaitCadence", K::GaitCadence, 0.05, Unit::Multiplier),
         Item::Note("tuning.gaitCadenceNote"),

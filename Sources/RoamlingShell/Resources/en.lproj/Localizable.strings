@@ -10,7 +10,7 @@
 "menu.roaming" = "Roaming";
 "menu.avoidPointer" = "Avoid Pointer";
 "menu.catchDrag" = "Catch & Drag";
-"menu.tuning" = "Behavior Tuning…";
+"menu.tuning" = "Behavior Settings…";
 "menu.accessibility" = "Cursor Awareness";
 "menu.openPetFolder" = "Open Pet Folder…";
 "menu.copyDiagnostics" = "Copy Diagnostics";
@@ -59,9 +59,9 @@
 "accessibility.alert.title" = "Enable caret awareness?";
 "accessibility.alert.body" = "macOS will ask you to allow Roamling under Accessibility. Roamling then reads the focused control's position and the text cursor's position so the pet can sit near your work without covering it.\n\nIt never reads what you type, the text you select, window titles, or document contents.";
 "accessibility.revoke.hint" = "Turn off in System Settings › Privacy & Security › Accessibility";
-"tuning.window.title" = "Roamling Behavior Tuning";
-"tuning.header" = "MVP 0 / 0.5 feel lab";
-"tuning.footer" = "Changes apply immediately and are saved. This panel tunes roaming and pointer interaction only; MVP 0.7 rest timing stays fixed during its first validation pass.";
+"tuning.window.title" = "Roamling Behavior Settings";
+"tuning.header" = "How your pet moves";
+"tuning.footer" = "Every change applies straight away and is remembered. Nothing here is required — the defaults are the authored behaviour, and Reset Defaults brings them back at any time.";
 "tuning.section.movement" = "Movement";
 "tuning.walkSpeed" = "Walk speed";
 "tuning.idleBeforeRest" = "Idle before napping";
@@ -81,7 +81,7 @@
 "unit.multiplier" = "%.2f×";
 "button.ok" = "OK";
 "alert.about.body" = "A tiny companion that actually lives on your desktop.\n\nCopyright © 2026 GooBeom Jeoung\nLicensed under GNU GPL v3.0 only.\nThis program comes with absolutely no warranty.\n\nInstalled pet packages remain subject to their authors’ licenses.";
-"tuning.section.advanced" = "Advanced";
+"tuning.section.advanced" = "Animation";
 "tuning.gaitCadence" = "Gait cadence";
 "tuning.gaitCadenceNote" = "How fast the walk cycle plays while travelling. 1.00× is the authored motion and the recommended setting; raise it only if faster walking speeds look like sliding to you.";
 "tuning.evadeSpeed" = "Evade speed";
