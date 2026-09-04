@@ -1,0 +1,41 @@
+// SPDX-FileCopyrightText: 2026 GooBeom Jeoung
+// SPDX-License-Identifier: GPL-3.0-only
+//
+// The executable's icon, and what the file's Properties page says about it.
+//
+// The icon is the same file the macOS app uses, converted size for size by
+// scripts/build-ico.py -- not a lookalike drawn twice. See "마크는 하나다" in
+// CLAUDE.md.
+//
+// Resource id 1 on purpose: the shell shows the lowest-numbered icon for a
+// file, so this is the one Explorer, the taskbar and Alt-Tab pick up.
+
+1 ICON "../../assets/Roamling.ico"
+
+1 VERSIONINFO
+FILEVERSION     ROAMLING_VERSION_COMMAS
+PRODUCTVERSION  ROAMLING_VERSION_COMMAS
+FILEOS          0x4L        // VOS_NT
+FILETYPE        0x1L        // VFT_APP
+{
+    BLOCK "StringFileInfo"
+    {
+        // 0409 is English (US), 04B0 is Unicode. A version block has to name a
+        // language even when the strings in it are not translated.
+        BLOCK "040904B0"
+        {
+            VALUE "CompanyName",      "GooBeom Jeoung"
+            VALUE "FileDescription",  "Roamling"
+            VALUE "FileVersion",      ROAMLING_VERSION_TEXT
+            VALUE "InternalName",     "roamling"
+            VALUE "LegalCopyright",   "Copyright (C) 2026 GooBeom Jeoung. GPL-3.0-only."
+            VALUE "OriginalFilename", "roamling.exe"
+            VALUE "ProductName",      "Roamling"
+            VALUE "ProductVersion",   ROAMLING_VERSION_TEXT
+        }
+    }
+    BLOCK "VarFileInfo"
+    {
+        VALUE "Translation", 0x409, 1200
+    }
+}

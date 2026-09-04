@@ -1376,8 +1376,23 @@ Rust 실제     1파일 ·  2.1 MB · OS 밖 DLL 0개
 영어로** 뜬다. 자기 언어를 묻는 것은 답이 정해진 질문이다.
 
 콘솔은 `#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]`가 release에서만
-없애므로 링커 플래그도 필요 없다. 아이콘도 `.ico`를 싣지 않는다 — 트레이 아이콘은 macOS가
-쓰는 것과 같은 🐾 글리프를 `SM_CXSMICON` 크기에 맞춰 그때그때 그린다.
+없애므로 링커 플래그도 필요 없다.
+
+**아이콘은 두 자리가 다르다 (2026-09-04).** 트레이는 여전히 그린다 — macOS 메뉴바가 🐾
+글리프를 쓰는 것과 같은 자리이고, `SM_CXSMICON`이 요청하는 크기에 맞춰 그때그때 그리는
+편이 비트맵보다 정확하다. **앱 아이콘은 파일이어야 한다**: exe의 리소스로 박혀야 탐색기·
+작업 표시줄·Alt-Tab·설치 파일이 그것을 쓴다. 그래서 `assets/Roamling.ico`를 커밋한다 —
+macOS가 `assets/Roamling.icns`를 커밋하는 것과 같은 이유다.
+
+**그 `.ico`는 `.icns`에서 나온다.** `scripts/build-ico.py`가 크기별 이미지를 **그대로 복사**
+한다(16·32·64·128·256). 닮은 것을 두 번 그리는 것이 아니라 같은 픽셀이다. 큰 것을 줄이는
+일은 하지 않는다 — 크기마다 따로 그린 이유가 그것이고, Windows가 48을 원하면 저장된 64를
+셸이 줄인다(같은 산술을 한 층 아래에서 하는 것뿐이다).
+
+`build.rs`가 `rc.exe`로 아이콘과 버전 블록을 넣는다. SDK에 이미 있는 도구라 크레이트가
+늘지 않는다. **버전은 `/d`로 넘기지 않고 `.rc` 사본에 치환한다** — `rc.exe`의 문자열
+define은 따옴표를 품어야 하고, 그것을 Windows 인자 분해를 통과시켜 온전히 넘기는 일은
+얻을 것 없는 싸움이다. `rc.exe`가 없으면 경고만 남기고 아이콘 없이 빌드한다.
 
 **per-user 설치가 핵심 선택이다.** `%LOCALAPPDATA%\Programs\Roamling`에 깔면 **UAC 프롬프트가
 아예 뜨지 않고**, 자동시작도 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`이라 권한이

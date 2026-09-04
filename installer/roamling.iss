@@ -49,6 +49,10 @@ LicenseFile=..\LICENSE
 ShowLanguageDialog=auto
 UninstallDisplayName=Roamling
 UninstallDisplayIcon={app}\roamling.exe
+; The same mark the app carries, so the download in the browser, the wizard and
+; the installed program all look like one thing. Generated from the macOS icon
+; by scripts/build-ico.py -- see "마크는 하나다" in CLAUDE.md.
+SetupIconFile=..\assets\Roamling.ico
 
 [Languages]
 ; Both ship with Inno Setup 6. The wizard's own text comes from these; the

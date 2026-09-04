@@ -64,6 +64,9 @@ compiler/SDK mismatch가 나면 두 script 모두 `ROAMLING_SWIFT_SDK=/path/to/M
 - macOS 메뉴바: `RoamlingAppDelegate`가 title에 `"🐾"`
 - Windows 트레이: `tray.rs`의 `paw_icon()`이 GDI로 그린다
 - macOS 앱 아이콘: `scripts/build-icon.sh` → `assets/Roamling.icns` (커밋됨)
+- Windows 앱 아이콘: `scripts/build-ico.py` → `assets/Roamling.ico` (커밋됨).
+  `.icns`에서 **크기별 이미지를 그대로 복사**한다 — 닮은 것을 두 번 그리는 것이 아니라
+  같은 픽셀이다. `build.rs`가 `rc.exe`로 exe에 박는다
 
 앱 아이콘만 파일이어야 해서 커밋한다. 마크를 바꾸면 `build-icon.sh`를 다시 돌린다.
 **글리프의 실제 잉크를 재서 맞춘다** — 폰트 크기를 고르면 side bearing을 추측하게 되고,
