@@ -13,7 +13,7 @@ macOS desktop companion runtime. Swift 6 / AppKit / SwiftPM, GPL-3.0-only.
 swift build                    # 약 5초
 ./scripts/test.sh              # RoamlingLogicTests + cargo test, 실패 시 non-zero
 swift run Roamling
-./scripts/build-app.sh release # build/Roamling.app (ad-hoc codesign)
+./scripts/build-app.sh release # build/Roamling.app (서명 identity 필수, 아래 참조)
 ```
 
 Windows에는 Swift가 없다 — 그쪽 빌드는 전부 Rust다.
@@ -28,7 +28,8 @@ Windows에는 Swift가 없다 — 그쪽 빌드는 전부 Rust다.
 `rust/Cargo.toml`의 버전이 다르면 워크플로가 실패한다** — 다르면 설치된 빌드가 영원히
 자기를 업데이트하기 때문이다. 자동 업데이트의 서명 키·피드 구조·수동으로 해야 할 일은
 `docs/windows.md`의 W7 절에 있다. **`PUBLIC_KEY_HEX`가 전부 0이면 업데이트는 꺼진 상태이고,
-그게 안전한 기본값이다** — 서명을 확인할 수 없는 빌드는 업데이트하지 않는다.
+그게 안전한 기본값이다** — 서명을 확인할 수 없는 빌드는 업데이트하지 않는다. 지금은 실제
+키가 들어 있고 양 플랫폼의 자동 업데이트가 켜져 있다.
 
 **빌드한 뒤에는 앱을 다시 켠다.** 상주 펫이라 내려둔 채로 두지 않고, 실무적으로도
 **실행 중인 사본이 자기 `roamling.exe`를 잡고 있어** `cargo build`가 "액세스가 거부되었습니다"로
@@ -149,8 +150,9 @@ import하지 않는다.** macOS SDK에 다 있어서 컴파일러는 이걸 못 
 
 **펫이 무엇을 할지 결정하는 코드는 이제 전부 `rust/roamling-core`에 있다.** geometry ·
 world · topology · emptiness · 배치 · attention · 반응 · 튜닝 · 활동 지휘 · tick 본체 ·
-애니메이션 해석까지. macOS 앱이 그것을 쓰고 있고 `RoamlingRuntime`은 667줄만 남았다 —
-타이머 · UserDefaults · 진단 파일 · agent 구독 · 스프라이트 시트, 즉 결정이 아닌 것들뿐이다.
+애니메이션 해석까지. macOS 앱이 그것을 쓰고 있고 `RoamlingRuntime`은 1,664줄에서 700줄
+아래로 줄었다 — 타이머 · UserDefaults · 진단 파일 · agent 구독 · 스프라이트 시트, 즉 결정이
+아닌 것들뿐이다.
 **Windows 게이트는 W7까지 전부 닫혔다 (2026-09-04).** W4 최소 루프 · W5 provider 셋 ·
 W5b agent 연동 · W6 패키징(Inno Setup, per-user) · W7 자동 업데이트(공유 Rust 업데이터 +
 Ed25519 서명)까지 실물로 돈다. 첫 릴리스 `v0.2.0`이 나가 있고 자동 업데이트가 켜져 있다.
@@ -276,7 +278,7 @@ Apple Developer Program 연 $99는 **여전히 안 냈다.** 내면 첫 다운�
 
 포팅 규칙은 그대로다: **살아 있는 구현은 항상 1벌.** Swift 원본은 대조군으로 Core에
 남아 있고(`MovementController` · `PlacementDirector` · `AttentionModel` 등), 단위마다
-게이트가 둘이다 — `cargo test`의 differential fixture 10개(14 MB, 6만+ 케이스)와 Swift
+게이트가 둘이다 — `cargo test`의 differential fixture 10개(12 MB, 6만+ 케이스)와 Swift
 쪽에서 두 구현을 나란히 돌려 비교하는 테스트. 런타임처럼 위에 호출자가 없어 대조군을
 만들 수 없는 경우에는 **실물을 40초 녹화해서**(`Tests/RoamlingLogicTests/RuntimeTrace.txt`)
 바이트 단위로 같은 답을 요구한다. 재생성은

@@ -628,7 +628,7 @@ Windows 셸이 못 읽는다. `LocalizedText.swift`는 이미 Foundation 20줄�
   전체 133개 통과.
 - import 게이트가 `Sources/RoamlingShell`까지 덮는다.
 
-**남은 것**: `RuntimeTuningWindowController`(SwiftUI 257줄)의 *레이아웃*은 아직 macOS 전용이다.
+**남은 것**: `RuntimeTuningWindowController`(SwiftUI)의 *레이아웃*은 아직 macOS 전용이다.
 필드 목록·범위·단위는 Core와 Shell이 들고 있으므로 Windows는 렌더러만 쓰면 되지만, 섹션 제목과
 순서는 아직 SwiftUI 뷰 안에 있다. W4에서 트레이를 만들 때 같이 뺀다.
 
