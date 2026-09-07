@@ -1552,11 +1552,22 @@ GitHub Pages도, 전용 브랜치도 필요 없고, 빌드를 올리는 그 CI �
    (에이전트가 돌리면 비밀키가 대화 기록에 남는다.)
 2. 공개키를 `roamling-update/src/lib.rs`의 `PUBLIC_KEY_HEX`에 붙인다.
 3. 비밀키를 GitHub 저장소 secret `ROAMLING_UPDATE_SECRET_KEY`에 넣는다.
-4. `rust/Cargo.toml`의 버전을 올리고 같은 번호로 태그를 민다. **워크플로가 태그와
-   Cargo.toml이 다르면 실패시킨다** — 다르면 설치된 빌드가 영원히 자기를 업데이트한다.
+4. 버전을 올리고 같은 번호로 태그를 민다. **세 곳이 태그와 같아야 하고, 워크플로가
+   대조해서 다르면 실패시킨다** — `rust/Cargo.toml`(업데이터가 비교하는 값),
+   `CFBundleShortVersionString`(정보 창에 보이는 값), `CFBundleVersion`(macOS가 빌드로
+   취급하는 값). 첫째가 어긋나면 설치된 빌드가 영원히 자기를 업데이트한다. 셋째는 두
+   릴리스 동안 `1`에 머물러 있었고, LaunchServices가 그 값으로 캐시한다.
 
-macOS는 아직 붙지 않았다. Swift 쪽이 `roamling-update`를 uniffi로 가져다 쓰고 `.app` 교체와
-재실행 80줄을 쓰면 같은 피드에 줄 하나가 늘어난다.
+**macOS는 2026-09-04에 붙었다.** 예상대로 `roamling-update`의 결정 로직을 uniffi로 가져다
+쓰고, 이 기계에 닿는 셋만 Swift가 한다 — URLSession으로 받고, `ditto`로 풀고, 번들을
+바꾼다. 피드는 `macos-arm64` 항목 하나가 늘었고 `.zip`을 가리킨다(dmg가 아니다 — 실행 중인
+앱을 디스크 이미지에서 바꾸려면 마운트와 언마운트가 필요하고 볼륨이 사용 중이면 실패한다).
+서명·배포·첫 실행 마찰은 `CLAUDE.md`의 "맥에서 해야 하는 일 → D"에 있다.
+
+**릴리스는 발행 전에 패키징된 앱을 실제로 켜 본다.** v0.3.0이 서명·봉인·검증을 전부
+통과하고도 실행 즉시 trap했다 — 검사가 전부 번들의 *모양*에 관한 것이었고 아무도 켜 보지
+않았다. 이유는 `CLAUDE.md`의 리소스 번들 절에 있다. 게이트는 `.build`를 치운 상태에서
+`ROAMLING_SMOKE_TEST=1`로 도는데, 그 조건이어야 결함이 보이기 때문이다.
 
 ## 5. 매핑 표에 더할 것
 
