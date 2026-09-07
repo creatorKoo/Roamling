@@ -697,7 +697,7 @@ Core의 범위대로 넓어진다(이건 의도된 수정이므로 따로 확인
 A로 가면 Swift 포터블 모듈에 산다. **어느 쪽이든 필요한 일이라 결정을 기다리지 않는다** —
 W1·W2와 같은 성질이다.
 
-### W4 — Windows 최소 루프
+### W4 — Windows 최소 루프 ✅ 완료 2026-09-04
 
 tray + layered window + Display/Pointer/Idle provider.
 **exit 조건: MVP 0 수준(배회 · 포인터 회피 · 잡기 · 드래그)이 Windows에서 돌고 사용자가
@@ -1286,7 +1286,7 @@ macOS는 코어에 **논리 포인트**를 주고 backing factor를 따로 보�
 
 그때 고른다. 먼저 고칠 이유는 아직 없다.
 
-### W5 — 나머지 provider
+### W5 — 나머지 provider ✅ 완료 2026-09-04
 
 Window / Focus / Capture. 5절 참조.
 
@@ -1422,7 +1422,7 @@ macOS는 `ShellPrompt.confirmation(for:)`으로 먼저 묻고 `integrationResult
 못했습니다"가 뜬다. Windows는 새 키를 쓰고, 두 `.strings`에 다 넣었다. **맥 할 일**: Swift
 쪽도 이 키를 쓰도록 고칠 것.
 
-### W6 — 패키징
+### W6 — 패키징 ✅ 완료 2026-09-04
 
 **10절의 입력은 이제 유효하지 않다.** 그것은 Swift 기준(17파일 · 56.0 MB · 단일 파일 불가)이고,
 D로 가면서 사라졌다. 실측 (2026-09-04):
@@ -1509,7 +1509,7 @@ define은 따옴표를 품어야 하고, 그것을 Windows 인자 분해를 통�
 macOS의 `scripts/signing.env` 패턴을 그대로 가져온다 — identity를 git-ignore된 파일에 두고,
 없으면 서명 없이 빌드해서 기여자 빌드가 깨지지 않게 한다.
 
-### W7 — 자동 업데이트 (양 플랫폼 공통)
+### W7 — 자동 업데이트 (양 플랫폼 공통) ✅ 완료 2026-09-04
 
 **첫 배포부터 넣는다.** 나중에 붙이면 이미 설치된 사용자에게 도달할 방법이 없다.
 
