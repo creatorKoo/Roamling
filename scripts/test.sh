@@ -37,6 +37,11 @@ PORTABLE_DIRS=(
   Sources/RoamlingSources
   Sources/RoamlingEngine
   Sources/RoamlingShell
+  # The harness too, since W2b. It was the last thing here that only built on
+  # macOS -- it decoded fixtures with ImageIO and encoded them with
+  # CGImageDestination -- and the point of moving the decoder was that the
+  # tests run wherever the code they test does.
+  Tests/RoamlingLogicTests
 )
 if grep -rnE --include='*.swift' \
   '^[[:space:]]*(@_exported[[:space:]]+)?import[[:space:]]+(AppKit|Cocoa|SwiftUI|ScreenCaptureKit|ApplicationServices|Quartz|CoreGraphics|ImageIO|CoreImage|Network)\b' \

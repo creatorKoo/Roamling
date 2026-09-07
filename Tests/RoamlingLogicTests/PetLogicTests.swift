@@ -1,12 +1,9 @@
 // SPDX-FileCopyrightText: 2026 GooBeom Jeoung
 // SPDX-License-Identifier: GPL-3.0-only
 
-import CoreGraphics
 import Foundation
-import ImageIO
 import RoamlingCore
 import RoamlingPet
-import UniformTypeIdentifiers
 
 func petLogicTests() -> [LogicTest] {
     [
@@ -971,45 +968,49 @@ private func cellIndex(of image: some PetPixels) -> Int? {
 
 private final class FixturePackage {
     let url: URL
-    private let image: CGImage
+    private let width: Int
+    private let height: Int
+    private let pixels: [UInt8]
 
     init(frameWidth: Int, frameHeight: Int, rows: Int, striped: Bool = false) throws {
         url = FileManager.default.temporaryDirectory
             .appendingPathComponent("roamling-pet-test-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        let width = frameWidth * 8
-        let height = frameHeight * rows
-        guard let context = CGContext(
-            data: nil,
-            width: width,
-            height: height,
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { throw FixtureError.context }
-        context.clear(CGRect(x: 0, y: 0, width: width, height: height))
+        let sheetWidth = frameWidth * 8
+        let sheetHeight = frameHeight * rows
+        // Written byte by byte rather than filled through a graphics context.
+        // A fill is colour-managed on the way into device RGB, which moves the
+        // value a level or two -- the fixture lying rather than the code under
+        // test -- and the same reason the numbered sheet below already did this.
+        var buffer = [UInt8](repeating: 0, count: sheetWidth * sheetHeight * 4)
         if striped {
-            context.setFillColor(CGColor(red: 0, green: 0, blue: 1, alpha: 1))
-            context.fill(CGRect(x: 0, y: 0, width: width, height: frameHeight))
-            context.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
-            context.fill(CGRect(x: 0, y: height - frameHeight, width: width, height: frameHeight))
+            // Red on top, blue at the bottom. The graphics context this
+            // replaces measured from the bottom left, so its `y: 0` fill was
+            // the *last* row of the image -- reading those calls as top-down
+            // inverts the sheet, and "frame zero slices visual top row" is the
+            // test that says so.
+            let bands = [(0..<frameHeight, UInt8(255), UInt8(0)),
+                         ((sheetHeight - frameHeight)..<sheetHeight, UInt8(0), UInt8(255))]
+            for (rows, red, blue) in bands {
+                for row in rows {
+                    for column in 0..<sheetWidth {
+                        let pixel = (row * sheetWidth + column) * 4
+                        buffer[pixel] = red
+                        buffer[pixel + 2] = blue
+                        buffer[pixel + 3] = 255
+                    }
+                }
+            }
         }
-        guard let image = context.makeImage() else { throw FixtureError.context }
-        self.image = image
+        width = sheetWidth
+        height = sheetHeight
+        pixels = buffer
     }
 
     func write(manifest: PetManifest) throws {
         try JSONEncoder().encode(manifest).write(to: url.appendingPathComponent("pet.json"))
-        let imageURL = url.appendingPathComponent("spritesheet.png")
-        guard let destination = CGImageDestinationCreateWithURL(
-            imageURL as CFURL,
-            UTType.png.identifier as CFString,
-            1,
-            nil
-        ) else { throw FixtureError.destination }
-        CGImageDestinationAddImage(destination, image, nil)
-        guard CGImageDestinationFinalize(destination) else { throw FixtureError.destination }
+        try PortablePNG.data(width: width, height: height, pixels: pixels)
+            .write(to: url.appendingPathComponent("spritesheet.png"))
     }
 
     func write(extension manifest: RoamlingManifest) throws {
@@ -1029,50 +1030,26 @@ private final class FixturePackage {
         // moved the value a level or two and made the cell report the wrong
         // index -- the fixture lying, not the code under test.
         let bytesPerRow = columns * 4
-        let buffer = UnsafeMutableRawPointer.allocate(
-            byteCount: bytesPerRow * rows, alignment: 8
-        )
-        defer { buffer.deallocate() }
-        buffer.initializeMemory(as: UInt8.self, repeating: 0, count: bytesPerRow * rows)
+        var buffer = [UInt8](repeating: 0, count: bytesPerRow * rows)
         if numbered {
-            let bytes = buffer.assumingMemoryBound(to: UInt8.self)
             for row in 0..<rows {
                 for column in 0..<columns {
                     // Buffer row 0 is the image's top row, which is also the row
                     // `cropping` counts from, so nothing is flipped here.
                     let pixel = row * bytesPerRow + column * 4
-                    bytes[pixel] = UInt8(row * columns + column)
-                    bytes[pixel + 3] = 255
+                    buffer[pixel] = UInt8(row * columns + column)
+                    buffer[pixel + 3] = 255
                 }
             }
         }
-        guard let context = CGContext(
-            data: buffer,
-            width: columns,
-            height: rows,
-            bitsPerComponent: 8,
-            bytesPerRow: bytesPerRow,
-            space: CGColorSpaceCreateDeviceRGB(),
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ), let image = context.makeImage() else { throw FixtureError.context }
-        guard let destination = CGImageDestinationCreateWithURL(
-            url.appendingPathComponent(name) as CFURL,
-            UTType.png.identifier as CFString,
-            1,
-            nil
-        ) else { throw FixtureError.destination }
-        CGImageDestinationAddImage(destination, image, nil)
-        guard CGImageDestinationFinalize(destination) else { throw FixtureError.destination }
+        try PortablePNG.data(width: columns, height: rows, pixels: buffer)
+            .write(to: url.appendingPathComponent(name))
     }
 
     func remove() {
         try? FileManager.default.removeItem(at: url)
     }
 
-    enum FixtureError: Error {
-        case context
-        case destination
-    }
 }
 
 /// FNV-1a over raw bytes -- reproducible without a hash library, which is what

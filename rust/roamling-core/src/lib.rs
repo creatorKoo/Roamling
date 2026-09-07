@@ -19,6 +19,7 @@ pub mod ffi;
 pub mod interest;
 pub mod geometry;
 pub mod movement;
+pub mod pet_image;
 pub mod pet_runtime;
 pub mod placement;
 pub mod pointer;
@@ -69,3 +70,5 @@ pub use safe_zone::{BasicSafeZonePlanner, RestDestination};
 pub use tuning::{RuntimeTuning, RuntimeTuningKey, TUNING_KEYS};
 pub use topology::{DisplayPortal, DisplayRoute, DisplayTopology};
 pub use world::{DesktopWorldSnapshot, DisplaySnapshot, FocusSnapshot, LocationHint, SafeZone};
+
+pub use pet_image::PetImage;

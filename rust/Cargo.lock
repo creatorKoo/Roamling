@@ -648,6 +648,7 @@ dependencies = [
 name = "roamling-core"
 version = "0.3.2"
 dependencies = [
+ "image",
  "roamling-update",
  "uniffi",
 ]

@@ -105,17 +105,21 @@ trap했다. 그래서 릴리스와 리허설 양쪽이 **`.build`를 치운 채�
 ```text
 RoamlingCore/     OS 비의존. geometry, world, behavior, attention, reaction
 rust/roamling-core/  결정 로직의 정본. 단위 1~7 완료 — Core 전체 + tick 본체 +
-                  애니메이션 해석. Swift 쪽 원본은 대조군으로만 남아 있다
+                  애니메이션 해석. 시트 디코딩(W2b, `image` 크레이트)도 여기 있다 —
+                  결정은 아니지만 양 셸이 같은 바이트를 받아야 하는 것이라서다.
+                  Swift 쪽 원본은 대조군으로만 남아 있다
 RoamlingCoreRs/   생성된 uniffi 바인딩. Engine이 RustCore.swift로 감싸 쓴다
 RoamlingPet/      Petdex manifest, atlas runtime, built-in mascot, fallback
-                  이미지는 PetImage(RGBA8)다. 디코딩은 PetImageSourcing 뒤에 있다
+                  이미지는 PetImage(RGBA8)다. 디코딩은 공유 Rust 디코더가 하고
+                  PetImageSourcing 뒤에는 placeholder 그리기만 남았다
 RoamlingSources/  ClaudeCode / Codex activity adapter + BSD 소켓 loopback transport
 RoamlingEngine/   RoamlingRuntime — tick loop, placement, activity orchestration
                   RuntimeTuning도 여기 산다 (규칙은 Rust에 있고 Core는 seam을 못 부른다)
 RoamlingShell/    메뉴 트리·알림 문구·Localizable.strings. 위젯은 없다
 RoamlingMac/      AppKit display, pointer, overlay, 메뉴 렌더러, app delegate
 RoamlingApp/      entry point
-rust/roamling-pet/   시트 디코딩(image 크레이트) · 내장 마스코트 · 펫 패키지.
+rust/roamling-pet/   내장 마스코트 · 펫 패키지. (시트 디코딩은 core로 내려갔다 —
+                  pet이 core를 의존하므로 셸이 부르려면 그쪽이어야 했다)
                   makeStandardMochi와 PetCatalog/PetManifest/PetLoader의 이식이고,
                   옛 authored 시트와 fallback은 아직 Swift에 있다
 rust/roamling-agent/ RoamlingSources의 이식. 훅 payload 정규화 · 인증 loopback
@@ -139,8 +143,9 @@ import하지 않는다.** macOS SDK에 다 있어서 컴파일러는 이걸 못 
 `docs/mvp.md`에 있다. **배터리를 이유로 무언가를 바꾸기 전에 `docs/battery.md`를 읽는다** —
 무엇이 실제로 비싼지의 실측과, 이미 되어 있어서 다시 할 필요가 없는 것들이 적혀 있다.
 (요약: capture 1회 62 ms가 나머지 전부의 만 배다. 산술은 손댈 것이 없다.) **MVP 사다리는 4에서 멈췄고(2026-09-02 완료), W1 Runtime 추출도 같은 날
-닫혔다. W2(이미지 파이프라인 탈-CoreGraphics)도 2026-09-02에 닫혔다 — 남은 것은 디코더
-(W2b)이고 그건 언어 결정과 같은 자리에 있다.** exit rule이 있으므로 사용자의 실사용 확인
+닫혔다. W2(이미지 파이프라인 탈-CoreGraphics)도 2026-09-02에, **W2b(이식 가능한 디코더)는
+2026-09-07에 닫혔다.** 이제 포터블 다섯 모듈과 **테스트 하네스** 모두 Apple 이미지·윈도우
+프레임워크 import가 0이고, `scripts/test.sh`의 grep이 둘 다 본다.** exit rule이 있으므로 사용자의 실사용 확인
 전에 다음 게이트로 넘어가지 않는다. 리팩터 게이트 중에는 **동작·타이밍·기본값을 고치지
 않는다** — W2의 exit에는 렌더 프레임 336개의 바이트 비교가 포함됐고, 그 픽스처는
 `Tests/RoamlingLogicTests/PreW2FrameHashes.swift`다.

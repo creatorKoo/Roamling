@@ -30,9 +30,14 @@ monitor 왼쪽/위에 있는 디스플레이에 음수 좌표를 준다.
 ### 테스트는 거의 그대로 돈다
 
 `RoamlingLogicTests`가 XCTest가 아니라 dependency-free executable이라 Windows에서 그대로
-빌드된다. W0 시점의 예외 둘 중 `SourceLogicTests.swift`는 W3가 풀었다. 남은 하나는
-`ImageIO`로 시트를 디코드하는 `PetLogicTests.swift`이고, **W2가 아니라 W2b가** 푼다 —
-디코딩이 플랫폼 서비스가 되면서 하네스도 자기 디코더를 갖게 됐기 때문이다.
+빌드된다. W0 시점의 예외 둘은 **모두 풀렸다** — `SourceLogicTests.swift`는 W3가,
+`PetLogicTests.swift`는 W2b가 (2026-09-07). 후자는 두 갈래였다: `ImageIO`로 시트를 디코드하던
+것과, `CGImageDestination`으로 픽스처를 **인코드**하던 것. 앞쪽은 공유 Rust 디코더가
+가져갔고 뒤쪽은 하네스 안의 작은 PNG writer(`PortablePNG.swift`)가 됐다 — deflate의
+stored 블록을 쓰므로 압축이 없고, 픽스처는 크기를 신경 쓰지 않는다.
+
+`scripts/test.sh`의 import 게이트가 이제 `Tests/RoamlingLogicTests`도 본다. 되돌아가면
+컴파일러가 아니라 그 grep이 잡는다.
 
 ## 2. 블로커는 세 개다
 
@@ -267,7 +272,7 @@ Windows 셸이 아틀라스 칸으로 바꾸는 데 필요한 것은 이제 전�
 **W4에 남은 것은 매니페스트 로딩과 아틀라스다** — `PetLoader` 246줄, `PetManifest` 162줄,
 `PetCatalog` 108줄, `MascotPetFactory` 621줄. 마지막 것은 내장 마스코트의 트랙을 코드로
 짓는 것이라 MVP 0의 Windows가 실제로 쓸 물건이다. 디코더는 W2b이고 D에서는 `image` crate
-한 줄이다.
+한 줄이다. **W2b는 2026-09-07에 닫혔다** — 아래 W2b 절 참조.
 
 **5a가 A 대 B 비용 주장을 실제로 검증한 자리다.** tick당 크로싱 8회로 재보니 Rust 경로가
 4.706 µs/tick, Swift 원본이 0.099 µs/tick(둘 다 release) — 차액 4.6 µs는 60 Hz 프레임 예산의
@@ -540,17 +545,70 @@ shipped `mochi-v3` 패키지(96) · placeholder(88). 크롭에 1픽셀 오프셋
 
 **Exit**: 서명 빌드 실사용에서 펫이 전과 같아 보인다 — 2026-09-02 사용자가 확인했다.
 
-### W2b — 이식 가능한 디코더 (B3)
+### W2b — 이식 가능한 디코더 (B3) ✅ 완료 2026-09-07
 
-**Windows가 실제로 빌드될 때, 또는 언어 결정 뒤에 연다.** 지금은 `PetImageSourcing`의
-구현이 macOS 하나뿐이고 테스트 하네스도 자기 ImageIO 디코더를 쓴다 — 1절이 말한
-"`PetLogicTests`의 ImageIO 의존"은 W2가 아니라 여기서 없어진다.
+D를 골랐으므로 벤더링은 없었다. `image` 크레이트가 WebP와 PNG를 함께 주고, 이미
+`roamling-pet`이 쓰고 있었다. 남은 일은 macOS가 그것을 부르게 하는 것이었다.
 
-경로는 언어 결정을 따른다. **A**면 libwebp 디코더 서브셋 + PNG/zlib(miniz)을 SwiftPM C
-타겟으로 벤더링한다(BSD/zlib 라이선스는 GPL-3.0-only와 호환, 약 4만 줄). **D**면 Rust
-`image` 크레이트가 WebP·PNG를 함께 주므로 벤더링이 사라진다 — 12절이 만든
-`PetImageSourcing` 이음새 뒤에 Rust 디코더를 꽂는 것이 그 확인 방법이고, 아틀라스가
-1.5 MB라 FFI 직렬화의 최악 경우를 그대로 때린다.
+**디코더는 `roamling-core`로 내려갔다.** `roamling-pet`이 core를 의존하므로 그 반대는
+순환이고, 셸이 부를 수 있으려면 core여야 했다. `roamling-pet`은 `pub use`로 재수출하므로
+`roamling-win`과 `package.rs`는 한 줄도 안 바뀌었다. uniffi로는 `decode_pet_image` 하나가
+늘었다.
+
+#### 두 디코더는 같은 답을 내지 않고 있었다
+
+바꾸기 전에 대조부터 했고, 그게 결함을 찾았다. 시트 아홉 장(PNG·WebP, 내장·패키지,
+v1·v2·v3)을 ImageIO와 Rust로 각각 디코드해 바이트를 비교했다:
+
+| | ImageIO | Rust (고치기 전) |
+|---|---|---|
+| `mochi-standard-atlas.webp` | `099042fa…` | `1d6943ac…` |
+| `mochi-extension-atlas.webp` | `b91016c2…` | `b91016c2…` |
+| `fat-mochi-runtime-atlas.png` | `5f3d4458…` | `51c7deba…` |
+
+표준 시트에서 **2,875,392 픽셀 중 47,678개(1.66%)**가 달랐다. 최대 채널 차는 **1**이고,
+다른 픽셀은 **전부 부분 투명**이었다 — 불투명(alpha 255) 0개, 완전 투명 0개.
+
+premultiply 반올림이었다. CoreGraphics는 반올림하고 `roamling-pet`은 버리고 있었다.
+어느 공식인지는 스트레이트 알파를 뽑아 후보를 전수 대조해서 특정했다:
+
+| 공식 | 불일치 픽셀 |
+|---|---|
+| `c*a/255` (버림, 원래 코드) | 47,678 |
+| `(c*a+127)/255` | **0** |
+| `(c*a+128)/255` | 380 |
+| `div255` 근사 | 0 |
+| `round(c*a/255.0)` | 0 |
+
+`+128`이 380개를 틀리는 이유는 `c*a/255`가 `k + 127/255 ≈ k+0.498`인 경우를 올려버리기
+때문이다. `+127`을 골랐다 — 정수 연산이고, 동점이 생길 수 없어(`2*c*a`가 255의 홀수배여야
+하는데 255가 홀수다) 반올림 규칙을 고를 필요가 없다.
+
+고친 뒤 **아홉 장 전부 바이트 단위로 일치한다.**
+
+이건 잠복해 있던 결함이기도 하다. Windows는 이 디코더를 이미 쓰고 있었으므로, 그동안
+부드러운 가장자리를 macOS보다 한 단계 어둡게 그리고 있었다. 눈에 보이는 차이는 아니지만
+**프레임 해시는 정확히 비교한다** — 두 플랫폼이 같은 픽스처를 공유할 수 없는 상태였다.
+
+#### 하네스가 풀렸다
+
+`PetLogicTests`는 두 갈래로 macOS에 묶여 있었다. 디코딩은 위가 가져갔고, 남은
+`CGImageDestination` 픽스처 **인코딩**은 하네스 안의 PNG writer로 바꿨다
+(`PortablePNG.swift`). deflate의 stored 블록을 쓰므로 압축 코드가 없고, 바이트가
+예측 가능해서 읽어 되비교하는 파일에 오히려 맞다.
+
+그 과정에서 테스트 하나가 위아래 뒤집힘을 잡았다. `CGContext`는 원점이 왼쪽 **아래**라
+`y: 0` 채우기가 이미지의 **마지막** 행이었는데, 그걸 top-down으로 읽어 옮기면 시트가
+뒤집힌다. "frame zero slices visual top row"가 그것을 말한다.
+
+**`scripts/test.sh`의 import 게이트가 이제 `Tests/RoamlingLogicTests`도 본다.** 다섯 모듈과
+하네스 모두 Apple 이미지·윈도우 프레임워크 import가 0이다.
+
+#### 남은 것
+
+`PetImageSourcing`은 그대로 있다. `placeholderAtlas`는 안티에일리어싱된 벡터 그림이라
+데이터 변환이 아니고, 플랫폼마다 자기 방식으로 그리는 것이 맞다. Windows 셸은 그 자리를
+자기 것으로 채운다.
 
 ### W3 — Sources 이식 ✅ 완료 2026-09-02
 

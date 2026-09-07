@@ -3,20 +3,18 @@
 
 import CoreGraphics
 import Foundation
-import ImageIO
+import RoamlingEngine
 import RoamlingPet
 
-/// macOS's answer to `PetImageSourcing`. ImageIO reads WebP and PNG without
-/// anything being vendored, which is why the pet layer asks the platform for
-/// pixels instead of decoding them itself -- Windows has no such gift for
-/// WebP and will need a real decoder here.
+/// macOS's answer to `PetImageSourcing`, which is now only half a platform
+/// question. Decoding goes to the shared Rust decoder -- W2b -- and what is
+/// left here is the placeholder, which is antialiased vector art rather than a
+/// data transform.
 public struct MacPetImageSource: PetImageSourcing {
     public init() {}
 
     public func decode(contentsOf url: URL) -> PetImage? {
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-              let image = CGImageSourceCreateImageAtIndex(source, 0, nil) else { return nil }
-        return Self.pixels(of: image)
+        RustImageDecoder.decode(contentsOf: url)
     }
 
     public func placeholderAtlas(

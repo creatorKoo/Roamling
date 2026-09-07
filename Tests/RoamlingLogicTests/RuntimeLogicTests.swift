@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: 2026 GooBeom Jeoung
 // SPDX-License-Identifier: GPL-3.0-only
 
-import CoreGraphics
 import Foundation
 import RoamlingCore
 import RoamlingEngine

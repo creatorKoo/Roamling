@@ -17,36 +17,9 @@ use std::collections::BTreeMap;
 
 /// A decoded sheet, as bytes rather than a platform image.
 ///
-/// RGBA8, **premultiplied** alpha, row-major with the top row first and no
-/// padding between rows -- byte for byte the contract Swift's `PetImage`
-/// states. `image` decodes to straight alpha, so the multiply below is not
-/// cosmetic: skip it and every soft edge on the sheet renders as a halo.
-pub struct PetImage {
-    pub width: usize,
-    pub height: usize,
-    pub pixels: Vec<u8>,
-}
-
-impl PetImage {
-    pub fn decode(bytes: &[u8]) -> Option<Self> {
-        let decoded = image::load_from_memory(bytes).ok()?.to_rgba8();
-        let (width, height) = (decoded.width() as usize, decoded.height() as usize);
-        let mut pixels = decoded.into_raw();
-        for pixel in pixels.chunks_exact_mut(4) {
-            let alpha = pixel[3] as u32;
-            // Integer, and rounding down, to land on the same bytes CoreGraphics
-            // produced before W2 replaced it.
-            pixel[0] = (pixel[0] as u32 * alpha / 255) as u8;
-            pixel[1] = (pixel[1] as u32 * alpha / 255) as u8;
-            pixel[2] = (pixel[2] as u32 * alpha / 255) as u8;
-        }
-        Some(Self {
-            width,
-            height,
-            pixels,
-        })
-    }
-}
+/// The decoder lives in the core because the macOS shell needs it too, and the
+/// core is the crate that shell already links. It is the same type either way.
+pub use roamling_core::PetImage;
 
 /// Which sheet a frame index lands on.
 ///

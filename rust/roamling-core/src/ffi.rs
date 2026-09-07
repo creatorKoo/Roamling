@@ -1702,3 +1702,32 @@ pub fn update_verify(bytes: Vec<u8>, size: u64, signature: String) -> Option<Str
         Err(error) => Some(error.to_string()),
     }
 }
+
+/// Sheet bytes in, RGBA8 premultiplied out -- the one thing the pet layer
+/// cannot do with arithmetic alone.
+///
+/// It used to be a platform capability, on the reasoning that macOS answers
+/// WebP and PNG through ImageIO for free and Windows does not. Both answer
+/// through this now, which is what W2b was for: two decoders meant two sets of
+/// bytes, and they differed -- CoreGraphics rounds when it premultiplies and
+/// this did not, so 1.66% of the standard sheet came out a channel darker on
+/// Windows. Measured byte for byte against ImageIO on nine sheets, PNG and
+/// WebP, built-in and packaged, after the rounding was fixed.
+///
+/// Returns nil for a file this cannot read, which the caller already had to
+/// handle -- a pet package can name a sheet that is missing or malformed.
+#[uniffi::export]
+pub fn decode_pet_image(bytes: Vec<u8>) -> Option<FfiPetImage> {
+    crate::PetImage::decode(&bytes).map(|image| FfiPetImage {
+        width: image.width as u32,
+        height: image.height as u32,
+        pixels: image.pixels,
+    })
+}
+
+#[derive(uniffi::Record)]
+pub struct FfiPetImage {
+    pub width: u32,
+    pub height: u32,
+    pub pixels: Vec<u8>,
+}

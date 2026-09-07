@@ -17,6 +17,11 @@ uniffi = { version = "0.32", features = ["cli"] }
 # links, and a second uniffi surface would mean a second set of bindings for
 # four functions.
 roamling-update = { path = "../roamling-update" }
+# W2b's decoder. WebP and PNG arrive together, cross-platform, with no C in the
+# tree -- which is what option D bought over vendoring libwebp. It is here
+# rather than in `roamling-pet` because the macOS shell needs to decode too and
+# this is the crate it already links; `roamling-pet` depends on this one.
+image = { version = "0.25", default-features = false, features = ["webp", "png"] }
 
 [[bin]]
 name = "uniffi-bindgen"
