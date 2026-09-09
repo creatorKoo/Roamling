@@ -6,6 +6,7 @@ import RoamlingEngine
 import RoamlingPet
 import RoamlingShell
 import RoamlingSources
+import ServiceManagement
 
 @MainActor
 public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
@@ -28,6 +29,7 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         runtime.repairAgentIntegrationsIfNeeded()
         UserDefaults.standard.register(defaults: [Self.automaticUpdatesKey: true])
         ShellMenu.automaticUpdates = UserDefaults.standard.bool(forKey: Self.automaticUpdatesKey)
+        offerLaunchAtLoginOnce()
         setupMenuBar()
         scheduleUpdateChecks()
 
@@ -65,6 +67,9 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
 
     private func rebuildMenu() {
         guard let runtime, let menu = statusItem?.menu else { return }
+        // Asked every time rather than stored: System Settings can change it
+        // behind our back, and a stale checkmark is a lie.
+        ShellMenu.launchAtLogin = SMAppService.mainApp.status == .enabled
         menu.removeAllItems()
         render(ShellMenu.items(for: runtime), into: menu)
     }
@@ -131,6 +136,63 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
     private var updateTimer: Timer?
 
     private static let automaticUpdatesKey = "roamling.automaticUpdates"
+    private static let launchAtLoginOfferedKey = "roamling.launchAtLoginOffered"
+
+    /// A companion that only shows up when you remember to open it is not much
+    /// of a companion, so the first bundled launch registers the login item.
+    /// Once: the key says the offer was made, and turning it off afterwards
+    /// (menu or System Settings) is the user's answer, never re-asked. Nothing
+    /// is presented here -- a first launch is not the moment for a modal, and
+    /// the menu already shows what the OS decided.
+    private func offerLaunchAtLoginOnce() {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: Self.launchAtLoginOfferedKey) else { return }
+        // Not a bundle (`swift run`): nothing to register, and the offer must
+        // wait for the first run that is one. Judged by shape, not by
+        // `status` -- a signed, never-registered .app also reads `.notFound`.
+        guard Bundle.main.bundleURL.pathExtension == "app" else { return }
+        // The release and rehearsal workflows really launch the packaged app;
+        // a runner must not end up with a login item. Leave the key unset so
+        // a real first launch still gets the offer.
+        guard ProcessInfo.processInfo.environment["ROAMLING_SMOKE_TEST"] != "1" else { return }
+        let service = SMAppService.mainApp
+        switch service.status {
+        case .enabled, .requiresApproval:
+            // Already answered, by the user or by System Settings.
+            break
+        default:
+            try? service.register()
+        }
+        defaults.set(true, forKey: Self.launchAtLoginOfferedKey)
+    }
+
+    /// One `SMAppService` call either way. Nothing is remembered locally: the
+    /// OS keeps the login item, and the menu reads it back on every build. A
+    /// binary that is not a bundle (`swift run`) fails here by design.
+    private func setLaunchAtLogin(_ enabled: Bool) {
+        let service = SMAppService.mainApp
+        do {
+            if enabled {
+                try service.register()
+                // The user turned it off in System Settings earlier; the OS
+                // will not silently override that, so take them there.
+                if service.status == .requiresApproval {
+                    SMAppService.openSystemSettingsLoginItems()
+                }
+            } else {
+                try service.unregister()
+            }
+        } catch {
+            // Turned off in System Settings earlier: register() throws
+            // "Operation not permitted" rather than overriding that choice.
+            // The fix is there, not in an alert.
+            if service.status == .requiresApproval {
+                SMAppService.openSystemSettingsLoginItems()
+            } else {
+                present(ShellPrompt.launchAtLoginFailure(detail: error.localizedDescription))
+            }
+        }
+    }
 
     /// A day. A desktop pet checking more often than that is spending the
     /// user's battery to find out nothing, which `docs/battery.md` would have
@@ -217,6 +279,9 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
             ShellMenu.automaticUpdates = enabled
             UserDefaults.standard.set(enabled, forKey: Self.automaticUpdatesKey)
             scheduleUpdateChecks()
+            rebuildMenu()
+        case let .setLaunchAtLogin(enabled):
+            setLaunchAtLogin(enabled)
             rebuildMenu()
         case .quit:
             NSApp.terminate(nil)

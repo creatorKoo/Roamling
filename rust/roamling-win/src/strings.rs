@@ -201,6 +201,7 @@ mod tests {
             "menu.visualPlacement",
             "menu.openPetFolder",
             "menu.copyDiagnostics",
+            "menu.launchAtLogin",
             "menu.about",
             "menu.viewSource",
             "menu.quit",

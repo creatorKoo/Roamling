@@ -44,6 +44,7 @@ pub const CMD_TUNING: usize = 11;
 pub const CMD_RELOAD_PETS: usize = 12;
 pub const CMD_UPDATE_CHECK: usize = 13;
 pub const CMD_UPDATE_AUTO: usize = 14;
+pub const CMD_LAUNCH_AT_LOGIN: usize = 15;
 /// The built-in mascot, then one id per discovered package.
 pub const CMD_PET_BUILT_IN: usize = 1_000;
 pub const CMD_PET_BASE: usize = 1_001;
@@ -296,6 +297,8 @@ pub struct MenuState {
     /// Whether the built-in mascot is the one showing.
     pub built_in: bool,
     pub auto_update: bool,
+    /// Whether the OS starts the app at sign-in, read from the registry.
+    pub launch_at_login: bool,
     /// The version waiting for a restart, if a swap has already happened.
     pub staged: Option<String>,
     pub checking: bool,
@@ -526,6 +529,13 @@ unsafe fn build(state: &MenuState) -> Option<HMENU> {
         } else {
             command(menu, CMD_UPDATE_CHECK, localized("menu.update.check"));
         }
+        let login_label = wide(localized("menu.launchAtLogin"));
+        let _ = AppendMenuW(
+            menu,
+            MF_STRING | checked(state.launch_at_login),
+            CMD_LAUNCH_AT_LOGIN,
+            PCWSTR(login_label.as_ptr()),
+        );
         let update_label = wide(localized("menu.update.auto"));
         let _ = AppendMenuW(
             menu,
@@ -558,6 +568,7 @@ mod tests {
             pets: vec![("Installed One".into(), true), ("Installed Two".into(), false)],
             built_in: false,
             auto_update: true,
+            launch_at_login: false,
             staged: Some("0.2.0".into()),
             checking: false,
             agents: [
@@ -619,6 +630,7 @@ mod tests {
             CMD_RELOAD_PETS,
             CMD_UPDATE_CHECK,
             CMD_UPDATE_AUTO,
+            CMD_LAUNCH_AT_LOGIN,
             CMD_PET_BUILT_IN,
             CMD_PET_BASE,
             CMD_PET_BASE + 1,

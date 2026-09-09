@@ -17,6 +17,7 @@
 //! established on real hardware that Windows can do the seven things the
 //! overlay needs. See `docs/windows.md`, section 9.
 
+mod autostart;
 mod capture;
 mod diagnostics;
 mod duplication;
@@ -897,6 +898,7 @@ fn menu_state(app: &App) -> tray::MenuState {
             .collect(),
         built_in: app.current_package.is_none(),
         auto_update: app.auto_update,
+        launch_at_login: autostart::is_enabled(),
         staged: app.staged.map(|version| version.to_string()),
         checking: app.checking,
         roaming: app.roaming,
@@ -966,6 +968,13 @@ unsafe fn perform(hwnd: HWND, chosen: usize, app: &mut App, now: f64) {
             // Turning it back on should not wait a day to matter.
             if app.auto_update {
                 app.update_at = now;
+            }
+        }
+        tray::CMD_LAUNCH_AT_LOGIN => {
+            // The registry is the record, so read it again rather than trust a
+            // field: the installer or the user may have changed it since.
+            if let Err(error) = autostart::set(!autostart::is_enabled()) {
+                eprintln!("start at login: {error}");
             }
         }
         tray::CMD_RELOAD_PETS => {

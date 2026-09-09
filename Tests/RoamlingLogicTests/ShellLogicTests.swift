@@ -79,6 +79,47 @@ func shellLogicTests() -> [LogicTest] {
                 }
             }
         },
+        LogicTest(name: "start at login is offered and flips through the platform") {
+            // The OS keeps the login item; the menu only mirrors it. So the
+            // checkmark must follow the mirror, and toggling must ask the
+            // platform for the opposite rather than change anything itself.
+            try MainActor.assumeIsolated {
+                let harness = try RuntimeHarness()
+                defer { harness.tearDown() }
+                defer { ShellMenu.launchAtLogin = false }
+
+                for enabled in [true, false] {
+                    ShellMenu.launchAtLogin = enabled
+                    let row = try require(
+                        ShellMenu.items(for: harness.runtime)
+                            .first { $0.title == localized("menu.launchAtLogin") }
+                    )
+                    guard case let .check(action, isOn) = row.content else {
+                        throw LogicTestFailure(
+                            message: "the row is not a checkbox: \(row.content)",
+                            file: #filePath, line: #line
+                        )
+                    }
+                    try expect(isOn == enabled, "the checkmark does not follow the OS")
+                    try expect(action == .toggleLaunchAtLogin)
+
+                    let effect = ShellController.perform(
+                        action, runtime: harness.runtime, version: "1.2.3"
+                    )
+                    guard case let .setLaunchAtLogin(next) = effect else {
+                        throw LogicTestFailure(
+                            message: "toggling produced \(effect)",
+                            file: #filePath, line: #line
+                        )
+                    }
+                    try expect(next == !enabled, "toggling did not ask for the opposite")
+                    try expect(
+                        ShellMenu.launchAtLogin == enabled,
+                        "the shell changed the mirror itself; that is the platform's"
+                    )
+                }
+            }
+        },
         LogicTest(name: "a failed install names the agent that failed") {
             // The failure title was hard-coded to Claude Code, so a Codex
             // install that went wrong said "Couldn't update Claude Code

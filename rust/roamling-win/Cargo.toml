@@ -19,6 +19,7 @@ roamling-update = { path = "../roamling-update" }
 version = "0.58"
 features = [
     "Win32_Foundation",
+    "Win32_System_Registry",
     "Win32_Graphics_Gdi",
     "Win32_Graphics_Dwm",
     "Win32_Graphics_Direct3D",

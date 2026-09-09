@@ -39,6 +39,9 @@ public enum ShellEffect: Sendable {
     case checkForUpdates
     /// Remember the choice and stop or start the timer.
     case setAutomaticUpdates(Bool)
+    /// Register or remove the login item. The OS is the record; the platform
+    /// asks it again when the menu is next built.
+    case setLaunchAtLogin(Bool)
     case quit
 }
 
@@ -162,6 +165,17 @@ public enum ShellPrompt {
         }
     }
 
+    /// The OS refused to add or remove the login item. The detail is whatever
+    /// it said, because the fix (usually System Settings) is on its side.
+    public static func launchAtLoginFailure(detail: String) -> AlertModel {
+        AlertModel(
+            title: localized("alert.launchAtLogin.failed"),
+            body: detail,
+            buttons: [],
+            isWarning: true
+        )
+    }
+
     /// What a check the user asked for comes back with. A background check
     /// that finds nothing says nothing, so this is only ever shown on request
     /// or when there is something to report.
@@ -274,6 +288,8 @@ public enum ShellController {
             return .checkForUpdates
         case .toggleAutomaticUpdates:
             return .setAutomaticUpdates(!ShellMenu.automaticUpdates)
+        case .toggleLaunchAtLogin:
+            return .setLaunchAtLogin(!ShellMenu.launchAtLogin)
         case .showAbout:
             return .present(ShellPrompt.about(version: version))
         case .quit:

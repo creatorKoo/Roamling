@@ -80,9 +80,15 @@ Name: "{group}\Roamling"; Filename: "{app}\roamling.exe"
 Name: "{group}\Uninstall Roamling"; Filename: "{uninstallexe}"
 
 [Registry]
+; The tray's "Start at Login" toggle reads and writes this same value
+; (rust/roamling-win/src/autostart.rs), so a box ticked here shows as on there.
 Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
     ValueType: string; ValueName: "Roamling"; ValueData: """{app}\roamling.exe"""; \
     Flags: uninsdeletevalue; Tasks: autostart
+; Untied to the task, so a value the tray toggle wrote after install is
+; removed on uninstall too. Creates nothing.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
+    ValueType: none; ValueName: "Roamling"; Flags: dontcreatekey uninsdeletevalue
 
 [Run]
 Filename: "{app}\roamling.exe"; Description: "{cm:LaunchProgram}"; \

@@ -138,6 +138,17 @@ before anything is written. A build that cannot verify a signature refuses to
 update rather than updating anyway. Turn the whole thing off with
 **Automatic Updates** in the tray menu.
 
+### Start at login
+
+On by default: macOS registers the login item the first time the app runs,
+and the Windows installer's "Start Roamling when I sign in" box is checked
+unless you untick it. **Start at Login** in the tray menu turns it off or back
+on. The OS keeps that setting, not Roamling: on macOS it also appears under
+System Settings → General → Login Items, and on Windows it is the same registry
+value the installer writes. Change it in either place and the menu shows the
+new answer the next time you open it, and Roamling never turns it back on by
+itself.
+
 ### Building on Windows
 
 There is no Swift here; the Windows build is Rust all the way down. Requires the

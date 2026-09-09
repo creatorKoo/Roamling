@@ -26,6 +26,7 @@ public enum MenuAction: Equatable, Sendable {
     case reloadPets
     case checkForUpdates
     case toggleAutomaticUpdates
+    case toggleLaunchAtLogin
     case showAbout
     case quit
 }
@@ -69,6 +70,10 @@ public enum ShellMenu {
     /// this module only says how they read.
     public static var updateStatus: UpdateStatus = .idle
     public static var automaticUpdates = true
+    /// Whether the OS will start the app at login. Read from the OS every time
+    /// the menu is built rather than remembered here, so the checkmark cannot
+    /// disagree with System Settings or the installer.
+    public static var launchAtLogin = false
 
     public enum UpdateStatus: Equatable, Sendable {
         case idle
@@ -126,6 +131,10 @@ public enum ShellMenu {
             // nothing more to do, and saying so is more useful than a button
             // that would find the same answer again.
             updateItem,
+            MenuItem(
+                localized("menu.launchAtLogin"),
+                .check(.toggleLaunchAtLogin, isOn: launchAtLogin)
+            ),
             MenuItem(
                 localized("menu.update.auto"),
                 .check(.toggleAutomaticUpdates, isOn: automaticUpdates)
