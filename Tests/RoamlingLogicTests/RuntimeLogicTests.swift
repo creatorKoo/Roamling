@@ -129,6 +129,11 @@ struct TestDefaults {
 
     func discard() {
         defaults.removePersistentDomain(forName: name)
+        // Removing the domain empties the file; it does not delete it. Left
+        // alone, every run adds one more 42-byte plist to ~/Library/Preferences.
+        let plist = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Preferences/\(name).plist")
+        try? FileManager.default.removeItem(at: plist)
     }
 }
 
