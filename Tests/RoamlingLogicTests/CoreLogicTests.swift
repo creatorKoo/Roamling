@@ -313,27 +313,44 @@ func coreLogicTests() -> [LogicTest] {
                     width: 60 + abs(next(0.05)), height: 60 + abs(next(0.05))
                 )
 
+                // Zero is the old behaviour, and the two shipped values are
+                // where the blocking actually decides something.
+                let clearance = [0.0, 100.0, 170.0, abs(next(0.3))][Int(abs(next())) % 4]
+
                 let swiftSeat = swiftPlanner.destination(
                     for: hint, in: world, currentPosition: position,
-                    pointerPosition: pointer, objectSize: size
+                    pointerPosition: pointer, pointerClearance: clearance, objectSize: size
                 )
                 let rustSeat = rustPlanner.destination(
                     for: hint, in: world, currentPosition: position,
-                    pointerPosition: pointer, objectSize: size
+                    pointerPosition: pointer, pointerClearance: clearance, objectSize: size
                 )
                 try expect(
                     swiftSeat == rustSeat,
                     "destination differs: \(String(describing: swiftSeat)) vs \(String(describing: rustSeat))"
                 )
 
+                let swiftAside = swiftPlanner.stepAside(
+                    for: hint, in: world, currentPosition: position,
+                    pointerPosition: pointer, pointerClearance: clearance, objectSize: size
+                )
+                let rustAside = rustPlanner.stepAside(
+                    for: hint, in: world, currentPosition: position,
+                    pointerPosition: pointer, pointerClearance: clearance, objectSize: size
+                )
+                try expect(
+                    swiftAside == rustAside,
+                    "step aside differs: \(String(describing: swiftAside)) vs \(String(describing: rustAside))"
+                )
+
                 let seat = WorldPoint(x: next(0.3), y: next(0.3))
                 let swiftEvaluation = swiftPlanner.evaluateSeat(
                     at: seat, for: hint, in: world, currentPosition: position,
-                    pointerPosition: pointer, objectSize: size
+                    pointerPosition: pointer, pointerClearance: clearance, objectSize: size
                 )
                 let rustEvaluation = rustPlanner.evaluateSeat(
                     at: seat, for: hint, in: world, currentPosition: position,
-                    pointerPosition: pointer, objectSize: size
+                    pointerPosition: pointer, pointerClearance: clearance, objectSize: size
                 )
                 try expect(
                     swiftEvaluation == rustEvaluation,
@@ -772,6 +789,9 @@ func coreLogicTests() -> [LogicTest] {
                         objectSize: size,
                         pointerPosition: step() % 3 == 0
                             ? WorldPoint(x: span(0, 1_600), y: span(0, 1_000)) : nil,
+                        // Zero is the old behaviour; the shipped values are
+                        // where a seat under the cursor changes the answer.
+                        pointerClearance: [0.0, 100.0, 170.0][pick(3)],
                         walkingSpeed: 160,
                         isPointerOwned: step() % 17 == 0,
                         isPointerWatching: step() % 11 == 0,
@@ -1663,6 +1683,222 @@ func coreLogicTests() -> [LogicTest] {
             let released = fixture.situation(at: 0.05, position: fixture.corner)
             try expect(director.decide(released).travelReason == .newActivity)
         },
+        LogicTest(name: "a seat under the cursor is not a seat") {
+            // The glance band stops the pet a notice distance short of the
+            // cursor, so a seat inside it is one the pet walks toward and never
+            // reaches. It is dropped from the pool rather than penalised: with
+            // a penalty it still won whenever the window was small.
+            let fixture = DirectorFixture()
+            let world = DesktopWorldSnapshot(displays: [fixture.display])
+            let hint = LocationHint(approximateRegion: fixture.window, confidence: 0.55)
+            let clear = try require(BasicInterestPositionPlanner.destination(
+                for: hint, in: world, currentPosition: fixture.corner,
+                pointerPosition: nil, pointerClearance: 170, objectSize: fixture.objectSize
+            ))
+            // The cursor lands on the seat the planner just picked.
+            let moved = try require(BasicInterestPositionPlanner.destination(
+                for: hint, in: world, currentPosition: fixture.corner,
+                pointerPosition: clear.point, pointerClearance: 170, objectSize: fixture.objectSize
+            ))
+            try expect(
+                moved.point.distance(to: clear.point) >= 170,
+                "got \(moved.point) beside the cursor at \(clear.point)"
+            )
+            let judged = try require(BasicInterestPositionPlanner.evaluateSeat(
+                at: clear.point, for: hint, in: world, currentPosition: fixture.corner,
+                pointerPosition: clear.point, pointerClearance: 170, objectSize: fixture.objectSize
+            ))
+            try expect(judged.pointerBlocked)
+            // Zero clearance is what every caller without pointer avoidance
+            // passes, and at zero nothing is blocked.
+            let unblocked = try require(BasicInterestPositionPlanner.evaluateSeat(
+                at: clear.point, for: hint, in: world, currentPosition: fixture.corner,
+                pointerPosition: clear.point, pointerClearance: 0, objectSize: fixture.objectSize
+            ))
+            try expect(!unblocked.pointerBlocked)
+
+            // A window too small for any seat to be a clearance from its
+            // centre has no seat at all.
+            let small = WorldRect(x: 700, y: 420, width: 200, height: 120)
+            let smallHint = LocationHint(approximateRegion: small, confidence: 0.55)
+            let centre = WorldPoint(x: small.midX, y: small.midY)
+            try expect(BasicInterestPositionPlanner.destination(
+                for: smallHint, in: world, currentPosition: fixture.corner,
+                pointerPosition: centre, pointerClearance: 170, objectSize: fixture.objectSize
+            ) == nil)
+
+            // Stepping aside goes straight away from the cursor, past the
+            // clearance, toward the pet.
+            let aside = try require(BasicInterestPositionPlanner.stepAside(
+                for: smallHint, in: world, currentPosition: fixture.corner,
+                pointerPosition: centre, pointerClearance: 170, objectSize: fixture.objectSize
+            ))
+            try expect(abs(aside.point.distance(to: centre) - 187) < 0.01, "got \(aside.point)")
+            try expect(aside.point.x < centre.x && aside.point.y > centre.y, "got \(aside.point)")
+            // Clamped back under the cursor is no seat either: the cursor in a
+            // display corner with the pet beyond it.
+            let cornered = WorldPoint(x: 58, y: 86)
+            try expect(BasicInterestPositionPlanner.stepAside(
+                for: smallHint, in: world, currentPosition: WorldPoint(x: 0, y: 0),
+                pointerPosition: cornered, pointerClearance: 170, objectSize: fixture.objectSize
+            ) == nil)
+        },
+        LogicTest(name: "a walk the cursor sits at the end of is redirected") {
+            // The reported loop: the pet walks to its seat, the cursor is on
+            // it, the glance stops the pet, the cursor twitches, the pet sets
+            // off for the same seat again. Now the review beat notices.
+            let fixture = DirectorFixture()
+            for director in AnyDirector.both() {
+                let far = WorldPoint(x: 1_100, y: 800)
+                let first = director.decide(fixture.situation(
+                    at: 0, position: fixture.corner, pointerPosition: far, pointerClearance: 170
+                ))
+                try expect(first.travelReason == .newActivity, "\(director.label): got \(first)")
+                let seat = try require(first.destination).point
+
+                // Halfway there, the user's cursor settles on the seat.
+                let midway = WorldPoint(
+                    x: (fixture.corner.x + seat.x) / 2, y: (fixture.corner.y + seat.y) / 2
+                )
+                let redirected = director.decide(fixture.situation(
+                    at: 0.6, position: midway, pointerPosition: seat, pointerClearance: 170
+                ))
+                try expect(
+                    redirected.travelReason == .seatUnderPointer, "\(director.label): got \(redirected)"
+                )
+                let elsewhere = try require(redirected.destination).point
+                try expect(
+                    elsewhere.distance(to: seat) >= 170,
+                    "\(director.label): got \(elsewhere) beside \(seat)"
+                )
+                try expect(director.isTravelling(), director.label)
+            }
+        },
+        LogicTest(name: "a blocked walk with nowhere better ends where the pet stands") {
+            // Every seat of a small window is under a cursor at its centre.
+            // Standing on nothing in particular, the pet watches from there.
+            let fixture = DirectorFixture()
+            let small = WorldRect(x: 700, y: 420, width: 200, height: 120)
+            let hint = LocationHint(approximateRegion: small, confidence: 0.55)
+            let centre = WorldPoint(x: small.midX, y: small.midY)
+            let midway = WorldPoint(x: 400, y: 640)
+            for director in AnyDirector.both() {
+                let first = director.decide(fixture.situation(
+                    at: 0, position: fixture.corner, hint: hint,
+                    pointerPosition: WorldPoint(x: 1_100, y: 800), pointerClearance: 170
+                ))
+                try expect(first.travelReason == .newActivity, "\(director.label): got \(first)")
+                let ended = director.decide(fixture.situation(
+                    at: 0.6, position: midway, hint: hint, pointerPosition: centre, pointerClearance: 170
+                ))
+                try expect(ended == .hold, "\(director.label): got \(ended)")
+                try expect(director.isSeated() && !director.isTravelling(), director.label)
+            }
+
+            // Standing on the caret instead, it steps aside from the cursor
+            // rather than sitting on the user's line until the cursor leaves.
+            for onCaret in AnyDirector.both() {
+                _ = onCaret.decide(fixture.situation(
+                    at: 0, position: fixture.corner, hint: hint,
+                    pointerPosition: WorldPoint(x: 1_100, y: 800), pointerClearance: 170
+                ))
+                let caret = WorldRect(x: midway.x - 1, y: midway.y - 8, width: 2, height: 16)
+                let focus = FocusSnapshot(
+                    windowFrame: small, focusedElementFrame: nil, caretFrame: caret, confidence: 0.9
+                )
+                let aside = onCaret.decide(fixture.situation(
+                    at: 0.6, position: midway, hint: hint, focus: focus,
+                    pointerPosition: centre, pointerClearance: 170
+                ))
+                try expect(aside.travelReason == .seatUnderPointer, "\(onCaret.label): got \(aside)")
+                let point = try require(aside.destination).point
+                try expect(
+                    point.distance(to: centre) >= 170, "\(onCaret.label): got \(point) beside \(centre)"
+                )
+                try expect(!fixture.petFrame(at: point).intersects(caret, tolerance: 12), onCaret.label)
+            }
+        },
+        LogicTest(name: "a seated pet on the caret still gets off it when every seat is under the cursor") {
+            // Dropping blocked seats from the pool opened a hole: a reason to
+            // leave with nowhere to go used to mean staying, and staying on the
+            // caret is the one thing placement exists to prevent.
+            let fixture = DirectorFixture()
+            let small = WorldRect(x: 700, y: 420, width: 200, height: 120)
+            let hint = LocationHint(approximateRegion: small, confidence: 0.55)
+            let centre = WorldPoint(x: small.midX, y: small.midY)
+            let standing = WorldPoint(x: 400, y: 640)
+            for director in AnyDirector.both() {
+                let first = director.decide(fixture.situation(
+                    at: 0, position: standing, hint: hint, pointerPosition: centre, pointerClearance: 170
+                ))
+                try expect(first == .hold && director.isSeated(), "\(director.label): got \(first)")
+
+                // The user clicks where the pet sits.
+                let caret = WorldRect(x: standing.x - 1, y: standing.y - 8, width: 2, height: 16)
+                let focus = FocusSnapshot(
+                    windowFrame: small, focusedElementFrame: nil, caretFrame: caret, confidence: 0.9
+                )
+                let off = director.decide(fixture.situation(
+                    at: 0.6, position: standing, hint: hint, focus: focus,
+                    pointerPosition: centre, pointerClearance: 170
+                ))
+                try expect(off.travelReason == .coveringCaret, "\(director.label): got \(off)")
+                let point = try require(off.destination).point
+                try expect(
+                    point.distance(to: centre) >= 170, "\(director.label): got \(point) beside \(centre)"
+                )
+                try expect(!fixture.petFrame(at: point).intersects(caret, tolerance: 12), director.label)
+            }
+        },
+        LogicTest(name: "a new agent in a small window under the cursor is watched from where the pet stands") {
+            // Every seat of the window is inside the clearance, so there is
+            // nowhere to walk to. The pet does not set off, and the seat is
+            // recorded where it stands so the window still counts as watched --
+            // which is the intended answer, pinned here because it is the most
+            // visible change the clearance rule makes.
+            let fixture = DirectorFixture()
+            let small = WorldRect(x: 700, y: 420, width: 200, height: 120)
+            let hint = LocationHint(approximateRegion: small, confidence: 0.55)
+            let centre = WorldPoint(x: small.midX, y: small.midY)
+            for director in AnyDirector.both() {
+                let first = director.decide(fixture.situation(
+                    at: 0, position: fixture.corner, hint: hint,
+                    pointerPosition: centre, pointerClearance: 170
+                ))
+                try expect(first == .hold, "\(director.label): got \(first)")
+                try expect(director.isSeated() && !director.isTravelling(), director.label)
+                // And it stays that way on the review beat.
+                let again = director.decide(fixture.situation(
+                    at: 0.6, position: fixture.corner, hint: hint,
+                    pointerPosition: centre, pointerClearance: 170
+                ))
+                try expect(again == .hold, "\(director.label): got \(again)")
+            }
+        },
+        LogicTest(name: "a cursor beside a seated pet is a glance, not a reason to move") {
+            // Only a walk in progress can be blocked. A seated pet with the
+            // cursor next to it is looked at, or pushed, by the pointer rules;
+            // placement must not add a walk on top of that.
+            let fixture = DirectorFixture()
+            for director in AnyDirector.both() {
+                let far = WorldPoint(x: 1_100, y: 800)
+                let first = director.decide(fixture.situation(
+                    at: 0, position: fixture.corner, pointerPosition: far, pointerClearance: 170
+                ))
+                let seat = try require(first.destination).point
+                let arrived = director.decide(fixture.situation(
+                    at: 0.6, position: seat, pointerPosition: far, pointerClearance: 170
+                ))
+                try expect(arrived == .hold && director.isSeated(), "\(director.label): got \(arrived)")
+
+                let beside = WorldPoint(x: seat.x + 50, y: seat.y)
+                let glanced = director.decide(fixture.situation(
+                    at: 1.2, position: seat, pointerPosition: beside, pointerClearance: 170
+                ))
+                try expect(glanced == .hold, "\(director.label): got \(glanced)")
+                try expect(director.isSeated() && !director.isTravelling(), director.label)
+            }
+        },
         LogicTest(name: "a new agent moves the pet across displays, not across the room") {
             // Walking over is the point of this priority, but only when there
             // is somewhere better to be. Without a caret the strongest pull is
@@ -2105,6 +2341,154 @@ func coreLogicTests() -> [LogicTest] {
             // owed, and it is owed now rather than one dwell from now.
             try expect(decide(at: 13, pointerOwned: false) == .escape(clear))
         },
+        LogicTest(name: "a glance does not stop the walk off the user's work while an agent is working") {
+            // Roaming already had this rule, for `.escape`. The seat watch's walk
+            // off a covered seat is the same remedy under another name, and
+            // losing it to the glance left the pet on the paragraph for as long
+            // as the cursor sat on the way out. The walk away from a seat the
+            // cursor sits on is the cursor's own doing, so it keeps going too.
+            // Everything else still waits. Each case first shows the verdict was
+            // a travel with the glance off, so `.none` below means the gate.
+            let fixture = DirectorFixture()
+            let far = WorldPoint(x: 1_100, y: 800)
+
+            /// Walk over, arrive, hold. Returns the seat.
+            func seatPet(_ director: AnyDirector, luminance: LuminanceField? = nil) throws -> WorldPoint {
+                let first = director.decide(fixture.situation(
+                    at: 0, position: fixture.corner, luminance: luminance,
+                    pointerPosition: far, pointerClearance: 170
+                ))
+                let seat = try require(first.destination, "\(director.label): got \(first)").point
+                let arrived = director.decide(fixture.situation(
+                    at: 0.6, position: seat, luminance: luminance,
+                    pointerPosition: far, pointerClearance: 170
+                ))
+                try expect(arrived == .hold, "\(director.label): got \(arrived)")
+                return seat
+            }
+            /// The glance lands on the off-beat tick and on the review beat.
+            func glance(
+                _ director: AnyDirector, from seat: WorldPoint, toward away: WorldPoint,
+                hint: LocationHint? = nil, focus: FocusSnapshot? = nil,
+                luminance: LuminanceField? = nil, pointer: WorldPoint = far,
+                expecting reason: PlacementTravelReason?
+            ) throws {
+                let step = WorldPoint(
+                    x: seat.x + (away.x - seat.x) * 0.1, y: seat.y + (away.y - seat.y) * 0.1
+                )
+                for timestamp in [1.3, 1.8] {
+                    let glanced = director.decide(fixture.situation(
+                        at: timestamp, position: step, hint: hint, focus: focus, luminance: luminance,
+                        isPointerWatching: true, isWalking: true,
+                        pointerPosition: pointer, pointerClearance: 170
+                    ))
+                    if let reason {
+                        try expect(
+                            glanced.travelReason == reason,
+                            "\(director.label) at \(timestamp): got \(glanced), wanted \(reason)"
+                        )
+                    } else {
+                        try expect(
+                            glanced == PlacementIntent.none,
+                            "\(director.label) at \(timestamp): got \(glanced), wanted none"
+                        )
+                    }
+                }
+            }
+
+            // coveringCaret: the user's caret lands under the seated pet.
+            for director in AnyDirector.both() {
+                let seat = try seatPet(director)
+                let caret = WorldRect(x: seat.x - 1, y: seat.y - 8, width: 2, height: 16)
+                let focus = FocusSnapshot(
+                    windowFrame: fixture.window, focusedElementFrame: nil,
+                    caretFrame: caret, confidence: 0.9
+                )
+                let off = director.decide(fixture.situation(
+                    at: 1.2, position: seat, focus: focus, pointerPosition: far, pointerClearance: 170
+                ))
+                try expect(off.travelReason == .coveringCaret, "\(director.label): got \(off)")
+                try glance(director, from: seat, toward: try require(off.destination).point,
+                           focus: focus, expecting: .coveringCaret)
+            }
+
+            // coveringWork: the window fills with text under the pet, past the dwell.
+            for director in AnyDirector.both() {
+                let seat = try seatPet(director)
+                let busy = try require(fixture.field(busyAround: seat, delta: 0.06))
+                let off = director.decide(fixture.situation(
+                    at: 16, position: seat, luminance: busy, pointerPosition: far, pointerClearance: 170
+                ))
+                try expect(off.travelReason == .coveringWork, "\(director.label): got \(off)")
+                let away = try require(off.destination).point
+                let step = WorldPoint(x: seat.x + (away.x - seat.x) * 0.1, y: seat.y + (away.y - seat.y) * 0.1)
+                for timestamp in [16.1, 16.6] {
+                    let glanced = director.decide(fixture.situation(
+                        at: timestamp, position: step, luminance: busy,
+                        isPointerWatching: true, isWalking: true,
+                        pointerPosition: far, pointerClearance: 170
+                    ))
+                    try expect(
+                        glanced.travelReason == .coveringWork,
+                        "\(director.label) at \(timestamp): got \(glanced)"
+                    )
+                }
+            }
+
+            // seatUnderPointer: the cursor sits on the seat the pet walks to.
+            for director in AnyDirector.both() {
+                let first = director.decide(fixture.situation(
+                    at: 0, position: fixture.corner, pointerPosition: far, pointerClearance: 170
+                ))
+                let seat = try require(first.destination).point
+                let midway = WorldPoint(
+                    x: (fixture.corner.x + seat.x) / 2, y: (fixture.corner.y + seat.y) / 2
+                )
+                let redirected = director.decide(fixture.situation(
+                    at: 0.6, position: midway, pointerPosition: seat, pointerClearance: 170
+                ))
+                try expect(redirected.travelReason == .seatUnderPointer, "\(director.label): got \(redirected)")
+                try glance(director, from: midway, toward: try require(redirected.destination).point,
+                           pointer: seat, expecting: .seatUnderPointer)
+            }
+
+            // newActivity: a walk toward the window from a fresh start waits.
+            for director in AnyDirector.both() {
+                let first = director.decide(fixture.situation(
+                    at: 0, position: fixture.corner, pointerPosition: far, pointerClearance: 170
+                ))
+                try expect(first.travelReason == .newActivity, "\(director.label): got \(first)")
+                try glance(director, from: fixture.corner, toward: try require(first.destination).point,
+                           expecting: nil)
+            }
+
+            // followedFocus: the window moves across the display.
+            for director in AnyDirector.both() {
+                let seat = try seatPet(director)
+                let moved = LocationHint(
+                    approximateRegion: WorldRect(x: 60, y: 120, width: 300, height: 200), confidence: 0.55
+                )
+                let follow = director.decide(fixture.situation(
+                    at: 1.2, position: seat, hint: moved, pointerPosition: far, pointerClearance: 170
+                ))
+                try expect(follow.travelReason == .followedFocus, "\(director.label): got \(follow)")
+                try glance(director, from: seat, toward: try require(follow.destination).point,
+                           hint: moved, expecting: nil)
+            }
+
+            // plannedBlind: the seat was chosen without a capture and one arrives
+            // showing text under it.
+            for director in AnyDirector.both() {
+                let seat = try seatPet(director)
+                let busy = try require(fixture.field(busyAround: seat, delta: 0.06))
+                let replan = director.decide(fixture.situation(
+                    at: 1.2, position: seat, luminance: busy, pointerPosition: far, pointerClearance: 170
+                ))
+                try expect(replan.travelReason == .plannedBlind, "\(director.label): got \(replan)")
+                try glance(director, from: seat, toward: try require(replan.destination).point,
+                           luminance: busy, expecting: nil)
+            }
+        },
         LogicTest(name: "a glance stops an aimless walk but not one off the text") {
             // The cursor parked beside a pet that is standing on a paragraph is
             // the ordinary case, not a corner one: the pet is on the text
@@ -2306,6 +2690,30 @@ private extension PlacementIntent {
     }
 }
 
+/// A director behind closures, so one case runs unchanged on the Swift original
+/// and on the Rust port that replaced it.
+private struct AnyDirector {
+    let label: String
+    let decide: (PetSituation) -> PlacementIntent
+    let isSeated: () -> Bool
+    let isTravelling: () -> Bool
+
+    static func both() -> [AnyDirector] {
+        var swift = PlacementDirector()
+        let rust = RustPlacement()
+        return [
+            AnyDirector(
+                label: "swift", decide: { swift.decide($0) },
+                isSeated: { swift.isSeated }, isTravelling: { swift.isTravelling }
+            ),
+            AnyDirector(
+                label: "rust", decide: { rust.decide($0) },
+                isSeated: { rust.isSeated }, isTravelling: { rust.isTravelling }
+            ),
+        ]
+    }
+}
+
 /// One display, one window, and whatever the decision table needs to read.
 ///
 /// Every argument here used to be a mutable field on the runtime that four
@@ -2354,7 +2762,9 @@ private struct DirectorFixture {
         userIdleDuration: TimeInterval = 0,
         idleBeforeRest: TimeInterval = .infinity,
         isStrollDue: Bool = false,
-        strollCandidates: [WorldPoint] = []
+        strollCandidates: [WorldPoint] = [],
+        pointerPosition: WorldPoint = WorldPoint(x: 600, y: 100),
+        pointerClearance: Double = 0
     ) -> PetSituation {
         PetSituation(
             timestamp: timestamp,
@@ -2366,7 +2776,8 @@ private struct DirectorFixture {
             ),
             position: position,
             objectSize: objectSize,
-            pointerPosition: WorldPoint(x: 600, y: 100),
+            pointerPosition: pointerPosition,
+            pointerClearance: pointerClearance,
             isPointerOwned: isPointerOwned,
             isPointerWatching: isPointerWatching,
             isEvading: isEvading,

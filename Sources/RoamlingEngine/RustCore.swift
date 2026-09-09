@@ -130,6 +130,7 @@ enum RustCore {
         in world: DesktopWorldSnapshot,
         currentPosition: WorldPoint,
         pointerPosition: WorldPoint?,
+        pointerClearance: Double,
         objectSize: WorldSize
     ) -> InterestDestination? {
         // A hint with no region cannot be placed against, and the Swift planner
@@ -140,15 +141,38 @@ enum RustCore {
             currentX: currentPosition.x,
             currentY: currentPosition.y,
             pointer: pointerPosition.map { [$0.x, $0.y] },
+            pointerClearance: pointerClearance,
             objectWidth: objectSize.width,
             objectHeight: objectSize.height
-        ).map {
-            InterestDestination(
-                point: WorldPoint(x: $0.x, y: $0.y),
-                displayID: $0.displayId,
-                score: $0.score
-            )
-        }
+        ).map(destination)
+    }
+
+    static func stepAside(
+        for hint: LocationHint,
+        in world: DesktopWorldSnapshot,
+        currentPosition: WorldPoint,
+        pointerPosition: WorldPoint?,
+        pointerClearance: Double,
+        objectSize: WorldSize
+    ) -> InterestDestination? {
+        guard let scene = scene(for: hint, in: world) else { return nil }
+        return RoamlingCoreRs.stepAside(
+            scene: scene,
+            currentX: currentPosition.x,
+            currentY: currentPosition.y,
+            pointer: pointerPosition.map { [$0.x, $0.y] },
+            pointerClearance: pointerClearance,
+            objectWidth: objectSize.width,
+            objectHeight: objectSize.height
+        ).map(destination)
+    }
+
+    private static func destination(_ ffi: FfiInterestDestination) -> InterestDestination {
+        InterestDestination(
+            point: WorldPoint(x: ffi.x, y: ffi.y),
+            displayID: ffi.displayId,
+            score: ffi.score
+        )
     }
 
     static func evaluateSeat(
@@ -157,6 +181,7 @@ enum RustCore {
         in world: DesktopWorldSnapshot,
         currentPosition: WorldPoint,
         pointerPosition: WorldPoint?,
+        pointerClearance: Double,
         objectSize: WorldSize
     ) -> SeatEvaluation? {
         guard let scene = scene(for: hint, in: world) else { return nil }
@@ -167,6 +192,7 @@ enum RustCore {
             currentX: currentPosition.x,
             currentY: currentPosition.y,
             pointer: pointerPosition.map { [$0.x, $0.y] },
+            pointerClearance: pointerClearance,
             objectWidth: objectSize.width,
             objectHeight: objectSize.height
         ).map {
@@ -176,7 +202,8 @@ enum RustCore {
                 score: $0.score,
                 emptiness: $0.emptiness,
                 coversCaret: $0.coversCaret,
-                watchesRegion: $0.watchesRegion
+                watchesRegion: $0.watchesRegion,
+                pointerBlocked: $0.pointerBlocked
             )
         }
     }
@@ -400,11 +427,13 @@ struct RustInterestPlanner: InterestPlacing {
         in world: DesktopWorldSnapshot,
         currentPosition: WorldPoint,
         pointerPosition: WorldPoint?,
+        pointerClearance: Double,
         objectSize: WorldSize
     ) -> InterestDestination? {
         RustCore.interestDestination(
             for: hint, in: world, currentPosition: currentPosition,
-            pointerPosition: pointerPosition, objectSize: objectSize
+            pointerPosition: pointerPosition, pointerClearance: pointerClearance,
+            objectSize: objectSize
         )
     }
 
@@ -414,11 +443,28 @@ struct RustInterestPlanner: InterestPlacing {
         in world: DesktopWorldSnapshot,
         currentPosition: WorldPoint,
         pointerPosition: WorldPoint?,
+        pointerClearance: Double,
         objectSize: WorldSize
     ) -> SeatEvaluation? {
         RustCore.evaluateSeat(
             at: point, for: hint, in: world, currentPosition: currentPosition,
-            pointerPosition: pointerPosition, objectSize: objectSize
+            pointerPosition: pointerPosition, pointerClearance: pointerClearance,
+            objectSize: objectSize
+        )
+    }
+
+    func stepAside(
+        for hint: LocationHint,
+        in world: DesktopWorldSnapshot,
+        currentPosition: WorldPoint,
+        pointerPosition: WorldPoint?,
+        pointerClearance: Double,
+        objectSize: WorldSize
+    ) -> InterestDestination? {
+        RustCore.stepAside(
+            for: hint, in: world, currentPosition: currentPosition,
+            pointerPosition: pointerPosition, pointerClearance: pointerClearance,
+            objectSize: objectSize
         )
     }
 }
@@ -691,7 +737,8 @@ public final class RustPlacement {
     private var pushedField: LuminanceField?
 
     private static let reasonOrder: [PlacementTravelReason] = [
-        .newActivity, .coveringCaret, .coveringWork, .plannedBlind, .followedFocus
+        .newActivity, .coveringCaret, .coveringWork, .plannedBlind, .followedFocus,
+        .seatUnderPointer
     ]
 
     public init() {}
@@ -726,6 +773,7 @@ public final class RustPlacement {
             objectWidth: situation.objectSize.width,
             objectHeight: situation.objectSize.height,
             pointer: situation.pointerPosition.map { [$0.x, $0.y] },
+            pointerClearance: situation.pointerClearance,
             walkingSpeed: situation.walkingSpeed,
             isPointerOwned: situation.isPointerOwned,
             isPointerWatching: situation.isPointerWatching,

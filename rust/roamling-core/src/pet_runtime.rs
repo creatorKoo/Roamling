@@ -563,7 +563,7 @@ impl PetRuntime {
                 // the pet there, so the pet finishes the animation first.
                 self.apply_intent(&intent, now, delta_time);
             } else if self.is_pointer_avoidance_enabled
-                && !self.escape_outranks_pointer(&intent, decision.proximity)
+                && !self.walk_outranks_glance(&intent, decision.proximity)
             {
                 self.behavior
                     .handle(BehaviorInput::Pointer(decision.proximity), now);
@@ -785,14 +785,17 @@ impl PetRuntime {
             .push(LuminanceRequest { region, interval });
     }
 
-    /// Whether leaving the user's work outranks the cursor on this tick.
-    /// Stopping to look at the cursor is a moment; standing on the user's work
-    /// is a condition, and a moment must not cancel the remedy for a condition.
-    fn escape_outranks_pointer(&self, intent: &PlacementIntent, proximity: PointerProximity) -> bool {
+    /// Whether the walk under way outranks the cursor on this tick. Stopping
+    /// to look at the cursor is a moment; standing on the user's work is a
+    /// condition, and a moment must not cancel the remedy for a condition.
+    /// Which walks qualify is `PlacementIntent::outranks_glance`; the director
+    /// carries a travel intent every tick, so only roaming's one-shot escape
+    /// needs the flag below to survive past the tick it was issued.
+    fn walk_outranks_glance(&self, intent: &PlacementIntent, proximity: PointerProximity) -> bool {
         if proximity != PointerProximity::Watching {
             return false;
         }
-        if matches!(intent, PlacementIntent::Escape(_)) {
+        if intent.outranks_glance() {
             return true;
         }
         self.escape_route_active && self.movement.has_route()
@@ -855,6 +858,11 @@ impl PetRuntime {
             position: self.movement.position(),
             object_size: self.object_size,
             pointer_position: Some(pointer),
+            pointer_clearance: if self.is_pointer_avoidance_enabled {
+                self.tuning.pointer_awareness_distance
+            } else {
+                0.0
+            },
             walking_speed: self.tuning.walking_speed,
             is_pointer_owned: catch_is_armed
                 || matches!(
@@ -1396,6 +1404,7 @@ fn reason_name(reason: PlacementTravelReason) -> &'static str {
     match reason {
         PlacementTravelReason::NewActivity => "newActivity",
         PlacementTravelReason::CoveringCaret => "coveringCaret",
+        PlacementTravelReason::SeatUnderPointer => "seatUnderPointer",
         PlacementTravelReason::CoveringWork => "coveringWork",
         PlacementTravelReason::PlannedBlind => "plannedBlind",
         PlacementTravelReason::FollowedFocus => "followedFocus",

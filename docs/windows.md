@@ -326,7 +326,7 @@ destination 전부 일치). Swift 원본은 그 대조군으로 남아 있고, �
 
 그래서 fixture 꼬리를 **스크립트**로 만들었다: 앉힌 다음 caret을 펫 위로 옮기고, 창을
 채우고, 8초 타임아웃을 넘기고, arrival tolerance에 정확히 서 본다. 이 절을 넣은 뒤
-intent 6종·travel 사유 5종이 모두 나오고, 타임아웃·arrival `<=`·caret 규칙·abandon clamp
+intent 6종·travel 사유 6종이 모두 나오고, 타임아웃·arrival `<=`·caret 규칙·abandon clamp
 변이가 전부 죽는다. **타임아웃은 사용자가 제보한 제자리 걷기 버그를 구조하던 바로 그
 분기다** — 난수만으로는 한 번도 실행되지 않았다.
 

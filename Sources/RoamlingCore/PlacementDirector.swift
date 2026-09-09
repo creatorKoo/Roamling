@@ -12,12 +12,30 @@ public enum PlacementTravelReason: String, Hashable, Sendable {
     /// A source the pet was not already watching started working.
     case newActivity
     case coveringCaret
+    /// The cursor has settled on the seat the pet is walking to. The glance
+    /// band stops the pet short of it every time, so the walk is one it cannot
+    /// finish. Only ever raised for a walk in progress: a cursor passing a
+    /// seated pet is a glance, not a reason to get up.
+    case seatUnderPointer
     case coveringWork
     /// The seat was chosen before any capture existed and one has since
     /// arrived, so the decision gets re-made rather than defended.
     case plannedBlind
     /// The seat no longer belongs to the window being watched.
     case followedFocus
+
+    /// Whether a walk for this reason keeps going when the cursor is merely
+    /// being looked at. Two of these walks exist because the pet is standing on
+    /// the user's work, and a glance must not cancel the remedy for that. The
+    /// third exists because the cursor sat on the seat: a walk the cursor
+    /// started, stopping to look at the cursor, would be a contradiction. The
+    /// remaining reasons are about a better seat, not a bad one, so they wait.
+    public var keepsWalkingPastGlance: Bool {
+        switch self {
+        case .coveringCaret, .coveringWork, .seatUnderPointer: return true
+        case .newActivity, .plannedBlind, .followedFocus: return false
+        }
+    }
 }
 
 /// The single answer to "where should the pet be right now".
@@ -40,6 +58,20 @@ public enum PlacementIntent: Equatable, Sendable {
         guard case let .travel(_, reason) = self else { return nil }
         return reason
     }
+
+    /// The walks the glance may not stop. Stopping to look at the cursor is a
+    /// moment; standing on someone's paragraph is a condition, and a moment
+    /// must not cancel the remedy for a condition. Roaming's `.escape` and the
+    /// seat-watch's covering travels are the same remedy under two names, and
+    /// the walk away from a cursor-blocked seat is one the cursor itself
+    /// started. Everything else waits for the glance to pass.
+    public var outranksGlance: Bool {
+        switch self {
+        case .escape: return true
+        case let .travel(_, reason): return reason.keepsWalkingPastGlance
+        case .none, .hold, .sleepInPlace, .stroll: return false
+        }
+    }
 }
 
 /// Everything the placement decision is allowed to look at, gathered once per
@@ -55,6 +87,10 @@ public struct PetSituation: Sendable {
     public var position: WorldPoint
     public var objectSize: WorldSize
     public var pointerPosition: WorldPoint?
+    /// No seat within this distance of the cursor can be reached: the glance
+    /// band stops the pet where it stands. The notice distance while pointer
+    /// avoidance is on, zero when it is off -- and at zero nothing is blocked.
+    public var pointerClearance: Double
     public var walkingSpeed: Double
     /// The pointer owns the pet outright: caught, dragged, evading, or close
     /// enough to be reaching for it. Nothing placement decides survives this.
@@ -88,6 +124,7 @@ public struct PetSituation: Sendable {
         position: WorldPoint,
         objectSize: WorldSize,
         pointerPosition: WorldPoint? = nil,
+        pointerClearance: Double = 0,
         walkingSpeed: Double = 160,
         isPointerOwned: Bool = false,
         isPointerWatching: Bool = false,
@@ -107,6 +144,7 @@ public struct PetSituation: Sendable {
         self.position = position
         self.objectSize = objectSize
         self.pointerPosition = pointerPosition
+        self.pointerClearance = pointerClearance
         self.walkingSpeed = walkingSpeed
         self.isPointerOwned = isPointerOwned
         self.isPointerWatching = isPointerWatching
@@ -234,13 +272,13 @@ public struct PlacementDirector: Sendable {
         // verdict is current when the pointer lets go. Gating the reading as
         // well as the moving is what froze the seat watch next to the cursor.
         if situation.isPointerOwned || situation.isEvading { return .none }
-        // The glance is the one pointer claim that loses, and only to the one
-        // answer that outranks it. Standing on the user's work is a condition;
-        // looking up at the cursor is a moment, and the moment happens to stop
-        // the pet right where the condition is. Everything else still waits.
-        if situation.isPointerWatching {
-            guard case .escape = verdict else { return .none }
-        }
+        // The glance is the one pointer claim that loses, and only to the
+        // answers that remedy a condition. Standing on the user's work is a
+        // condition; looking up at the cursor is a moment, and the moment
+        // happens to stop the pet right where the condition is -- whether the
+        // walk off it is roaming's escape or the seat watch's covering travel.
+        // Everything else still waits.
+        if situation.isPointerWatching, !verdict.outranksGlance { return .none }
         return verdict
     }
 
@@ -313,40 +351,45 @@ public struct PlacementDirector: Sendable {
             in: situation.world,
             currentPosition: situation.position,
             pointerPosition: situation.pointerPosition,
+            pointerClearance: situation.pointerClearance,
             objectSize: situation.objectSize
         )
+        let sawCapture = travel?.sawCapture ?? seat?.sawCapture ?? false
 
         if let reason = departureReason(
             evaluation: evaluation,
-            sawCapture: travel?.sawCapture ?? seat?.sawCapture ?? false,
+            sawCapture: sawCapture,
             isNew: isNew,
             in: situation
-        ),
-           let destination = planner.destination(
-            for: hint,
-            in: situation.world,
-            currentPosition: situation.position,
-            pointerPosition: situation.pointerPosition,
-            objectSize: situation.objectSize
-           ),
-           accepts(
-            destination,
-            over: evaluation,
-            judged: judged,
-            for: reason,
-            hint: hint,
-            in: situation
-           ) {
-            travel = Travel(
-                destination: destination,
-                reason: reason,
+        ) {
+            if let destination = planner.destination(
+                for: hint,
+                in: situation.world,
+                currentPosition: situation.position,
+                pointerPosition: situation.pointerPosition,
+                pointerClearance: situation.pointerClearance,
+                objectSize: situation.objectSize
+            ), accepts(
+                destination,
+                over: evaluation,
+                judged: judged,
+                for: reason,
+                hint: hint,
+                in: situation
+            ) {
+                return depart(to: destination, for: reason, sourceID: sourceID, in: situation)
+            }
+            if let intent = fallback(
+                for: reason,
+                evaluation: evaluation,
+                judged: judged,
+                sawCapture: sawCapture,
+                hint: hint,
                 sourceID: sourceID,
-                startedAt: situation.timestamp,
-                sawCapture: situation.world.luminance != nil
-            )
-            seat = nil
-            carried = .travel(destination, reason: reason)
-            return carried
+                in: situation
+            ) {
+                return intent
+            }
         }
 
         // Nothing better exists, so the walk already under way continues rather
@@ -379,7 +422,83 @@ public struct PlacementDirector: Sendable {
         return carried
     }
 
-    /// Priorities 3 through 6, in order. Above them is only ownership, below
+    private mutating func depart(
+        to destination: InterestDestination,
+        for reason: PlacementTravelReason,
+        sourceID: String,
+        in situation: PetSituation
+    ) -> PlacementIntent {
+        travel = Travel(
+            destination: destination,
+            reason: reason,
+            sourceID: sourceID,
+            startedAt: situation.timestamp,
+            sawCapture: situation.world.luminance != nil
+        )
+        seat = nil
+        carried = .travel(destination, reason: reason)
+        return carried
+    }
+
+    /// What to do when a reason to leave found no seat to leave for, which
+    /// happens once seats under the cursor stop counting. A reason that says
+    /// the spot is bad -- the caret, the user's text -- still has to be acted
+    /// on, so the pet steps aside from the cursor instead. A walk the cursor
+    /// blocked ends where the pet stands if that spot is fine, and steps aside
+    /// if it is not. Anything else falls through to holding, as before.
+    private mutating func fallback(
+        for reason: PlacementTravelReason,
+        evaluation: SeatEvaluation?,
+        judged: WorldPoint,
+        sawCapture: Bool,
+        hint: LocationHint,
+        sourceID: String,
+        in situation: PetSituation
+    ) -> PlacementIntent? {
+        let spotIsBad: Bool
+        switch reason {
+        case .coveringCaret, .coveringWork:
+            spotIsBad = true
+        case .seatUnderPointer:
+            // The evaluation judged the seat being walked to. Whether the walk
+            // may end here is a question about where the pet stands. Watching
+            // the region is not asked: watching from a distance until the
+            // cursor moves on is still watching.
+            let standing = planner.evaluateSeat(
+                at: situation.position,
+                for: hint,
+                in: situation.world,
+                currentPosition: situation.position,
+                pointerPosition: situation.pointerPosition,
+                pointerClearance: situation.pointerClearance,
+                objectSize: situation.objectSize
+            )
+            spotIsBad = standing.map {
+                $0.coversCaret || ($0.emptiness ?? 1) < configuration.holdEmptiness
+            } ?? false
+        case .newActivity, .plannedBlind, .followedFocus:
+            return nil
+        }
+        if spotIsBad,
+           let destination = planner.stepAside(
+            for: hint,
+            in: situation.world,
+            currentPosition: situation.position,
+            pointerPosition: situation.pointerPosition,
+            pointerClearance: situation.pointerClearance,
+            objectSize: situation.objectSize
+           ),
+           accepts(destination, over: evaluation, judged: judged, for: reason, hint: hint, in: situation) {
+            return depart(to: destination, for: reason, sourceID: sourceID, in: situation)
+        }
+        if reason == .seatUnderPointer {
+            // The walk cannot finish and there is nowhere better: it ends here.
+            return settle(sourceID: sourceID, sawCapture: sawCapture, at: situation.timestamp)
+        }
+        return nil
+    }
+
+    /// Priorities 3 through 7, in order. Above them is only ownership, below
     /// them only staying put.
     private func departureReason(
         evaluation: SeatEvaluation?,
@@ -392,6 +511,7 @@ public struct PlacementDirector: Sendable {
         // scored would walk the pet on exactly the screens it understands least.
         guard let evaluation else { return nil }
         if evaluation.coversCaret { return .coveringCaret }
+        if travel != nil, evaluation.pointerBlocked { return .seatUnderPointer }
         if let emptiness = evaluation.emptiness,
            emptiness < configuration.abandonEmptiness,
            dwellElapsed(in: situation) {
@@ -431,6 +551,7 @@ public struct PlacementDirector: Sendable {
                 in: situation.world,
                 currentPosition: situation.position,
                 pointerPosition: situation.pointerPosition,
+                pointerClearance: situation.pointerClearance,
                 objectSize: situation.objectSize
             )
             if replacement?.isHoldable == true { return true }
@@ -451,7 +572,7 @@ public struct PlacementDirector: Sendable {
             // region is the question, so it is asked directly.
             guard let evaluation, evaluation.watchesRegion else { return true }
             return destination.score > evaluation.score + configuration.replacementMargin
-        case .coveringCaret, .plannedBlind, .followedFocus:
+        case .coveringCaret, .seatUnderPointer, .plannedBlind, .followedFocus:
             return true
         }
     }

@@ -9,7 +9,7 @@
 //! measured 0.03% of a frame in `docs/windows.md` section 12.
 
 use crate::emptiness::LuminanceField;
-use crate::interest::BasicInterestPositionPlanner;
+use crate::interest::{BasicInterestPositionPlanner, InterestDestination};
 use crate::geometry::{WorldPoint, WorldRect, WorldSize};
 use crate::safe_zone::BasicSafeZonePlanner;
 use crate::world::{
@@ -209,6 +209,7 @@ pub struct FfiSeatEvaluation {
     pub emptiness: Option<f64>,
     pub covers_caret: bool,
     pub watches_region: bool,
+    pub pointer_blocked: bool,
     pub is_holdable: bool,
 }
 
@@ -241,6 +242,7 @@ pub fn interest_destination(
     current_x: f64,
     current_y: f64,
     pointer: Option<Vec<f64>>,
+    pointer_clearance: f64,
     object_width: f64,
     object_height: f64,
 ) -> Option<FfiInterestDestination> {
@@ -252,14 +254,43 @@ pub fn interest_destination(
         &world,
         WorldPoint::new(current_x, current_y),
         pointer,
+        pointer_clearance,
         WorldSize::new(object_width, object_height),
     )
-    .map(|destination| FfiInterestDestination {
+    .map(ffi_destination)
+}
+
+#[uniffi::export]
+pub fn step_aside(
+    scene: FfiInterestScene,
+    current_x: f64,
+    current_y: f64,
+    pointer: Option<Vec<f64>>,
+    pointer_clearance: f64,
+    object_width: f64,
+    object_height: f64,
+) -> Option<FfiInterestDestination> {
+    let (world, hint) = scene.parts();
+    let pointer = pointer
+        .and_then(|values| (values.len() == 2).then(|| WorldPoint::new(values[0], values[1])));
+    BasicInterestPositionPlanner::step_aside(
+        &hint,
+        &world,
+        WorldPoint::new(current_x, current_y),
+        pointer,
+        pointer_clearance,
+        WorldSize::new(object_width, object_height),
+    )
+    .map(ffi_destination)
+}
+
+fn ffi_destination(destination: InterestDestination) -> FfiInterestDestination {
+    FfiInterestDestination {
         x: destination.point.x,
         y: destination.point.y,
         display_id: destination.display_id,
         score: destination.score,
-    })
+    }
 }
 
 #[uniffi::export]
@@ -270,6 +301,7 @@ pub fn evaluate_seat(
     current_x: f64,
     current_y: f64,
     pointer: Option<Vec<f64>>,
+    pointer_clearance: f64,
     object_width: f64,
     object_height: f64,
 ) -> Option<FfiSeatEvaluation> {
@@ -282,6 +314,7 @@ pub fn evaluate_seat(
         &world,
         WorldPoint::new(current_x, current_y),
         pointer,
+        pointer_clearance,
         WorldSize::new(object_width, object_height),
     )
     .map(|evaluation| FfiSeatEvaluation {
@@ -292,6 +325,7 @@ pub fn evaluate_seat(
         emptiness: evaluation.emptiness,
         covers_caret: evaluation.covers_caret,
         watches_region: evaluation.watches_region,
+        pointer_blocked: evaluation.pointer_blocked,
         is_holdable: evaluation.is_holdable(),
     })
 }
@@ -766,12 +800,13 @@ use crate::placement::{
     PetSituation, PlacementDirector, PlacementIntent, PlacementTravelReason,
 };
 
-const TRAVEL_REASONS: [PlacementTravelReason; 5] = [
+const TRAVEL_REASONS: [PlacementTravelReason; 6] = [
     PlacementTravelReason::NewActivity,
     PlacementTravelReason::CoveringCaret,
     PlacementTravelReason::CoveringWork,
     PlacementTravelReason::PlannedBlind,
     PlacementTravelReason::FollowedFocus,
+    PlacementTravelReason::SeatUnderPointer,
 ];
 
 #[derive(uniffi::Record)]
@@ -796,6 +831,7 @@ pub struct FfiSituation {
     pub object_width: f64,
     pub object_height: f64,
     pub pointer: Option<Vec<f64>>,
+    pub pointer_clearance: f64,
     pub walking_speed: f64,
     pub is_pointer_owned: bool,
     pub is_pointer_watching: bool,
@@ -908,6 +944,7 @@ impl Placement {
             pointer_position: situation
                 .pointer
                 .and_then(|values| (values.len() == 2).then(|| WorldPoint::new(values[0], values[1]))),
+            pointer_clearance: situation.pointer_clearance,
             walking_speed: situation.walking_speed,
             is_pointer_owned: situation.is_pointer_owned,
             is_pointer_watching: situation.is_pointer_watching,

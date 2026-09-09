@@ -307,6 +307,33 @@ Windows에서 `cargo test --release`가 이제 초록이어야 한다. **아니�
 `RoamlingCore`는 실제 `Package.swift`로 Windows에서 무수정 빌드되고 Core 테스트가 통과한다. **포팅·언어 선택·Rust 재작성 논의를 시작하기 전에 그 문서를 읽는다** — 특히
 11절이 Rust 전환 판단에 필요한 실측치를 모아 둔 브리프다.
 
+### F. 커서가 앉은 자리로 걷지 않는다 — 2026-09-09 완료
+
+활동 중 좌석이 커서 옆이면 펫이 가다 서다를 반복했다. 응시 대역(인식 거리 170)이 걸음을
+멈추고, 커서가 조금 움직이면 `travel_to_seat`가 같은 좌석으로 다시 출발하기 때문이다.
+배치 판정에 포인터 항이 없었고 후보 점수의 포인터 감점(최대 27.5)은 좌석을 못 뒤집었다.
+
+이제 **커서에서 `pointer_clearance`(회피가 켜져 있으면 인식 거리, 꺼져 있으면 0) 안의 좌석
+후보는 후보가 아니다.** 걷는 중에 목적지가 그 안에 들어오면 review beat에 `SeatUnderPointer`로
+다른 좌석을 고르고, 없으면 선 자리가 깨끗할 때 거기서 `settle`, 캐럿·글자 위면 커서 반대쪽
+clearance×1.1 지점으로 비켜선다(`step_aside`, 정규 좌석 선택에는 안 섞는다). 그 fallback은
+`CoveringCaret`·`CoveringWork`에도 적용된다 — 좌석을 빼면서 생긴 "갈 곳이 없어 캐럿 위에
+앉는" 구멍을 막는다. **앉아 있는 펫 옆을 지나는 커서는 대상이 아니다.** clearance 0이면
+옛 동작과 같다. `PetSituation`에 필드가 하나 늘어 placement·interest 픽스처를 재생성했고
+(생성기는 `output/w-unit5/gen-director.swift` · `output/w-unit2/gen4.swift`, 재현 확인 후),
+녹화된 세션은 한 바이트도 안 바뀌었다. 사다리는 `docs/placement.md` §3.2.
+
+**같은 날 두 번째 결함.** 활동 중 펫을 글자 위에 놓으면 `Travel(CoveringCaret|CoveringWork)`로
+떠나는데, 그 길에 커서를 두면 응시 대역에서 멈춰 글자 위에 그대로 앉았다. §3.2.2의 "응시는
+글자 탈출 걸음을 못 막는다"가 배회의 `Escape`에만 구현돼 있었기 때문이다. 이제 그 정의는
+`PlacementIntent::outranks_glance` 하나다 — `Escape`와, `PlacementTravelReason::
+keeps_walking_past_glance`가 참인 `Travel`(`CoveringCaret` · `CoveringWork` · `SeatUnderPointer`.
+셋째는 커서 때문에 시작된 걸음이 커서를 보느라 멈추면 자기모순이라서다). `decide`의 응시
+게이트와 런타임의 `walk_outranks_glance`가 둘 다 그것을 본다. `NewActivity` · `PlannedBlind` ·
+`FollowedFocus`는 여전히 응시에 양보한다 — 자리가 나쁜 게 아니라 더 나은 자리로 가는
+걸음이라서다. 이 조합은 랜덤 픽스처에 없어서 `gen-director.swift`에 스크립트 시나리오로
+박았다 — Windows의 `cargo test`가 이 규칙을 보는 유일한 자리다.
+
 ## 상태 어휘는 Petdex가 정본이다
 
 `PetdexState` 9종의 **뜻·표준 길이·transient/steady 분류는 우리가 정하지 않는다.** upstream

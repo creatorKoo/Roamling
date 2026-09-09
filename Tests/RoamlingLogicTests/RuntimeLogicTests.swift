@@ -482,6 +482,113 @@ func stuckTravelLogicTests() -> [LogicTest] {
                     "the pet arrived and kept walking on the spot -- state is \(state)"
                 )
             }
+        },
+        LogicTest(name: "a cursor in the glance band does not stop the walk off covered work") {
+            try MainActor.assumeIsolated {
+                // Seen on 2026-09-09: dropped onto the terminal's text while
+                // Claude Code worked, the pet set off for a clear seat, met the
+                // cursor on the way and stopped to look at it -- standing on the
+                // text for as long as the cursor stayed. Roaming's walk off the
+                // text already ignored the glance; the seat watch's did not.
+                let clock = TestClock(startingAt: 1_000)
+                let display = DisplaySnapshot(
+                    id: "1",
+                    name: "test",
+                    frame: WorldRect(x: 0, y: 0, width: 1440, height: 900),
+                    visibleFrame: WorldRect(x: 0, y: 25, width: 1440, height: 875),
+                    scale: 2
+                )
+                let platform = FakePlatform(display: display, worldTop: 900)
+                platform.pointer.position = WorldPoint(x: 20, y: 60)
+                platform.userIdle.duration = 0
+                platform.capture.isAuthorized = true
+                platform.capture.field = nil
+
+                let suite = try makeTestDefaults()
+                defer { suite.discard() }
+                suite.defaults.set(true, forKey: "roamling.position.exists")
+                suite.defaults.set(700.0, forKey: "roamling.position.x")
+                suite.defaults.set(734.0, forKey: "roamling.position.y")
+                let agent = FakeAgent()
+                let runtime = RoamlingRuntime(
+                    services: platform.services,
+                    agents: [agent],
+                    defaults: suite.defaults,
+                    catalog: PetCatalog(roots: []),
+                    clock: clock.read
+                )
+                runtime.start()
+                defer { runtime.stop() }
+
+                let region = WorldRect(x: 200, y: 200, width: 1000, height: 600)
+                agent.emit(CompanionEvent(
+                    sourceID: "fake-agent:session",
+                    sourceType: .agent,
+                    timestamp: clock.read(),
+                    kind: .activityStarted,
+                    locationHint: LocationHint(
+                        applicationIdentifier: "test",
+                        approximateRegion: region,
+                        confidence: 0.8
+                    )
+                ))
+                drainActivityEvents()
+                for tick in 0..<60 {
+                    clock.advance(1.0 / 30)
+                    runtime.tick()
+                    if tick % 10 == 0 { drainActivityEvents() }
+                }
+
+                // The capture says the seat is on content: the walk this test
+                // is about.
+                platform.capture.field = fieldBusy(
+                    inside: WorldRect(x: 520, y: 600, width: 380, height: 280),
+                    bounds: WorldRect(x: 0, y: 0, width: 1440, height: 900)
+                )
+                var departed = false
+                for tick in 0..<2_400 where !departed {
+                    clock.advance(1.0 / 30)
+                    runtime.tick()
+                    if tick % 10 == 0 { drainActivityEvents() }
+                    departed = runtime.behaviorState == .travelToInterest
+                }
+                try expect(departed, "the pet never set off, so the case was not reached")
+                try expect(
+                    runtime.diagnosticsText.contains("travel coveringWork"),
+                    "the walk was not the covering-work one this test is about"
+                )
+
+                // Two ticks give the direction of travel. The cursor is parked a
+                // little ahead and 130 points to the side of the path: inside
+                // the 170 glance band as the pet passes, outside the 100 evade
+                // radius, so only the glance is in play.
+                let before = runtime.position
+                clock.advance(1.0 / 30)
+                runtime.tick()
+                clock.advance(1.0 / 30)
+                runtime.tick()
+                let start = runtime.position
+                let heading = (start - before).normalized
+                try expect(heading != .zero, "the pet is not moving after departing")
+                let side = WorldVector(dx: -heading.dy, dy: heading.dx)
+                platform.pointer.position = start + heading * 60 + side * 130
+
+                var glanced = false
+                var pushed = false
+                for _ in 0..<90 {
+                    clock.advance(1.0 / 30)
+                    runtime.tick()
+                    if runtime.behaviorState == .lookAtPointer { glanced = true }
+                    if runtime.behaviorState == .evadePointer { pushed = true }
+                }
+                let travelled = runtime.position.distance(to: start)
+                try expect(!pushed, "the cursor was placed inside the evade radius; the case is wrong")
+                try expect(!glanced, "the pet stopped to look at the cursor on its way off the text")
+                try expect(
+                    travelled > 120,
+                    "the pet moved only \(travelled) points in three seconds with the cursor beside its path"
+                )
+            }
         }
     ]
 }

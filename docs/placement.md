@@ -209,8 +209,9 @@ flowchart LR
 | 1 | 잡힘 / 끌림 | `.none` — 포인터가 소유 |
 | 2 | 회피 중 | `.none` — 회피가 소유 |
 | 3 | 이 소스에 대한 자리가 아직 없음 | `.travel(reason: .newActivity)` |
-| 4 | 자리가 캐럿을 덮음 | `.travel(reason: .coveringCaret)` |
-| 5 | 자리 emptiness < `abandonEmptiness` **그리고** 체류 시간 경과 | `.travel(reason: .coveringWork)` |
+| 4 | 자리가 캐럿을 덮음 | `.travel(reason: .coveringCaret)` — 커서 응시에 양보하지 않는다 |
+| 4' | **걷는 중** + 목적지가 커서의 `pointerClearance` 안 | `.travel(reason: .seatUnderPointer)` — 없으면 아래 fallback. 커서 응시에 양보하지 않는다 |
+| 5 | 자리 emptiness < `abandonEmptiness` **그리고** 체류 시간 경과 | `.travel(reason: .coveringWork)` — 커서 응시에 양보하지 않는다 |
 | 6 | 캡처 없이 정한 자리 + 캡처 도착 | `.travel(reason: .plannedBlind)` |
 | 7 | 보는 창이 바뀜 | `.travel(reason: .followedFocus)` |
 | 8 | 활동 중 + 자리 유지 가능 + user idle 경과 | `.sleepInPlace` |
@@ -218,6 +219,26 @@ flowchart LR
 | 10 | 활동 없음 + 배회 시각 도래 | `.stroll(to:)` — 후보 6개를 emptiness로 거름 |
 | 10' | 활동 없음 + 지금 자리가 덮임 | `.escape(to:)` — 후보는 같고, 커서에게 양보하지 않는다 |
 | 11 | 그 외 | `.hold` |
+
+**커서의 `pointerClearance`(회피가 켜져 있으면 인식 거리, 기본 170) 안에 있는 좌석 후보는
+후보가 아니다.** 응시 대역이 걸음을 멈추므로 거기에는 도착할 수 없다 — 감점으로 두면 창이
+작을 때 여전히 이겼다. 그래서 planner가 아예 빼고, 전부 막히면 `nil`을 돌려준다. 4'는 이미
+걷고 있을 때만 켜진다: 앉아 있는 펫 옆을 지나는 커서는 응시이지 일어날 이유가 아니다.
+
+떠날 이유는 있는데 정규 좌석이 없을 때의 fallback, 순서대로:
+
+- a. clearance 밖 정규 좌석이 있고 `accepts`가 받으면 거기로.
+- b. 없으면 **선 자리를 잰다.** 캐럿을 안 덮고 emptiness가 `holdEmptiness` 이상이면
+  (창을 보고 있는지는 묻지 않는다 — 멀리서 지켜보는 것도 지켜보는 것이다) 4'일 때 그
+  자리에서 `settle`. 4·5는 자리가 나쁘다는 것이 정의라 이 단계를 건너뛴다.
+- c. 자리가 나쁘면 **비켜서기** — `stepAside`: 커서에서 펫 방향으로 clearance의 1.1배(기본
+  187) 떨어진 점을 safe rect에 clamp한 것. 정규 좌석 선택에는 섞지 않는다(섞으면 평소 자리가
+  달라진다). clamp 뒤에도 커서 안이면 `nil`. 그 점도 a와 같은 `accepts`를 통과해야 한다 —
+  거리 조건과, 5에서는 대체 자리가 holdable이거나 점수 차가 `replacementMargin` 이상이라는
+  조건.
+- d. 그것도 없으면 4'는 그 자리에서 `settle`, 4·5는 예전처럼 hold로 떨어진다.
+
+3·6·7은 자리 자체가 나쁜 것이 아니므로 정규 좌석이 없으면 예전처럼 hold(seat 기록)한다.
 
 3번의 질문은 "펫이 그 창을 보고 있는가"다. 보고 있지 않으면 무조건 걸어간다 — 다른
 디스플레이에 있는 경우가 대표적이고, 이건 점수로는 안 나온다. 실측하면 2번 모니터의
@@ -321,8 +342,9 @@ stateDiagram-v2
    10'번이 답을 만들면서 `parkedSince`를 비웠다. 커서가 옆에 머무는 한 대기는 성숙할
    때마다 되감겼고, 펫은 커서가 치워질 때까지 글자 위에 있었다. 이제 `parkedSince`는
    실제로 걷기 시작할 때(`isWalking`) 비워진다.
-2. **경로가 취소됐다.** 이제 `.escape` 경로가 살아 있는 동안 바깥 대역은 tick을
-   가져가지 못한다. 런타임의 `escapeOutranksPointer`가 판단한다.
+2. **경로가 취소됐다.** 이제 응시를 무시하는 걸음(`.escape`, 그리고 아래 정의의
+   `.travel`)이 살아 있는 동안 바깥 대역은 tick을 가져가지 못한다. 런타임의
+   `walk_outranks_glance`(`pet_runtime.rs`)가 `PlacementIntent::outranks_glance`를 보고 판단한다.
 3. **걸음을 시작하지도 못했다.** 커서가 **이미** 옆에 서 있으면 펫은 응시 상태고,
    `wanderEntryStates`가 그 상태에서의 `.beginWander`를 거절했다. 즉 이동 중에 끊기는
    경우를 고쳐도, 정지한 채로 덮이는 경우는 그대로 남았다 — 그리고 이쪽이 더 흔하다.
@@ -334,14 +356,31 @@ stateDiagram-v2
 | 신호 | 뜻 | 배치가 지는가 |
 |---|---|---|
 | `isPointerOwned` | 잡힘·끌림·회피, 또는 손이 닿는 거리(≤100px, `catchable`) | 항상 진다 |
-| `isPointerWatching` | 바깥 대역(100~170px) 응시 | `.escape`에만 진다 |
+| `isPointerWatching` | 바깥 대역(100~170px) 응시 | 응시를 무시하는 걸음(`.escape`, `.travel(coveringCaret\|coveringWork\|seatUnderPointer)`)에만 진다 |
 
 `wanderEntryStates`에 `.lookAtPointer`를 넣은 것도 이 갈래 때문이다. 응시 중에 배치가
-내주는 경로는 `.escape` 하나뿐이므로(다른 답은 전부 `.none`이 된다), 그 상태에서 걸음을
-허용해도 한가한 산책이 새어 나오지 않는다.
+내주는 경로는 응시를 무시하는 걸음뿐이므로(다른 답은 전부 `.none`이 된다), 그 상태에서
+걸음을 허용해도 한가한 산책이 새어 나오지 않는다.
+
+"응시를 무시하는 걸음"의 정의는 `PlacementIntent.outranksGlance` 하나다 — 배회의 `.escape`와,
+활동 중 자리 감시가 내는 `.travel` 중 `PlacementTravelReason.keepsWalkingPastGlance`가 참인 것:
+`.coveringCaret` · `.coveringWork` · `.seatUnderPointer`. 앞의 둘은 `.escape`와 같은 조건(펫이
+사용자 작업 위에 있다)의 해결책이 이름만 다른 것이고, 셋째는 커서가 좌석에 앉아서 시작된
+걸음이다 — 커서 때문에 떠나는 걸음이 커서를 보느라 멈추는 것은 자기모순이다. `decide`의 응시
+게이트와 런타임의 `walk_outranks_glance`가 둘 다 이 정의를 본다. 처음에는 `.escape`만 있었고,
+활동 중 글자 위에 놓인 펫이 떠나는 길에 커서를 만나면 응시가 경로를 취소해 글자 위에 그대로
+앉았다(2026-09-09). 양보하는 것은 `.newActivity` · `.plannedBlind` · `.followedFocus` 셋 —
+자리가 나빠서가 아니라 더 나은 자리로 가는 걸음이라서다.
 
 **바깥 대역만 양보한다.** 회피와 잡기는 그대로 펫을 소유한다 — 하나는 펫을 옮기고
 하나는 집어 올리므로, 둘 다 펫을 글자 위에 버려둘 수 없다.
+
+활동 중의 걸음은 두 갈래로 커서를 다룬다. **목적지가 커서 옆이면 좌석을 그 대역 밖에서
+고른다**(4') — 좌석이 커서 옆이면 펫은 170px 앞에서 서고, 커서가 조금 움직이면 같은 좌석으로
+다시 출발하고, 다시 선다. 반복을 끊는 것은 8~12초 타임아웃뿐이었고, 그 뒤 review가 같은
+좌석을 또 골랐다. **글자 위에서 벗어나는 걸음과 4'의 걸음은 응시를 무시한다**(위 정의) — 길에
+커서가 있어도 멈추지 않고 지나간다. 3·6·7의 `.travel`은 응시에 양보한다. 커서를 끄고
+오는 안은 버렸다 — 사용자의 포인터를 앱이 옮기는 것은 "Never annoying"에 어긋난다.
 
 ### 3.3 이 구조가 막는 것
 

@@ -32,6 +32,10 @@ public struct SeatEvaluation: Equatable, Sendable {
     /// False once the seat no longer belongs to the window it was planned for,
     /// which is how a focus change unsticks a held seat.
     public let watchesRegion: Bool
+    /// The cursor sits within the pointer clearance of this seat. The glance
+    /// band stops the pet where it stands, so a seat inside it is one the pet
+    /// can walk toward forever and never reach.
+    public let pointerBlocked: Bool
 
     public init(
         point: WorldPoint,
@@ -39,7 +43,8 @@ public struct SeatEvaluation: Equatable, Sendable {
         score: Double,
         emptiness: Double?,
         coversCaret: Bool,
-        watchesRegion: Bool
+        watchesRegion: Bool,
+        pointerBlocked: Bool = false
     ) {
         self.point = point
         self.displayID = displayID
@@ -47,6 +52,7 @@ public struct SeatEvaluation: Equatable, Sendable {
         self.emptiness = emptiness
         self.coversCaret = coversCaret
         self.watchesRegion = watchesRegion
+        self.pointerBlocked = pointerBlocked
     }
 
     public var isHoldable: Bool {
@@ -66,6 +72,7 @@ public protocol InterestPlacing: Sendable {
         in world: DesktopWorldSnapshot,
         currentPosition: WorldPoint,
         pointerPosition: WorldPoint?,
+        pointerClearance: Double,
         objectSize: WorldSize
     ) -> InterestDestination?
 
@@ -75,8 +82,18 @@ public protocol InterestPlacing: Sendable {
         in world: DesktopWorldSnapshot,
         currentPosition: WorldPoint,
         pointerPosition: WorldPoint?,
+        pointerClearance: Double,
         objectSize: WorldSize
     ) -> SeatEvaluation?
+
+    func stepAside(
+        for hint: LocationHint,
+        in world: DesktopWorldSnapshot,
+        currentPosition: WorldPoint,
+        pointerPosition: WorldPoint?,
+        pointerClearance: Double,
+        objectSize: WorldSize
+    ) -> InterestDestination?
 }
 
 /// The Swift implementation, kept as the control the port is measured against.
@@ -88,11 +105,13 @@ public struct SwiftInterestPlanner: InterestPlacing {
         in world: DesktopWorldSnapshot,
         currentPosition: WorldPoint,
         pointerPosition: WorldPoint?,
+        pointerClearance: Double,
         objectSize: WorldSize
     ) -> InterestDestination? {
         BasicInterestPositionPlanner.destination(
             for: hint, in: world, currentPosition: currentPosition,
-            pointerPosition: pointerPosition, objectSize: objectSize
+            pointerPosition: pointerPosition, pointerClearance: pointerClearance,
+            objectSize: objectSize
         )
     }
 
@@ -102,11 +121,28 @@ public struct SwiftInterestPlanner: InterestPlacing {
         in world: DesktopWorldSnapshot,
         currentPosition: WorldPoint,
         pointerPosition: WorldPoint?,
+        pointerClearance: Double,
         objectSize: WorldSize
     ) -> SeatEvaluation? {
         BasicInterestPositionPlanner.evaluateSeat(
             at: point, for: hint, in: world, currentPosition: currentPosition,
-            pointerPosition: pointerPosition, objectSize: objectSize
+            pointerPosition: pointerPosition, pointerClearance: pointerClearance,
+            objectSize: objectSize
+        )
+    }
+
+    public func stepAside(
+        for hint: LocationHint,
+        in world: DesktopWorldSnapshot,
+        currentPosition: WorldPoint,
+        pointerPosition: WorldPoint?,
+        pointerClearance: Double,
+        objectSize: WorldSize
+    ) -> InterestDestination? {
+        BasicInterestPositionPlanner.stepAside(
+            for: hint, in: world, currentPosition: currentPosition,
+            pointerPosition: pointerPosition, pointerClearance: pointerClearance,
+            objectSize: objectSize
         )
     }
 }
@@ -142,6 +178,9 @@ public enum BasicInterestPositionPlanner {
     /// exactly what walks the pet into the next sentence — and stays below the
     /// penalty for covering the caret outright.
     private static let caretAdvancePenalty = 60.0
+    /// How far past the clearance the step-aside seat is placed. Exactly on
+    /// the line would round to a blocked seat as often as not.
+    private static let stepAsideScale = 1.1
 
     /// Everything the candidate scoring needs, resolved once per call.
     private struct Plan {
@@ -155,6 +194,7 @@ public enum BasicInterestPositionPlanner {
         let objectSize: WorldSize
         let currentPosition: WorldPoint
         let pointerPosition: WorldPoint?
+        let pointerClearance: Double
 
         var halfWidth: Double { objectSize.width / 2 }
         var halfHeight: Double { objectSize.height / 2 }
@@ -174,6 +214,7 @@ public enum BasicInterestPositionPlanner {
         in world: DesktopWorldSnapshot,
         currentPosition: WorldPoint,
         pointerPosition: WorldPoint?,
+        pointerClearance: Double = 0,
         objectSize: WorldSize
     ) -> InterestDestination? {
         guard let plan = makePlan(
@@ -181,11 +222,16 @@ public enum BasicInterestPositionPlanner {
             in: world,
             currentPosition: currentPosition,
             pointerPosition: pointerPosition,
+            pointerClearance: pointerClearance,
             objectSize: objectSize
         ) else { return nil }
 
+        // A seat under the cursor is not a worse seat, it is not a seat: the
+        // glance band stops the pet short of it every time. Left in the pool
+        // with a penalty it still won whenever the window was small.
         let best = candidates(in: plan)
             .map { evaluate($0.point, intendedOutside: $0.outside, in: plan) }
+            .filter { !$0.pointerBlocked }
             .max { lhs, rhs in
                 if lhs.score == rhs.score {
                     return currentPosition.distance(to: lhs.point)
@@ -210,6 +256,7 @@ public enum BasicInterestPositionPlanner {
         in world: DesktopWorldSnapshot,
         currentPosition: WorldPoint,
         pointerPosition: WorldPoint?,
+        pointerClearance: Double = 0,
         objectSize: WorldSize
     ) -> SeatEvaluation? {
         guard let plan = makePlan(
@@ -217,9 +264,53 @@ public enum BasicInterestPositionPlanner {
             in: world,
             currentPosition: currentPosition,
             pointerPosition: pointerPosition,
+            pointerClearance: pointerClearance,
             objectSize: objectSize
         ) else { return nil }
         return evaluate(point, intendedOutside: false, in: plan)
+    }
+
+    /// The seat for when every real one is under the cursor: straight away
+    /// from the cursor, past the clearance, clamped onto the display. It is
+    /// where the pet goes to get off the user's work when it cannot get to a
+    /// seat, so it is scored like one but never competes with one -- mixed
+    /// into the pool it would change where the pet sits on an ordinary day.
+    ///
+    /// `nil` without a cursor, without a clearance, or when the clamp pushed
+    /// the point back under the cursor.
+    public static func stepAside(
+        for hint: LocationHint,
+        in world: DesktopWorldSnapshot,
+        currentPosition: WorldPoint,
+        pointerPosition: WorldPoint?,
+        pointerClearance: Double,
+        objectSize: WorldSize
+    ) -> InterestDestination? {
+        guard let pointer = pointerPosition, pointerClearance > 0 else { return nil }
+        guard let plan = makePlan(
+            for: hint,
+            in: world,
+            currentPosition: currentPosition,
+            pointerPosition: pointerPosition,
+            pointerClearance: pointerClearance,
+            objectSize: objectSize
+        ) else { return nil }
+        var direction = (currentPosition - pointer).normalized
+        if direction == .zero {
+            // The pet is on the cursor. Any direction is as good as another;
+            // this one is the same on both sides of the port.
+            direction = WorldVector(dx: -1, dy: 0)
+        }
+        let point = plan.safe.closestPoint(
+            to: pointer + direction * (pointerClearance * Self.stepAsideScale)
+        )
+        let evaluation = evaluate(point, intendedOutside: false, in: plan)
+        guard !evaluation.pointerBlocked else { return nil }
+        return InterestDestination(
+            point: evaluation.point,
+            displayID: evaluation.displayID,
+            score: evaluation.score
+        )
     }
 
     private static func makePlan(
@@ -227,6 +318,7 @@ public enum BasicInterestPositionPlanner {
         in world: DesktopWorldSnapshot,
         currentPosition: WorldPoint,
         pointerPosition: WorldPoint?,
+        pointerClearance: Double,
         objectSize: WorldSize
     ) -> Plan? {
         let focus = world.focus.flatMap { $0.confidence > 0 ? $0 : nil }
@@ -255,7 +347,8 @@ public enum BasicInterestPositionPlanner {
             bottomY: region.maxY - objectSize.height / 2 - 14,
             objectSize: objectSize,
             currentPosition: currentPosition,
-            pointerPosition: pointerPosition
+            pointerPosition: pointerPosition,
+            pointerClearance: pointerClearance
         )
     }
 
@@ -333,6 +426,9 @@ public enum BasicInterestPositionPlanner {
         let pointerPenalty = plan.pointerPosition.map {
             max(0, 220 - $0.distance(to: point)) / 8
         } ?? 0
+        let pointerBlocked = plan.pointerPosition.map {
+            $0.distance(to: point) < plan.pointerClearance
+        } ?? false
         let travelPenalty = min(18, plan.currentPosition.distance(to: point) / 220)
         let bottomDistance = abs(point.y - plan.bottomY)
         let bottomEdgeScore = max(0, 12 - bottomDistance / 24)
@@ -400,7 +496,8 @@ public enum BasicInterestPositionPlanner {
                 - advancePenalty,
             emptiness: emptiness,
             coversCaret: coversCaret,
-            watchesRegion: watched.contains(point)
+            watchesRegion: watched.contains(point),
+            pointerBlocked: pointerBlocked
         )
     }
 }

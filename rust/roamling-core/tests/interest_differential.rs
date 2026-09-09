@@ -66,14 +66,20 @@ fn build_scene(values: &[f64]) -> Scene {
 
 fn answer(op: &str, input: &[f64], scene: &Scene) -> Vec<f64> {
     match op {
-        "interest.destination" => {
+        "interest.destination" | "interest.stepAside" => {
             let pointer = (input[2] == 1.0).then(|| WorldPoint::new(input[3], input[4]));
-            match BasicInterestPositionPlanner::destination(
+            let planner = if op == "interest.destination" {
+                BasicInterestPositionPlanner::destination
+            } else {
+                BasicInterestPositionPlanner::step_aside
+            };
+            match planner(
                 &scene.hint,
                 &scene.world,
                 WorldPoint::new(input[0], input[1]),
                 pointer,
-                WorldSize::new(input[5], input[6]),
+                input[5],
+                WorldSize::new(input[6], input[7]),
             ) {
                 Some(destination) => {
                     vec![destination.point.x, destination.point.y, destination.score]
@@ -89,13 +95,15 @@ fn answer(op: &str, input: &[f64], scene: &Scene) -> Vec<f64> {
                 &scene.world,
                 WorldPoint::new(input[2], input[3]),
                 pointer,
-                WorldSize::new(input[7], input[8]),
+                input[7],
+                WorldSize::new(input[8], input[9]),
             ) {
                 Some(evaluation) => vec![
                     evaluation.score,
                     evaluation.emptiness.unwrap_or(NIL),
                     if evaluation.covers_caret { 1.0 } else { 0.0 },
                     if evaluation.watches_region { 1.0 } else { 0.0 },
+                    if evaluation.pointer_blocked { 1.0 } else { 0.0 },
                     if evaluation.is_holdable() { 1.0 } else { 0.0 },
                 ],
                 None => vec![NIL],
@@ -148,5 +156,5 @@ fn matches_the_swift_original_bit_for_bit() {
     }
 
     assert!(checked > 1_000, "only {checked} cases -- the fixture shrank");
-    assert_eq!(operations.len(), 2, "an operation lost its coverage");
+    assert_eq!(operations.len(), 3, "an operation lost its coverage");
 }

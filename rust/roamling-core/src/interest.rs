@@ -4,7 +4,7 @@
 //! Ported from `Sources/RoamlingCore/InterestPlacement.swift`.
 
 use crate::emptiness::{LuminanceField, VisualEmptiness};
-use crate::geometry::{swift_max, swift_min, WorldPoint, WorldRect, WorldSize};
+use crate::geometry::{swift_max, swift_min, WorldPoint, WorldRect, WorldSize, WorldVector};
 use crate::world::{last_maximum, DesktopWorldSnapshot, DisplaySnapshot, FocusSnapshot, LocationHint};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -32,6 +32,10 @@ pub struct SeatEvaluation {
     /// False once the seat no longer belongs to the window it was planned for,
     /// which is how a focus change unsticks a held seat.
     pub watches_region: bool,
+    /// The cursor sits within the pointer clearance of this seat. The glance
+    /// band stops the pet where it stands, so a seat inside it is one the pet
+    /// can walk toward forever and never reach.
+    pub pointer_blocked: bool,
 }
 
 impl SeatEvaluation {
@@ -53,6 +57,7 @@ struct Plan<'a> {
     object_size: WorldSize,
     current_position: WorldPoint,
     pointer_position: Option<WorldPoint>,
+    pointer_clearance: f64,
 }
 
 impl Plan<'_> {
@@ -95,18 +100,33 @@ impl BasicInterestPositionPlanner {
     /// ahead of it is buried within seconds. It outweighs the proximity bonus on
     /// purpose and stays below the penalty for covering the caret outright.
     const CARET_ADVANCE_PENALTY: f64 = 60.0;
+    /// How far past the clearance the step-aside seat is placed. Exactly on the
+    /// line would round to a blocked seat as often as not.
+    const STEP_ASIDE_SCALE: f64 = 1.1;
 
     pub fn destination(
         hint: &LocationHint,
         world: &DesktopWorldSnapshot,
         current_position: WorldPoint,
         pointer_position: Option<WorldPoint>,
+        pointer_clearance: f64,
         object_size: WorldSize,
     ) -> Option<InterestDestination> {
-        let plan = Self::make_plan(hint, world, current_position, pointer_position, object_size)?;
+        let plan = Self::make_plan(
+            hint,
+            world,
+            current_position,
+            pointer_position,
+            pointer_clearance,
+            object_size,
+        )?;
+        // A seat under the cursor is not a worse seat, it is not a seat: the
+        // glance band stops the pet short of it every time. Left in the pool
+        // with a penalty it still won whenever the window was small.
         let evaluations: Vec<SeatEvaluation> = Self::candidates(&plan)
             .into_iter()
             .map(|(point, outside)| Self::evaluate(point, outside, &plan))
+            .filter(|evaluation| !evaluation.pointer_blocked)
             .collect();
 
         // Swift's `max(by:)` keeps the last of equal elements, and on a tied
@@ -134,10 +154,66 @@ impl BasicInterestPositionPlanner {
         world: &DesktopWorldSnapshot,
         current_position: WorldPoint,
         pointer_position: Option<WorldPoint>,
+        pointer_clearance: f64,
         object_size: WorldSize,
     ) -> Option<SeatEvaluation> {
-        let plan = Self::make_plan(hint, world, current_position, pointer_position, object_size)?;
+        let plan = Self::make_plan(
+            hint,
+            world,
+            current_position,
+            pointer_position,
+            pointer_clearance,
+            object_size,
+        )?;
         Some(Self::evaluate(point, false, &plan))
+    }
+
+    /// The seat for when every real one is under the cursor: straight away
+    /// from the cursor, past the clearance, clamped onto the display. It is
+    /// where the pet goes to get off the user's work when it cannot get to a
+    /// seat, so it is scored like one but never competes with one -- mixed
+    /// into the pool it would change where the pet sits on an ordinary day.
+    ///
+    /// `None` without a cursor, without a clearance, or when the clamp pushed
+    /// the point back under the cursor.
+    pub fn step_aside(
+        hint: &LocationHint,
+        world: &DesktopWorldSnapshot,
+        current_position: WorldPoint,
+        pointer_position: Option<WorldPoint>,
+        pointer_clearance: f64,
+        object_size: WorldSize,
+    ) -> Option<InterestDestination> {
+        let pointer = pointer_position?;
+        if !(pointer_clearance > 0.0) {
+            return None;
+        }
+        let plan = Self::make_plan(
+            hint,
+            world,
+            current_position,
+            pointer_position,
+            pointer_clearance,
+            object_size,
+        )?;
+        let mut direction = current_position.vector_from(pointer).normalized();
+        if direction == WorldVector::ZERO {
+            // The pet is on the cursor. Any direction is as good as another;
+            // this one is the same on both sides of the port.
+            direction = WorldVector::new(-1.0, 0.0);
+        }
+        let point = plan
+            .safe
+            .closest_point(pointer.offset(direction.scaled(pointer_clearance * Self::STEP_ASIDE_SCALE)));
+        let evaluation = Self::evaluate(point, false, &plan);
+        if evaluation.pointer_blocked {
+            return None;
+        }
+        Some(InterestDestination {
+            point: evaluation.point,
+            display_id: evaluation.display_id,
+            score: evaluation.score,
+        })
     }
 
     fn make_plan<'a>(
@@ -145,6 +221,7 @@ impl BasicInterestPositionPlanner {
         world: &'a DesktopWorldSnapshot,
         current_position: WorldPoint,
         pointer_position: Option<WorldPoint>,
+        pointer_clearance: f64,
         object_size: WorldSize,
     ) -> Option<Plan<'a>> {
         let focus = world.focus.as_ref().filter(|value| value.confidence > 0.0);
@@ -178,6 +255,7 @@ impl BasicInterestPositionPlanner {
             object_size,
             current_position,
             pointer_position,
+            pointer_clearance,
         })
     }
 
@@ -255,6 +333,9 @@ impl BasicInterestPositionPlanner {
         let pointer_penalty = plan
             .pointer_position
             .map_or(0.0, |pointer| swift_max(0.0, 220.0 - pointer.distance(point)) / 8.0);
+        let pointer_blocked = plan
+            .pointer_position
+            .map_or(false, |pointer| pointer.distance(point) < plan.pointer_clearance);
         let travel_penalty = swift_min(18.0, plan.current_position.distance(point) / 220.0);
         let bottom_distance = (point.y - plan.bottom_y).abs();
         let bottom_edge_score = swift_max(0.0, 12.0 - bottom_distance / 24.0);
@@ -321,6 +402,7 @@ impl BasicInterestPositionPlanner {
             emptiness,
             covers_caret,
             watches_region: watched.contains(point),
+            pointer_blocked,
         }
     }
 }

@@ -27,12 +27,32 @@ pub enum PlacementTravelReason {
     /// A source the pet was not already watching started working.
     NewActivity,
     CoveringCaret,
+    /// The cursor has settled on the seat the pet is walking to. The glance
+    /// band stops the pet short of it every time, so the walk is one it
+    /// cannot finish. Only ever raised for a walk in progress: a cursor
+    /// passing a seated pet is a glance, not a reason to get up.
+    SeatUnderPointer,
     CoveringWork,
     /// The seat was chosen before any capture existed and one has since
     /// arrived, so the decision gets re-made rather than defended.
     PlannedBlind,
     /// The seat no longer belongs to the window being watched.
     FollowedFocus,
+}
+
+impl PlacementTravelReason {
+    /// Whether a walk for this reason keeps going when the cursor is merely
+    /// being looked at. Two of these walks exist because the pet is standing on
+    /// the user's work, and a glance must not cancel the remedy for that. The
+    /// third exists because the cursor sat on the seat: a walk the cursor
+    /// started, stopping to look at the cursor, would be a contradiction. The
+    /// remaining reasons are about a better seat, not a bad one, so they wait.
+    pub fn keeps_walking_past_glance(self) -> bool {
+        match self {
+            Self::CoveringCaret | Self::CoveringWork | Self::SeatUnderPointer => true,
+            Self::NewActivity | Self::PlannedBlind | Self::FollowedFocus => false,
+        }
+    }
 }
 
 /// The single answer to "where should the pet be right now".
@@ -60,6 +80,20 @@ impl PlacementIntent {
             _ => Option::None,
         }
     }
+
+    /// The walks the glance may not stop. Stopping to look at the cursor is a
+    /// moment; standing on someone's paragraph is a condition, and a moment
+    /// must not cancel the remedy for a condition. Roaming's `Escape` and the
+    /// seat-watch's covering travels are the same remedy under two names, and
+    /// the walk away from a cursor-blocked seat is one the cursor itself
+    /// started. Everything else waits for the glance to pass.
+    pub fn outranks_glance(&self) -> bool {
+        match self {
+            Self::Escape(_) => true,
+            Self::Travel(_, reason) => reason.keeps_walking_past_glance(),
+            Self::None | Self::Hold | Self::SleepInPlace | Self::Stroll(_) => false,
+        }
+    }
 }
 
 /// Everything the placement decision is allowed to look at, gathered once per
@@ -76,6 +110,10 @@ pub struct PetSituation {
     pub position: WorldPoint,
     pub object_size: WorldSize,
     pub pointer_position: Option<WorldPoint>,
+    /// No seat within this distance of the cursor can be reached: the glance
+    /// band stops the pet where it stands. The notice distance while pointer
+    /// avoidance is on, zero when it is off -- and at zero nothing is blocked.
+    pub pointer_clearance: f64,
     pub walking_speed: f64,
     /// The pointer owns the pet outright: caught, dragged, evading, or close
     /// enough to be reaching for it. Nothing placement decides survives this.
@@ -246,11 +284,13 @@ impl PlacementDirector {
         if situation.is_pointer_owned || situation.is_evading {
             return PlacementIntent::None;
         }
-        // The glance is the one pointer claim that loses, and only to the one
-        // answer that outranks it. Standing on the user's work is a condition;
-        // looking up at the cursor is a moment, and the moment happens to stop
-        // the pet right where the condition is. Everything else still waits.
-        if situation.is_pointer_watching && !matches!(verdict, PlacementIntent::Escape(_)) {
+        // The glance is the one pointer claim that loses, and only to the
+        // answers that remedy a condition. Standing on the user's work is a
+        // condition; looking up at the cursor is a moment, and the moment
+        // happens to stop the pet right where the condition is -- whether the
+        // walk off it is roaming's escape or the seat watch's covering travel.
+        // Everything else still waits.
+        if situation.is_pointer_watching && !verdict.outranks_glance() {
             return PlacementIntent::None;
         }
         verdict
@@ -338,6 +378,7 @@ impl PlacementDirector {
             &situation.world,
             situation.position,
             situation.pointer_position,
+            situation.pointer_clearance,
             situation.object_size,
         );
         let saw_capture = self
@@ -355,6 +396,7 @@ impl PlacementDirector {
                 &situation.world,
                 situation.position,
                 situation.pointer_position,
+                situation.pointer_clearance,
                 situation.object_size,
             ) {
                 if self.accepts(
@@ -365,17 +407,19 @@ impl PlacementDirector {
                     hint,
                     situation,
                 ) {
-                    self.travel = Some(Travel {
-                        destination: destination.clone(),
-                        reason,
-                        source_id: source_id.clone(),
-                        started_at: situation.timestamp,
-                        saw_capture: situation.world.luminance.is_some(),
-                    });
-                    self.seat = Option::None;
-                    self.carried = PlacementIntent::Travel(destination, reason);
-                    return self.carried.clone();
+                    return self.depart(destination, reason, source_id.clone(), situation);
                 }
+            }
+            if let Some(intent) = self.fallback(
+                reason,
+                evaluation.as_ref(),
+                judged,
+                saw_capture,
+                hint,
+                source_id,
+                situation,
+            ) {
+                return intent;
             }
         }
 
@@ -417,7 +461,88 @@ impl PlacementDirector {
         self.carried.clone()
     }
 
-    /// Priorities 3 through 6, in order. Above them is only ownership, below
+    fn depart(
+        &mut self,
+        destination: InterestDestination,
+        reason: PlacementTravelReason,
+        source_id: String,
+        situation: &PetSituation,
+    ) -> PlacementIntent {
+        self.travel = Some(Travel {
+            destination: destination.clone(),
+            reason,
+            source_id,
+            started_at: situation.timestamp,
+            saw_capture: situation.world.luminance.is_some(),
+        });
+        self.seat = Option::None;
+        self.carried = PlacementIntent::Travel(destination, reason);
+        self.carried.clone()
+    }
+
+    /// What to do when a reason to leave found no seat to leave for, which
+    /// happens once seats under the cursor stop counting. A reason that says
+    /// the spot is bad -- the caret, the user's text -- still has to be acted
+    /// on, so the pet steps aside from the cursor instead. A walk the cursor
+    /// blocked ends where the pet stands if that spot is fine, and steps aside
+    /// if it is not. Anything else falls through to holding, as before.
+    fn fallback(
+        &mut self,
+        reason: PlacementTravelReason,
+        evaluation: Option<&SeatEvaluation>,
+        judged: WorldPoint,
+        saw_capture: bool,
+        hint: &LocationHint,
+        source_id: &str,
+        situation: &PetSituation,
+    ) -> Option<PlacementIntent> {
+        let spot_is_bad = match reason {
+            PlacementTravelReason::CoveringCaret | PlacementTravelReason::CoveringWork => true,
+            PlacementTravelReason::SeatUnderPointer => {
+                // The evaluation judged the seat being walked to. Whether the
+                // walk may end here is a question about where the pet stands.
+                // Watching the region is not asked: watching from a distance
+                // until the cursor moves on is still watching.
+                BasicInterestPositionPlanner::evaluate_seat(
+                    situation.position,
+                    hint,
+                    &situation.world,
+                    situation.position,
+                    situation.pointer_position,
+                    situation.pointer_clearance,
+                    situation.object_size,
+                )
+                .map_or(false, |standing| {
+                    standing.covers_caret
+                        || standing.emptiness.unwrap_or(1.0) < self.configuration.hold_emptiness
+                })
+            }
+            PlacementTravelReason::NewActivity
+            | PlacementTravelReason::PlannedBlind
+            | PlacementTravelReason::FollowedFocus => return Option::None,
+        };
+        if spot_is_bad {
+            if let Some(destination) = BasicInterestPositionPlanner::step_aside(
+                hint,
+                &situation.world,
+                situation.position,
+                situation.pointer_position,
+                situation.pointer_clearance,
+                situation.object_size,
+            ) {
+                if self.accepts(&destination, evaluation, judged, reason, hint, situation) {
+                    return Some(self.depart(destination, reason, source_id.to_owned(), situation));
+                }
+            }
+        }
+        if reason == PlacementTravelReason::SeatUnderPointer {
+            // The walk cannot finish and there is nowhere better: it ends here.
+            return Some(self.settle(source_id.to_owned(), saw_capture, situation.timestamp));
+        }
+        Option::None
+    }
+
+    /// Priorities 3 through 7, in order. Above them is only ownership, below
     /// them only staying put.
     fn departure_reason(
         &self,
@@ -434,6 +559,9 @@ impl PlacementDirector {
         let evaluation = evaluation?;
         if evaluation.covers_caret {
             return Some(PlacementTravelReason::CoveringCaret);
+        }
+        if self.travel.is_some() && evaluation.pointer_blocked {
+            return Some(PlacementTravelReason::SeatUnderPointer);
         }
         if let Some(emptiness) = evaluation.emptiness {
             if emptiness < self.configuration.abandon_emptiness && self.dwell_elapsed(situation) {
@@ -483,6 +611,7 @@ impl PlacementDirector {
                     &situation.world,
                     situation.position,
                     situation.pointer_position,
+                    situation.pointer_clearance,
                     situation.object_size,
                 );
                 if replacement
@@ -510,6 +639,7 @@ impl PlacementDirector {
                 destination.score > evaluation.score + self.configuration.replacement_margin
             }
             PlacementTravelReason::CoveringCaret
+            | PlacementTravelReason::SeatUnderPointer
             | PlacementTravelReason::PlannedBlind
             | PlacementTravelReason::FollowedFocus => true,
         }

@@ -21,12 +21,13 @@ use roamling_core::{
 
 const NIL: f64 = -999.0;
 
-const REASONS: [PlacementTravelReason; 5] = [
+const REASONS: [PlacementTravelReason; 6] = [
     PlacementTravelReason::NewActivity,
     PlacementTravelReason::CoveringCaret,
     PlacementTravelReason::CoveringWork,
     PlacementTravelReason::PlannedBlind,
     PlacementTravelReason::FollowedFocus,
+    PlacementTravelReason::SeatUnderPointer,
 ];
 
 fn parse(fields: std::str::SplitWhitespace<'_>) -> Vec<f64> {
@@ -130,9 +131,9 @@ fn encode(intent: &PlacementIntent) -> Vec<f64> {
 }
 
 fn situation(input: &[f64], scene: &Scene) -> PetSituation {
-    let count = input[21] as usize;
+    let count = input[22] as usize;
     let stroll_candidates = (0..count)
-        .map(|slot| WorldPoint::new(input[22 + slot * 2], input[23 + slot * 2]))
+        .map(|slot| WorldPoint::new(input[23 + slot * 2], input[24 + slot * 2]))
         .collect();
     PetSituation {
         timestamp: input[0],
@@ -140,18 +141,19 @@ fn situation(input: &[f64], scene: &Scene) -> PetSituation {
         position: WorldPoint::new(input[1], input[2]),
         object_size: WorldSize::new(input[3], input[4]),
         pointer_position: (input[5] == 1.0).then(|| WorldPoint::new(input[6], input[7])),
-        walking_speed: input[8],
-        is_pointer_owned: input[9] == 1.0,
-        is_pointer_watching: input[10] == 1.0,
-        is_evading: input[11] == 1.0,
-        is_walking: input[12] == 1.0,
-        is_resting: input[13] == 1.0,
-        activity_source_id: (input[14] == 1.0).then(|| format!("s{}", input[15] as i64)),
-        activity_hint: (input[16] == 1.0).then(|| scene.hint.clone()),
-        user_idle_duration: input[17],
-        idle_before_rest: input[18],
-        is_roaming_enabled: input[19] == 1.0,
-        is_stroll_due: input[20] == 1.0,
+        pointer_clearance: input[8],
+        walking_speed: input[9],
+        is_pointer_owned: input[10] == 1.0,
+        is_pointer_watching: input[11] == 1.0,
+        is_evading: input[12] == 1.0,
+        is_walking: input[13] == 1.0,
+        is_resting: input[14] == 1.0,
+        activity_source_id: (input[15] == 1.0).then(|| format!("s{}", input[16] as i64)),
+        activity_hint: (input[17] == 1.0).then(|| scene.hint.clone()),
+        user_idle_duration: input[18],
+        idle_before_rest: input[19],
+        is_roaming_enabled: input[20] == 1.0,
+        is_stroll_due: input[21] == 1.0,
         stroll_candidates,
     }
 }
@@ -247,5 +249,5 @@ fn matches_the_swift_original_bit_for_bit() {
     // there on purpose; losing that section would leave the rules that move a
     // pet off the user's work untested.
     assert_eq!(intents.len(), 6, "an intent lost its coverage: {intents:?}");
-    assert_eq!(reasons.len(), 5, "a travel reason lost its coverage: {reasons:?}");
+    assert_eq!(reasons.len(), 6, "a travel reason lost its coverage: {reasons:?}");
 }
