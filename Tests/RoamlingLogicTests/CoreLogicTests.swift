@@ -2568,6 +2568,236 @@ func coreLogicTests() -> [LogicTest] {
                 fixture.situation(at: 1, position: fixture.corner, sourceID: nil)
             ) == .hold)
         },
+        LogicTest(name: "a stroll prefers the middle of empty space to its edge") {
+            // A spot one pixel clear of a paragraph and the middle of the
+            // desktop both scored a full mark, because the score only ever
+            // looked at the pet's own frame. Clearance widens the frame in
+            // steps, and the edge of the text fails the second step.
+            let fixture = DirectorFixture()
+            let text = WorldRect(x: 0, y: 0, width: 720, height: 900)
+            let field = try require(fixture.field(busyAround: nil, delta: 0.06, radius: text))
+            let size = fixture.objectSize
+            // Frame 725...821 at 1x, clear; 701...845 at 1.5x, on the text.
+            let edge = WorldPoint(x: 773, y: 600)
+            let middle = WorldPoint(x: 1_000, y: 600)
+            let alsoMiddle = WorldPoint(x: 980, y: 400)
+            let onText = WorldPoint(x: 300, y: 600)
+
+            try expect(VisualEmptiness.clearance(at: edge, objectSize: size, in: field, atLeast: 0.55) == 1)
+            try expect(VisualEmptiness.clearance(at: middle, objectSize: size, in: field, atLeast: 0.55) == 3)
+            try expect(VisualEmptiness.clearance(at: onText, objectSize: size, in: field, atLeast: 0.55) == 0)
+
+            func pick(_ points: [WorldPoint]) -> ComfortPick {
+                VisualEmptiness.mostComfortable(
+                    among: points, objectSize: size, in: field, atLeast: 0.55
+                )
+            }
+            // Offered the edge first, it still takes the middle.
+            try expect(pick([edge, middle]) == .clear(middle))
+            // Two spots with room enough are as good as each other, and the
+            // first keeps the walk aimless.
+            try expect(pick([alsoMiddle, middle]) == .clear(alsoMiddle))
+            // Only the edge on offer: it is off the text, so it is taken.
+            try expect(pick([onText, edge]) == .clear(edge))
+            // Nothing off the text: the least bad, but marked as such.
+            try expect(pick([onText]) == .marginal(onText))
+            try expect(pick([WorldPoint(x: 4_000, y: 4_000)]) == .unjudged)
+        },
+        LogicTest(name: "a stroll finds the clear patch the random draws missed") {
+            // Six draws biased to the bottom of the screen rarely land in the
+            // one clear region, and the least bad of six covered spots is
+            // still a covered spot. The director sweeps the display itself.
+            let fixture = DirectorFixture()
+            var director = PlacementDirector()
+            let text = WorldRect(x: 0, y: 0, width: 720, height: 900)
+            let field = try require(fixture.field(busyAround: nil, delta: 0.06, radius: text))
+            let drawsOnText = [WorldPoint(x: 200, y: 700), WorldPoint(x: 500, y: 300)]
+
+            let intent = director.decide(fixture.situation(
+                at: 0, position: WorldPoint(x: 300, y: 600), sourceID: nil,
+                luminance: field, isStrollDue: true, strollCandidates: drawsOnText
+            ))
+            guard case let .stroll(point) = intent else {
+                throw LogicTestFailure(
+                    message: "expected a stroll, got \(intent)", file: #filePath, line: #line
+                )
+            }
+            try expect(!drawsOnText.contains(point), "walked to a covered draw")
+            try expect(
+                VisualEmptiness.clearance(
+                    at: point, objectSize: fixture.objectSize, in: field, atLeast: 0.55
+                ) == 3,
+                "the swept spot \(point) is not in the middle of the clear patch"
+            )
+        },
+        LogicTest(name: "a stroll from a clean spot is declined when everywhere else is covered") {
+            // Roaming used to take the least bad of its draws whatever the
+            // pet stood on, which is how a pet on the wallpaper walked onto a
+            // paragraph. From a covered spot the least bad draw still wins.
+            let fixture = DirectorFixture()
+            var director = PlacementDirector()
+            let size = fixture.objectSize
+            let draws = [WorldPoint(x: 400, y: 700), WorldPoint(x: 900, y: 300)]
+
+            // Everything is covered, the pet included: it moves to the least bad.
+            let covered = try require(fixture.uniformField(delta: 0.06))
+            let fromCovered = director.decide(fixture.situation(
+                at: 0, position: WorldPoint(x: 600, y: 500), sourceID: nil,
+                luminance: covered, isStrollDue: true, strollCandidates: draws
+            ))
+            guard case let .stroll(point) = fromCovered, draws.contains(point) else {
+                throw LogicTestFailure(
+                    message: "expected the least bad draw, got \(fromCovered)",
+                    file: #filePath, line: #line
+                )
+            }
+
+            // Covered everywhere except a hole the size of the pet, placed
+            // between the sweep's columns so nothing on offer is clean.
+            let standing = WorldPoint(x: 700, y: 500)
+            let frame = fixture.petFrame(at: standing)
+            // `insetBy` clamps a negative inset to zero, so grow it by hand.
+            let hole = WorldRect(
+                x: frame.minX - 10, y: frame.minY - 10,
+                width: frame.size.width + 20, height: frame.size.height + 20
+            )
+            let columns = 80, rows = 60
+            let cell = WorldSize(
+                width: fixture.display.frame.size.width / Double(columns),
+                height: fixture.display.frame.size.height / Double(rows)
+            )
+            var samples: [Double] = []
+            for row in 0..<rows {
+                for column in 0..<columns {
+                    let sample = WorldPoint(
+                        x: (Double(column) + 0.5) * cell.width,
+                        y: (Double(row) + 0.5) * cell.height
+                    )
+                    samples.append(
+                        hole.contains(sample) ? 0.62
+                            : (column + row).isMultiple(of: 2) ? 0.47 : 0.53
+                    )
+                }
+            }
+            let pinned = try require(LuminanceField(
+                bounds: fixture.display.frame, columns: columns, rows: rows, samples: samples
+            ))
+            let standingScore = try require(VisualEmptiness.score(
+                of: fixture.petFrame(at: standing), in: pinned
+            ))
+            try expect(standingScore >= 0.55, "the hole scored \(standingScore)")
+            try expect(
+                VisualEmptiness.mostComfortable(
+                    among: draws, objectSize: size, in: pinned, atLeast: 0.55
+                ) == .marginal(draws[0]) || VisualEmptiness.mostComfortable(
+                    among: draws, objectSize: size, in: pinned, atLeast: 0.55
+                ) == .marginal(draws[1]),
+                "the draws were supposed to be covered"
+            )
+
+            let declined = director.decide(fixture.situation(
+                at: 1, position: standing, sourceID: nil,
+                luminance: pinned, isStrollDue: true, strollCandidates: draws
+            ))
+            try expect(declined == .hold, "walked off a clean spot onto text: \(declined)")
+        },
+        LogicTest(name: "a stroll does not walk through the cursor") {
+            // Escaping past the cursor stopped in the glance band, got owned,
+            // and on release picked the same seat and walked back into it.
+            // Every draw and sweep point is now judged by its path.
+            let fixture = DirectorFixture()
+            var director = PlacementDirector()
+            let field = try require(fixture.flatField())
+            let pet = WorldPoint(x: 200, y: 600)
+            let past = WorldPoint(x: 1_000, y: 600)
+            let aside = WorldPoint(x: 200, y: 200)
+            let cursor = WorldPoint(x: 600, y: 610)
+
+            // The cursor sits on the straight line to `past`.
+            let blocked = director.decide(fixture.situation(
+                at: 0, position: pet, sourceID: nil, luminance: field,
+                isStrollDue: true, strollCandidates: [past, aside],
+                pointerPosition: cursor, pointerClearance: 170
+            ))
+            try expect(blocked == .stroll(aside), "walked through the cursor: \(blocked)")
+
+            // Avoidance off: the clearance is zero and nothing is blocked.
+            let unblocked = director.decide(fixture.situation(
+                at: 1, position: pet, sourceID: nil, luminance: field,
+                isStrollDue: true, strollCandidates: [past, aside],
+                pointerPosition: cursor, pointerClearance: 0
+            ))
+            try expect(unblocked == .stroll(past), "got \(unblocked)")
+
+            // Already inside the band, walking straight away is allowed and
+            // walking closer is not.
+            let near = WorldPoint(x: 480, y: 600)
+            let away = director.decide(fixture.situation(
+                at: 2, position: near, sourceID: nil, luminance: field,
+                isStrollDue: true, strollCandidates: [past, aside],
+                pointerPosition: cursor, pointerClearance: 170
+            ))
+            try expect(away == .stroll(aside), "got \(away)")
+
+            // No capture at all: the first draw the cursor is not in the way of.
+            let blind = director.decide(fixture.situation(
+                at: 3, position: pet, sourceID: nil,
+                isStrollDue: true, strollCandidates: [past, aside],
+                pointerPosition: cursor, pointerClearance: 170
+            ))
+            try expect(blind == .stroll(aside), "got \(blind)")
+            let nowhere = director.decide(fixture.situation(
+                at: 4, position: pet, sourceID: nil,
+                isStrollDue: true, strollCandidates: [past],
+                pointerPosition: cursor, pointerClearance: 170
+            ))
+            try expect(nowhere == .hold, "got \(nowhere)")
+        },
+        LogicTest(name: "a long glance lets the stroll go, away from the cursor") {
+            // A cursor parked beside the pet used to pin it for as long as it
+            // stayed: the stroll never outranked the glance. After the patience
+            // runs out the stroll goes as an escape, and only to a spot the
+            // walk to leads away from the cursor.
+            let fixture = DirectorFixture()
+            var director = PlacementDirector()
+            let field = try require(fixture.flatField())
+            let pet = WorldPoint(x: 400, y: 600)
+            let cursor = WorldPoint(x: 540, y: 600)
+            let away = WorldPoint(x: 150, y: 400)
+            let through = WorldPoint(x: 1_000, y: 600)
+            // Leads away from the cursor but ends 200 points from it: a
+            // shuffle, refused once the pet is tired of the glance.
+            let shuffle = WorldPoint(x: 340, y: 600)
+            func glance(at time: TimeInterval) -> PlacementIntent {
+                director.decide(fixture.situation(
+                    at: time, position: pet, sourceID: nil, luminance: field,
+                    isPointerWatching: true, isStrollDue: true,
+                    strollCandidates: [through, shuffle, away],
+                    pointerPosition: cursor, pointerClearance: 170
+                ))
+            }
+            try expect(glance(at: 0) == PlacementIntent.none)
+            try expect(glance(at: 6.9) == PlacementIntent.none)
+            try expect(glance(at: 7) == .escape(away), "got \(glance(at: 7))")
+
+            // The glance breaking resets the patience.
+            _ = director.decide(fixture.situation(
+                at: 8, position: pet, sourceID: nil, luminance: field, isStrollDue: true,
+                strollCandidates: [away], pointerPosition: WorldPoint(x: 1_100, y: 100),
+                pointerClearance: 170
+            ))
+            try expect(glance(at: 9) == PlacementIntent.none)
+            try expect(glance(at: 15.9) == PlacementIntent.none)
+            try expect(glance(at: 16) == .escape(away))
+
+            // Owned outright, no patience applies.
+            let owned = director.decide(fixture.situation(
+                at: 30, position: pet, sourceID: nil, luminance: field,
+                isPointerOwned: true, isPointerWatching: true, isStrollDue: true,
+                strollCandidates: [away], pointerPosition: cursor, pointerClearance: 170
+            ))
+            try expect(owned == PlacementIntent.none)
+        },
         LogicTest(name: "an approval request always shows the paw") {
             // It used to roll a third of these into a stare. Petdex holds
             // `waiting` until the user answers, and a pet that asks only

@@ -168,6 +168,113 @@ impl VisualEmptiness {
         }
         best.map(|(point, _)| point)
     }
+
+    /// The frames a spot has to clear, each as a multiple of the pet's own,
+    /// before it counts as having room around it. Passing the first means the
+    /// pet is not on content; passing the last means there is a pet's width of
+    /// nothing on every side. A spot beside a paragraph passes the first only,
+    /// and until this existed that was indistinguishable from the middle of
+    /// the desktop.
+    pub const CLEARANCE_SCALES: [f64; 3] = [1.0, 1.5, 2.0];
+
+    /// How many of `CLEARANCE_SCALES` the spot clears, starting from the
+    /// smallest. Zero means it is on content; None means the field cannot
+    /// judge even the pet's own frame there.
+    pub fn clearance(
+        point: WorldPoint,
+        object_size: WorldSize,
+        field: &LuminanceField,
+        threshold: f64,
+    ) -> Option<usize> {
+        Self::clearance_and_score(point, object_size, field, threshold).map(|(tier, _)| tier)
+    }
+
+    /// The tier plus the score at the pet's own frame, so a caller ranking the
+    /// spots that failed does not pay for the same score twice.
+    fn clearance_and_score(
+        point: WorldPoint,
+        object_size: WorldSize,
+        field: &LuminanceField,
+        threshold: f64,
+    ) -> Option<(usize, f64)> {
+        let mut passed = 0usize;
+        let mut base = 0.0;
+        for (index, scale) in Self::CLEARANCE_SCALES.iter().enumerate() {
+            let frame = WorldRect::new(
+                point.x - object_size.width * scale / 2.0,
+                point.y - object_size.height * scale / 2.0,
+                object_size.width * scale,
+                object_size.height * scale,
+            );
+            let Some(score) = Self::score(frame, field) else {
+                if index == 0 {
+                    return None;
+                }
+                break;
+            };
+            if index == 0 {
+                base = score;
+            }
+            if !(score >= threshold) {
+                break;
+            }
+            passed += 1;
+        }
+        Some((passed, base))
+    }
+
+    /// Picks the spot from `points` with the most room around it, without
+    /// making roaming look calculated.
+    ///
+    /// The first candidate that clears every scale wins outright -- any spot
+    /// with a pet's width of nothing on every side is as good as any other, and
+    /// taking the first keeps the walk aimless. Only when none does is the
+    /// best tier taken, and only when nothing passes at all does the least bad
+    /// one come back, marked as such so the caller can decline the walk.
+    pub fn most_comfortable(
+        points: &[WorldPoint],
+        object_size: WorldSize,
+        field: &LuminanceField,
+        threshold: f64,
+    ) -> ComfortPick {
+        let mut best_clear: Option<(WorldPoint, usize)> = None;
+        let mut least_bad: Option<(WorldPoint, f64)> = None;
+        for point in points {
+            let Some((tier, base)) =
+                Self::clearance_and_score(*point, object_size, field, threshold)
+            else {
+                continue;
+            };
+            if tier >= Self::CLEARANCE_SCALES.len() {
+                return ComfortPick::Clear(*point);
+            }
+            if tier >= 1 {
+                if tier > best_clear.map(|(_, value)| value).unwrap_or(0) {
+                    best_clear = Some((*point, tier));
+                }
+            } else if base > least_bad.map(|(_, value)| value).unwrap_or(-1.0) {
+                least_bad = Some((*point, base));
+            }
+        }
+        if let Some((point, _)) = best_clear {
+            return ComfortPick::Clear(point);
+        }
+        if let Some((point, _)) = least_bad {
+            return ComfortPick::Marginal(point);
+        }
+        ComfortPick::Unjudged
+    }
+}
+
+/// What `VisualEmptiness::most_comfortable` found.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ComfortPick {
+    /// Off content, with the most room around it of the spots offered.
+    Clear(WorldPoint),
+    /// Every judgeable spot is on content; this one least so.
+    Marginal(WorldPoint),
+    /// The field could not judge any of them.
+    Unjudged,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]

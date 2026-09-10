@@ -51,7 +51,9 @@ public enum PlacementIntent: Equatable, Sendable {
     /// The spot the pet is standing on turned out to be covered, so this is a
     /// walk it owes the user rather than one it fancied. Kept apart from
     /// `.stroll` because callers rank it differently: an aimless walk yields to
-    /// the cursor, and getting off someone's paragraph does not.
+    /// the cursor, and getting off someone's paragraph does not. A stroll the
+    /// glance has held up past `glancePatience` is issued as this too, for the
+    /// same reason: it is a walk the glance may not stop.
     case escape(WorldPoint)
 
     public var travelReason: PlacementTravelReason? {
@@ -253,6 +255,19 @@ public struct PlacementDirector: Sendable {
     /// The verdict from the last review, repeated between beats so a walk in
     /// progress keeps its destination instead of restarting every frame.
     private var carried: PlacementIntent = .hold
+    /// When the current glance began, so a stroll can outlast it.
+    private var watchingSince: TimeInterval?
+
+    /// How long the pet looks at a cursor that just sits there before a stroll
+    /// is allowed to walk it away. A glance is a moment; one that has lasted
+    /// this long is a cursor parked beside the pet, and a pet that never moves
+    /// while the cursor rests nearby reads as stuck rather than attentive.
+    public static let glancePatience: TimeInterval = 7
+
+    /// How far, in pointer clearances, the walk that ends a tired glance has
+    /// to end from the cursor. Twice the clearance is out of the glance band
+    /// with the same margin again beyond it.
+    public static let boredDistanceScale: Double = 2
 
     public init(
         configuration: Configuration = .standard,
@@ -267,6 +282,11 @@ public struct PlacementDirector: Sendable {
     public var isTravelling: Bool { travel != nil }
 
     public mutating func decide(_ situation: PetSituation) -> PlacementIntent {
+        if situation.isPointerWatching {
+            if watchingSince == nil { watchingSince = situation.timestamp }
+        } else {
+            watchingSince = nil
+        }
         let verdict = verdict(for: situation)
         // Priorities 1 and 2. The table above them was still read, so the
         // verdict is current when the pointer lets go. Gating the reading as
@@ -278,7 +298,15 @@ public struct PlacementDirector: Sendable {
         // happens to stop the pet right where the condition is -- whether the
         // walk off it is roaming's escape or the seat watch's covering travel.
         // Everything else still waits.
-        if situation.isPointerWatching, !verdict.outranksGlance { return .none }
+        if situation.isPointerWatching, !verdict.outranksGlance {
+            // A stroll the glance has held up for long enough goes anyway,
+            // as an escape so the walk survives the glance. The path filter
+            // has already kept it to walks that lead away from the cursor.
+            if case let .stroll(point) = verdict, isBored(situation) {
+                return .escape(point)
+            }
+            return .none
+        }
         return verdict
     }
 
@@ -613,8 +641,28 @@ public struct PlacementDirector: Sendable {
         if parkedSince == nil { parkedSince = situation.timestamp }
 
         if situation.isStrollDue {
+            let intent: PlacementIntent
+            switch comfortable(among: situation) {
+            // No capture: the caller's first draw, unjudged, as it always
+            // was -- unless the cursor is in the way of every one of them.
+            case nil, .unjudged?:
+                guard let first = reachable(situation).first else { return carried }
+                intent = .stroll(first)
+            case let .clear(point)?:
+                intent = .stroll(point)
+            case let .marginal(point)?:
+                // Nothing on offer is off content. Walking from a clean spot
+                // onto someone's paragraph is worse than not walking, so the
+                // stroll is declined and asked again next tick with fresh
+                // draws. From a covered spot the least bad one still wins,
+                // because refusing to move is not an answer there.
+                if standingClear(situation) { return carried }
+                intent = .stroll(point)
+            }
             parkedSince = nil
-            return .stroll(comfortable(among: situation) ?? first)
+            // Deliberately not stored in `carried`: a stroll is acted on once,
+            // and repeating it between review beats would relay the same walk.
+            return intent
         }
 
         // The pause between walks is the whole point of roaming, and it is also
@@ -628,14 +676,9 @@ public struct PlacementDirector: Sendable {
                 in: field
               ),
               score < configuration.holdEmptiness,
-              let escape = comfortable(among: situation),
               // Only somewhere genuinely clear, for the same reason a seat is:
               // trading one covered spot for another just paces the pet.
-              let escapeScore = VisualEmptiness.score(
-                of: frame(at: escape, size: situation.objectSize),
-                in: field
-              ),
-              escapeScore >= configuration.holdEmptiness,
+              case let .clear(escape)? = comfortable(among: situation),
               situation.position.distance(to: escape) > configuration.minimumTravelDistance
         else { return carried }
 
@@ -650,15 +693,100 @@ public struct PlacementDirector: Sendable {
         return .escape(escape)
     }
 
-    private func comfortable(among situation: PetSituation) -> WorldPoint? {
-        situation.world.luminance.flatMap {
-            VisualEmptiness.firstComfortable(
-                among: situation.strollCandidates,
+    /// Whether the spot the pet stands on is one it may keep. Cannot-tell
+    /// reads as no here: a stroll declined from an unjudged spot would be
+    /// declined forever, since the same field judges the candidates.
+    private func standingClear(_ situation: PetSituation) -> Bool {
+        guard let field = situation.world.luminance,
+              let score = VisualEmptiness.score(
+                of: frame(at: situation.position, size: situation.objectSize),
+                in: field
+              )
+        else { return false }
+        return score >= configuration.holdEmptiness
+    }
+
+    /// The roaming pick: the caller's random draws first, then a fixed sweep
+    /// of the display the pet is on. Six draws biased to the bottom of the
+    /// screen rarely land in the middle of the desktop's one clear patch, and
+    /// the sweep is what finds it. It comes second so a draw that is just as
+    /// clear keeps the walk aimless, and it draws nothing from the caller's
+    /// random stream, so what roaming does without a capture is unchanged.
+    private func comfortable(among situation: PetSituation) -> ComfortPick? {
+        situation.world.luminance.map {
+            VisualEmptiness.mostComfortable(
+                among: reachable(situation)
+                    + Self.sweep(situation).filter { pathAvoidsPointer(to: $0, situation) },
                 objectSize: situation.objectSize,
                 in: $0,
                 atLeast: configuration.holdEmptiness
             )
         }
+    }
+
+    /// Whether the glance has gone on long enough for a stroll to end it.
+    private func isBored(_ situation: PetSituation) -> Bool {
+        guard let watchingSince else { return false }
+        return situation.timestamp - watchingSince >= Self.glancePatience
+    }
+
+    /// The caller's draws whose walk does not run into the cursor.
+    private func reachable(_ situation: PetSituation) -> [WorldPoint] {
+        situation.strollCandidates.filter { pathAvoidsPointer(to: $0, situation) }
+    }
+
+    /// Whether the straight walk to `point` stays outside the pointer
+    /// clearance. A seat past the cursor is as unreachable as a seat under it:
+    /// the glance band stops the pet on the way, the cursor then owns it, and
+    /// once released it picks the same seat and walks into the cursor again.
+    /// A pet already inside the band is only refused walks that bring it
+    /// closer, so it can always leave. A walk that ends a glance the pet has
+    /// tired of has to end well clear of the cursor -- `boredDistanceScale`
+    /// clearances away -- or it is a shuffle, not a leaving.
+    private func pathAvoidsPointer(to point: WorldPoint, _ situation: PetSituation) -> Bool {
+        guard let pointer = situation.pointerPosition, situation.pointerClearance > 0 else {
+            return true
+        }
+        if isBored(situation),
+           pointer.distance(to: point) < situation.pointerClearance * Self.boredDistanceScale {
+            return false
+        }
+        let from = situation.position
+        let dx = point.x - from.x
+        let dy = point.y - from.y
+        let lengthSquared = dx * dx + dy * dy
+        let t = lengthSquared > 0
+            ? (((pointer.x - from.x) * dx + (pointer.y - from.y) * dy) / lengthSquared).clamped(to: 0...1)
+            : 0
+        let closestX = from.x + dx * t
+        let closestY = from.y + dy * t
+        let closest = ((pointer.x - closestX) * (pointer.x - closestX)
+            + (pointer.y - closestY) * (pointer.y - closestY)).squareRoot()
+        return !(closest < min(situation.pointerClearance, pointer.distance(to: from)))
+    }
+
+    /// Bottom row first, matching the bias of the random draws.
+    private static func sweep(_ situation: PetSituation) -> [WorldPoint] {
+        let columns = 7
+        let rows = 5
+        let position = situation.position
+        guard let display = situation.world.display(containing: position)
+            ?? situation.world.nearestDisplay(to: position) else { return [] }
+        let safe = display.visibleFrame.insetBy(
+            dx: situation.objectSize.width / 2 + 18,
+            dy: situation.objectSize.height / 2 + 12
+        )
+        if safe.isEmpty { return [] }
+        var points: [WorldPoint] = []
+        points.reserveCapacity(columns * rows)
+        for row in (0..<rows).reversed() {
+            let y = safe.minY + safe.size.height * (Double(row) + 0.5) / Double(rows)
+            for column in 0..<columns {
+                let x = safe.minX + safe.size.width * (Double(column) + 0.5) / Double(columns)
+                points.append(WorldPoint(x: x, y: y))
+            }
+        }
+        return points
     }
 
     private func frame(at point: WorldPoint, size: WorldSize) -> WorldRect {

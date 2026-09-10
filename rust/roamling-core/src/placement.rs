@@ -12,7 +12,7 @@
 //! It holds a seat, a trip and the time of the last review across ticks, so
 //! Swift keeps a handle rather than shipping the state in and out every frame.
 
-use crate::emptiness::VisualEmptiness;
+use crate::emptiness::{ComfortPick, VisualEmptiness};
 use crate::geometry::{clamped, swift_max, swift_min, WorldPoint, WorldRect, WorldSize};
 use crate::interest::{BasicInterestPositionPlanner, InterestDestination, SeatEvaluation};
 use crate::world::{DesktopWorldSnapshot, LocationHint};
@@ -69,7 +69,9 @@ pub enum PlacementIntent {
     /// The spot the pet is standing on turned out to be covered, so this is a
     /// walk it owes the user rather than one it fancied. Kept apart from
     /// `Stroll` because callers rank it differently: an aimless walk yields to
-    /// the cursor, and getting off someone's paragraph does not.
+    /// the cursor, and getting off someone's paragraph does not. A stroll the
+    /// glance has held up past `GLANCE_PATIENCE` is issued as this too, for
+    /// the same reason: it is a walk the glance may not stop.
     Escape(WorldPoint),
 }
 
@@ -243,7 +245,20 @@ pub struct PlacementDirector {
     /// The verdict from the last review, repeated between beats so a walk in
     /// progress keeps its destination instead of restarting every frame.
     carried: PlacementIntent,
+    /// When the current glance began, so a stroll can outlast it.
+    watching_since: Option<f64>,
 }
+
+/// How long the pet looks at a cursor that just sits there before a stroll is
+/// allowed to walk it away. A glance is a moment; one that has lasted this
+/// long is a cursor parked beside the pet, and a pet that never moves while
+/// the cursor rests nearby reads as stuck rather than attentive.
+const GLANCE_PATIENCE: f64 = 7.0;
+
+/// How far, in pointer clearances, the walk that ends a tired glance has to
+/// end from the cursor. Twice the clearance is out of the glance band with
+/// the same margin again beyond it.
+const BORED_DISTANCE_SCALE: f64 = 2.0;
 
 impl Default for PlacementDirector {
     fn default() -> Self {
@@ -260,6 +275,7 @@ impl PlacementDirector {
             parked_since: Option::None,
             last_review_at: f64::NEG_INFINITY,
             carried: PlacementIntent::Hold,
+            watching_since: Option::None,
         }
     }
 
@@ -277,6 +293,13 @@ impl PlacementDirector {
     }
 
     pub fn decide(&mut self, situation: &PetSituation) -> PlacementIntent {
+        if situation.is_pointer_watching {
+            if self.watching_since.is_none() {
+                self.watching_since = Some(situation.timestamp);
+            }
+        } else {
+            self.watching_since = Option::None;
+        }
         let verdict = self.verdict(situation);
         // Priorities 1 and 2. The table above them was still read, so the
         // verdict is current when the pointer lets go. Gating the reading as
@@ -291,6 +314,14 @@ impl PlacementDirector {
         // walk off it is roaming's escape or the seat watch's covering travel.
         // Everything else still waits.
         if situation.is_pointer_watching && !verdict.outranks_glance() {
+            // A stroll the glance has held up for long enough goes anyway,
+            // as an escape so the walk survives the glance. The path filter
+            // has already kept it to walks that lead away from the cursor.
+            if let PlacementIntent::Stroll(point) = verdict {
+                if self.is_bored(situation) {
+                    return PlacementIntent::Escape(point);
+                }
+            }
             return PlacementIntent::None;
         }
         verdict
@@ -670,8 +701,7 @@ impl PlacementDirector {
     /// only applied to agent seats left most of the day unruled.
     fn stroll_verdict(&mut self, situation: &PetSituation) -> PlacementIntent {
         self.carried = PlacementIntent::Hold;
-        let first = situation.stroll_candidates.first().copied();
-        let (true, Some(first)) = (situation.is_roaming_enabled, first) else {
+        let (true, Some(_)) = (situation.is_roaming_enabled, situation.stroll_candidates.first()) else {
             self.parked_since = Option::None;
             return self.carried.clone();
         };
@@ -684,10 +714,32 @@ impl PlacementDirector {
         }
 
         if situation.is_stroll_due {
+            let intent = match self.comfortable(situation) {
+                // No capture: the caller's first draw, unjudged, as it always
+                // was -- unless the cursor is in the way of every one of them.
+                Option::None | Some(ComfortPick::Unjudged) => {
+                    let Some(first) = self.reachable(situation).into_iter().next() else {
+                        return self.carried.clone();
+                    };
+                    PlacementIntent::Stroll(first)
+                }
+                Some(ComfortPick::Clear(point)) => PlacementIntent::Stroll(point),
+                Some(ComfortPick::Marginal(point)) => {
+                    // Nothing on offer is off content. Walking from a clean
+                    // spot onto someone's paragraph is worse than not walking,
+                    // so the stroll is declined and asked again next tick with
+                    // fresh draws. From a covered spot the least bad one still
+                    // wins, because refusing to move is not an answer there.
+                    if self.standing_clear(situation) {
+                        return self.carried.clone();
+                    }
+                    PlacementIntent::Stroll(point)
+                }
+            };
             self.parked_since = Option::None;
             // Deliberately not stored in `carried`: a stroll is acted on once,
             // and repeating it between review beats would relay the same walk.
-            return PlacementIntent::Stroll(self.comfortable(situation).unwrap_or(first));
+            return intent;
         }
 
         // The pause between walks is the whole point of roaming, and it is also
@@ -711,19 +763,11 @@ impl PlacementDirector {
         if !(score < self.configuration.hold_emptiness) {
             return self.carried.clone();
         }
-        let Some(escape) = self.comfortable(situation) else {
-            return self.carried.clone();
-        };
         // Only somewhere genuinely clear, for the same reason a seat is:
         // trading one covered spot for another just paces the pet.
-        let Some(escape_score) =
-            VisualEmptiness::score(frame(escape, situation.object_size), field)
-        else {
+        let Some(ComfortPick::Clear(escape)) = self.comfortable(situation) else {
             return self.carried.clone();
         };
-        if !(escape_score >= self.configuration.hold_emptiness) {
-            return self.carried.clone();
-        }
         if !(situation.position.distance(escape) > self.configuration.minimum_travel_distance) {
             return self.carried.clone();
         }
@@ -739,15 +783,122 @@ impl PlacementDirector {
         PlacementIntent::Escape(escape)
     }
 
-    fn comfortable(&self, situation: &PetSituation) -> Option<WorldPoint> {
-        situation.world.luminance.as_ref().and_then(|field| {
-            VisualEmptiness::first_comfortable(
-                &situation.stroll_candidates,
+    /// Whether the spot the pet stands on is one it may keep. Cannot-tell
+    /// reads as no here: a stroll declined from an unjudged spot would be
+    /// declined forever, since the same field judges the candidates.
+    fn standing_clear(&self, situation: &PetSituation) -> bool {
+        situation
+            .world
+            .luminance
+            .as_ref()
+            .and_then(|field| {
+                VisualEmptiness::score(frame(situation.position, situation.object_size), field)
+            })
+            .map_or(false, |score| score >= self.configuration.hold_emptiness)
+    }
+
+    /// The roaming pick: the caller's random draws first, then a fixed sweep
+    /// of the display the pet is on. Six draws biased to the bottom of the
+    /// screen rarely land in the middle of the desktop's one clear patch, and
+    /// the sweep is what finds it. It comes second so a draw that is just as
+    /// clear keeps the walk aimless, and it draws nothing from the caller's
+    /// random stream, so what roaming does without a capture is unchanged.
+    fn comfortable(&self, situation: &PetSituation) -> Option<ComfortPick> {
+        situation.world.luminance.as_ref().map(|field| {
+            let mut points = self.reachable(situation);
+            points.extend(
+                Self::sweep(situation)
+                    .into_iter()
+                    .filter(|point| self.path_avoids_pointer(*point, situation)),
+            );
+            VisualEmptiness::most_comfortable(
+                &points,
                 situation.object_size,
                 field,
                 self.configuration.hold_emptiness,
             )
         })
+    }
+
+    /// Whether the glance has gone on long enough for a stroll to end it.
+    fn is_bored(&self, situation: &PetSituation) -> bool {
+        self.watching_since
+            .map_or(false, |since| situation.timestamp - since >= GLANCE_PATIENCE)
+    }
+
+    /// The caller's draws whose walk does not run into the cursor.
+    fn reachable(&self, situation: &PetSituation) -> Vec<WorldPoint> {
+        situation
+            .stroll_candidates
+            .iter()
+            .copied()
+            .filter(|point| self.path_avoids_pointer(*point, situation))
+            .collect()
+    }
+
+    /// Whether the straight walk to `point` stays outside the pointer
+    /// clearance. A seat past the cursor is as unreachable as a seat under it:
+    /// the glance band stops the pet on the way, the cursor then owns it, and
+    /// once released it picks the same seat and walks into the cursor again.
+    /// A pet already inside the band is only refused walks that bring it
+    /// closer, so it can always leave. A walk that ends a glance the pet has
+    /// tired of has to end well clear of the cursor -- `BORED_DISTANCE_SCALE`
+    /// clearances away -- or it is a shuffle, not a leaving.
+    fn path_avoids_pointer(&self, point: WorldPoint, situation: &PetSituation) -> bool {
+        let Some(pointer) = situation.pointer_position else { return true };
+        if !(situation.pointer_clearance > 0.0) {
+            return true;
+        }
+        if self.is_bored(situation)
+            && pointer.distance(point) < situation.pointer_clearance * BORED_DISTANCE_SCALE
+        {
+            return false;
+        }
+        let from = situation.position;
+        let dx = point.x - from.x;
+        let dy = point.y - from.y;
+        let length_squared = dx * dx + dy * dy;
+        let t = if length_squared > 0.0 {
+            clamped(((pointer.x - from.x) * dx + (pointer.y - from.y) * dy) / length_squared, 0.0, 1.0)
+        } else {
+            0.0
+        };
+        let closest_x = from.x + dx * t;
+        let closest_y = from.y + dy * t;
+        let closest = ((pointer.x - closest_x) * (pointer.x - closest_x)
+            + (pointer.y - closest_y) * (pointer.y - closest_y))
+            .sqrt();
+        !(closest < swift_min(situation.pointer_clearance, pointer.distance(from)))
+    }
+
+    /// Bottom row first, matching the bias of the random draws.
+    fn sweep(situation: &PetSituation) -> Vec<WorldPoint> {
+        const COLUMNS: usize = 7;
+        const ROWS: usize = 5;
+        let position = situation.position;
+        let Some(display) = situation
+            .world
+            .display_containing(position)
+            .or_else(|| situation.world.nearest_display(position))
+        else {
+            return Vec::new();
+        };
+        let safe = display.visible_frame.inset_by(
+            situation.object_size.width / 2.0 + 18.0,
+            situation.object_size.height / 2.0 + 12.0,
+        );
+        if safe.is_empty() {
+            return Vec::new();
+        }
+        let mut points = Vec::with_capacity(COLUMNS * ROWS);
+        for row in (0..ROWS).rev() {
+            let y = safe.min_y() + safe.size.height * (row as f64 + 0.5) / ROWS as f64;
+            for column in 0..COLUMNS {
+                let x = safe.min_x() + safe.size.width * (column as f64 + 0.5) / COLUMNS as f64;
+                points.push(WorldPoint::new(x, y));
+            }
+        }
+        points
     }
 }
 
