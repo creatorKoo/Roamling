@@ -1319,6 +1319,7 @@ pub struct FfiTickInput {
     pub did_query_focus: bool,
     pub queried_focus: Option<FfiFocus>,
     pub pointer_is_over_pet: bool,
+    pub affection_held: bool,
 }
 
 #[derive(uniffi::Record)]
@@ -1545,6 +1546,7 @@ impl PetLoop {
             did_query_focus: input.did_query_focus,
             queried_focus: focus,
             pointer_is_over_pet: input.pointer_is_over_pet,
+            affection_held: input.affection_held,
         });
         FfiTickOutput {
             delta_time: answer.delta_time,

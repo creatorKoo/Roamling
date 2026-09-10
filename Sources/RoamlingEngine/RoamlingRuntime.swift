@@ -57,6 +57,8 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     /// What the pet is doing and where it is standing. Read-only, and read by
     /// tests -- the app watches the pet through the overlay instead.
     public var behaviorState: BehaviorState { core.state }
+    /// The picture the last tick chose, for tests that need to see it.
+    public private(set) var currentCapability: PetCapability?
     public var position: WorldPoint { core.position }
     /// How many random numbers the pet has spent. Read only by the recorded
     /// session, where it is the fastest way to see two runs part company.
@@ -381,8 +383,10 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             focusAuthorized: focusAuthorized,
             didQueryFocus: didQueryFocus,
             queriedFocus: queriedFocus,
-            pointerIsOverPet: overlay.containsPet(atWorldPoint: pointer.position)
+            pointerIsOverPet: overlay.containsPet(atWorldPoint: pointer.position),
+            affectionHeld: pointer.affectionHeld
         )
+        currentCapability = output.capability
 
         for line in output.diagnostics {
             record(line.category, line.message, at: now)

@@ -1036,7 +1036,8 @@ public final class RustPetLoop {
         focusAuthorized: Bool,
         didQueryFocus: Bool,
         queriedFocus: FocusSnapshot?,
-        pointerIsOverPet: Bool
+        pointerIsOverPet: Bool,
+        affectionHeld: Bool
     ) -> Tick {
         let output = handle.finishTick(input: FfiTickInput(
             now: now,
@@ -1048,7 +1049,8 @@ public final class RustPetLoop {
             focusAuthorized: focusAuthorized,
             didQueryFocus: didQueryFocus,
             queriedFocus: queriedFocus.map(RustCore.ffiFocus),
-            pointerIsOverPet: pointerIsOverPet
+            pointerIsOverPet: pointerIsOverPet,
+            affectionHeld: affectionHeld
         ))
         return Tick(
             deltaTime: output.deltaTime,

@@ -58,6 +58,7 @@ pub fn capability_for(
     state: BehaviorState,
     velocity_dx: f64,
     is_caught_transition_active: bool,
+    is_petted: bool,
 ) -> PetCapability {
     match state {
         BehaviorState::Idle => PetCapability::Idle,
@@ -72,6 +73,10 @@ pub fn capability_for(
             }
         }
         BehaviorState::Sit => PetCapability::Sit,
+        // Being petted is the glance's state wearing Petdex's `waiting` row --
+        // sat down, looking up, head tilted. The pet has stopped for the
+        // cursor either way, and only the reason differs.
+        BehaviorState::LookAtPointer if is_petted => PetCapability::Paw,
         BehaviorState::LookAtPointer => PetCapability::Gaze,
         BehaviorState::Observe => PetCapability::Observe,
         BehaviorState::Spark => PetCapability::Spark,

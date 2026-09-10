@@ -51,11 +51,20 @@ public struct PointerSnapshot: Codable, Hashable, Sendable {
     public let position: WorldPoint
     public let timestamp: TimeInterval
     public let primaryButtonDown: Bool
+    /// The affection key is held (left Command on macOS). See `TickInput`
+    /// in the Rust core for what it changes.
+    public let affectionHeld: Bool
 
-    public init(position: WorldPoint, timestamp: TimeInterval, primaryButtonDown: Bool) {
+    public init(
+        position: WorldPoint,
+        timestamp: TimeInterval,
+        primaryButtonDown: Bool,
+        affectionHeld: Bool = false
+    ) {
         self.position = position
         self.timestamp = timestamp
         self.primaryButtonDown = primaryButtonDown
+        self.affectionHeld = affectionHeld
     }
 }
 

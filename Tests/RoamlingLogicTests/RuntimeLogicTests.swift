@@ -76,6 +76,83 @@ func runtimeLogicTests() -> [LogicTest] {
             }
         },
 
+        LogicTest(name: "the affection key turns an approach into a sit") {
+            try MainActor.assumeIsolated {
+                let clock = TestClock(startingAt: 1_000)
+                let platform = FakePlatform(
+                    display: DisplaySnapshot(
+                        id: "test-display",
+                        name: "Test",
+                        frame: WorldRect(x: 0, y: 0, width: 1440, height: 900),
+                        visibleFrame: WorldRect(x: 0, y: 25, width: 1440, height: 875),
+                        scale: 2
+                    ),
+                    worldTop: 900
+                )
+                let suite = try makeTestDefaults()
+                defer { suite.discard() }
+                let runtime = RoamlingRuntime(
+                    services: platform.services,
+                    defaults: suite.defaults,
+                    catalog: PetCatalog(roots: []),
+                    clock: clock.read
+                )
+                platform.pointer.position = runtime.position + WorldVector(dx: 600, dy: 0)
+                for _ in 0..<30 {
+                    clock.advance(1.0 / 30)
+                    runtime.tick()
+                }
+
+                // Inside the evade radius, with the key held: no stepping
+                // away, but no petting either -- the hand is beside the pet,
+                // so it watches as it would any cursor.
+                platform.pointer.affectionHeld = true
+                platform.pointer.position = runtime.position + WorldVector(dx: 80, dy: 0)
+                let start = runtime.position
+                var watched = false
+                for _ in 0..<60 {
+                    clock.advance(1.0 / 30)
+                    runtime.tick()
+                    try expect(
+                        runtime.behaviorState != .evadePointer,
+                        "the pet stepped away from a hand"
+                    )
+                    try expect(runtime.currentCapability != .paw, "petted from 80 points away")
+                    if runtime.behaviorState == .lookAtPointer, runtime.currentCapability == .gaze {
+                        watched = true
+                    }
+                }
+                try expect(watched, "the pet never watched the hand, state \(runtime.behaviorState)")
+
+                // The hand on the pet: it sits up for it.
+                platform.pointer.position = runtime.position
+                var sat = false
+                for _ in 0..<60 {
+                    clock.advance(1.0 / 30)
+                    runtime.tick()
+                    try expect(runtime.behaviorState != .evadePointer, "stepped away from a hand")
+                    if runtime.behaviorState == .lookAtPointer, runtime.currentCapability == .paw {
+                        sat = true
+                    }
+                }
+                try expect(sat, "the pet never sat for the hand, state \(runtime.behaviorState)")
+                try expect(
+                    runtime.position.distance(to: start) < 1,
+                    "the pet moved \(runtime.position.distance(to: start)) points while being petted"
+                )
+
+                // Key released with the cursor still close: back to its old self.
+                platform.pointer.affectionHeld = false
+                platform.pointer.position = runtime.position + WorldVector(dx: 80, dy: 0)
+                var stepped = false
+                for _ in 0..<30 {
+                    clock.advance(1.0 / 30)
+                    runtime.tick()
+                    if runtime.behaviorState == .evadePointer { stepped = true }
+                }
+                try expect(stepped, "the pet kept sitting after the hand was gone")
+            }
+        },
         LogicTest(name: "a pointer beside the pet keeps it awake however long the desk is idle") {
             try MainActor.assumeIsolated {
                 let clock = TestClock(startingAt: 1_000)
@@ -225,12 +302,14 @@ final class FakePointerProvider: PointerProviding {
     /// The drop path only runs when the button comes back up, so a trace that
     /// catches the pet has to be able to put it down.
     var primaryButtonDown = false
+    var affectionHeld = false
 
     func currentPointer(at timestamp: TimeInterval) -> PointerSnapshot {
         PointerSnapshot(
             position: position,
             timestamp: timestamp,
-            primaryButtonDown: primaryButtonDown
+            primaryButtonDown: primaryButtonDown,
+            affectionHeld: affectionHeld
         )
     }
 }

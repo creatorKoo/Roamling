@@ -176,6 +176,17 @@ idle / wander ─────────── 170px 이내 ──▶ lookAtPoi
 된다. 100px 안쪽의 회피와 잡기는 예외 없이 그대로 이긴다 — 둘 다 펫을 그 자리에
 버려두지 않기 때문이다. 근거는 `docs/placement.md` 3.2.2.
 
+**애정 키 (2026-09-10).** 왼쪽 ⌘(macOS) / 왼쪽 Ctrl(Windows)을 누른 채 커서가 170px 안에
+오면 위 표의 회피가 전부 꺼진다. 근접 등급이 무엇이든 `lookAtPointer`로 가서 평소처럼
+꼬리를 흔들고(`gaze`), **커서가 펫 위에 올라오면** `paw`(row 6 `waiting` — 앉아서 위
+올려다보며 고개 갸웃)를 입는다 — 상태는 응시 그대로고 옷만 다르다
+(`capability_for`의 `is_petted`). 배치는 커서 소유로 보아 전부 `None`이고, 응시 인내
+(`docs/placement.md` 3.2.5)도 세지 않는다 — 쓰다듬는 손은 지겨워지는 대상이 아니다. 잡기는
+실제 근접 판정을 그대로 읽으므로 앉은 펫도 집어 올릴 수 있다. 키를 떼면 그 tick부터 커서
+거리에 따라 평소대로 회피한다. 키 상태는 셸이 읽는다 — macOS는
+`CGEventSource.keyState`(권한 불필요, `NSEvent.modifierFlags`는 좌우를 구분 못 한다), Windows는
+`GetAsyncKeyState(VK_LCONTROL)`.
+
 끌지 않고 그냥 클릭하면 `caught → dragged`를 한 바퀴 돌린 뒤 `dropped`로 끝난다. 즉
 **클릭도 드래그도 row 6 → row 4 순서로 같은 그림을 본다.**
 

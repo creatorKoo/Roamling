@@ -15,7 +15,7 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::System::SystemInformation::GetTickCount;
 use windows::Win32::UI::HiDpi::{GetDpiForMonitor, MDT_EFFECTIVE_DPI};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, GetLastInputInfo, LASTINPUTINFO, VK_LBUTTON,
+    GetAsyncKeyState, GetLastInputInfo, LASTINPUTINFO, VK_LBUTTON, VK_LCONTROL,
 };
 use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
 
@@ -137,6 +137,12 @@ pub fn primary_button_down() -> bool {
     // The high bit is "currently down"; the low bit is "pressed since last
     // call" and would make the runtime see a click the user already released.
     unsafe { (GetAsyncKeyState(VK_LBUTTON.0 as i32) as u16 & 0x8000) != 0 }
+}
+
+/// The affection key: left Control, the Windows stand-in for the Mac's left
+/// Command. Held, a cursor coming close is a hand rather than a threat.
+pub fn affection_held() -> bool {
+    unsafe { (GetAsyncKeyState(VK_LCONTROL.0 as i32) as u16 & 0x8000) != 0 }
 }
 
 /// Seconds since the last keyboard or mouse input, machine-wide.

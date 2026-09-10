@@ -548,6 +548,7 @@ fn tick(hwnd: HWND, app: &mut App) {
         // Only the shell knows how big the pet is once the panel has scaled it.
         pointer_is_over_pet: (pointer.x - position.x).abs() <= half_width
             && (pointer.y - position.y).abs() <= half_height,
+        affection_held: platform::affection_held(),
     });
 
     if output.state != app.last_state {

@@ -108,6 +108,12 @@ pub struct TickInput {
     /// Whether the cursor is inside the pet's hit region. Only the platform
     /// knows how big that is once the panel has scaled it.
     pub pointer_is_over_pet: bool,
+    /// The user is holding the affection key -- left Command on macOS, left
+    /// Control on Windows. A cursor that comes close while it is held is a
+    /// hand, not a threat: the pet watches it instead of stepping away, and
+    /// once the hand is on it, sits up for it. Catching still works, since a
+    /// hand can also pick the pet up.
+    pub affection_held: bool,
 }
 
 /// A capture the runtime would like, near a region it cares about. The caller
@@ -194,6 +200,8 @@ pub struct PetRuntime {
     /// The current walk is one the pet owes the user: it is standing on their
     /// work and leaving. Cleared as soon as the route is gone, however it went.
     escape_route_active: bool,
+    /// The affection key is held and the cursor is on the pet: see `TickInput`.
+    is_petted: bool,
     rest_destination: Option<RestDestination>,
     caught_transition_duration: f64,
     dragged_cycle_duration: f64,
@@ -238,6 +246,7 @@ impl PetRuntime {
             last_pointer_decision: None,
             is_evade_transitioning: false,
             escape_route_active: false,
+            is_petted: false,
             rest_destination: None,
             caught_transition_duration: 0.0,
             dragged_cycle_duration: 0.4,
@@ -481,6 +490,14 @@ impl PetRuntime {
             .pointer_model
             .evaluate(input.pointer, self.movement.position(), now);
         self.last_pointer_decision = Some(decision);
+        // Under the affection key every close approach reads as the glance:
+        // the pet stops and looks, and never evades. The catch below still
+        // reads the real decision, so the hand can still pick it up.
+        let is_adored = input.affection_held && decision.proximity != PointerProximity::Far;
+        // Only a hand actually on the pet is petting it. Beside it, the pet
+        // just watches as it would any cursor -- minus the stepping away.
+        self.is_petted = is_adored && input.pointer_is_over_pet;
+        let proximity = if is_adored { PointerProximity::Watching } else { decision.proximity };
 
         if !self.is_click_reaction_pending
             && decision.should_arm_catch()
@@ -498,7 +515,7 @@ impl PetRuntime {
             // something else owns the pet, so the seat verdict is never stale
             // by the time placement is allowed to act on it.
             let was_travelling = self.placement.is_travelling();
-            let situation = self.make_situation(now, input, decision.proximity, catch_is_armed);
+            let situation = self.make_situation(now, input, proximity, is_adored, catch_is_armed);
             let intent = self.placement.decide(&situation);
             // Arriving is an event, and this is where it happens: the director
             // stops travelling on the tick it decides the walk is over, whether
@@ -551,7 +568,7 @@ impl PetRuntime {
                 self.apply_intent(&intent, now, delta_time);
             } else if self.update_rest_lifecycle(
                 input.user_idle_duration,
-                decision.proximity,
+                proximity,
                 input.pointer,
                 intent == PlacementIntent::SleepInPlace,
                 now,
@@ -562,12 +579,12 @@ impl PetRuntime {
                 // Landing. The cursor is only where it is because the user put
                 // the pet there, so the pet finishes the animation first.
                 self.apply_intent(&intent, now, delta_time);
-            } else if self.is_pointer_avoidance_enabled
-                && !self.walk_outranks_glance(&intent, decision.proximity)
+            } else if is_adored
+                || (self.is_pointer_avoidance_enabled
+                    && !self.walk_outranks_glance(&intent, proximity))
             {
-                self.behavior
-                    .handle(BehaviorInput::Pointer(decision.proximity), now);
-                match decision.proximity {
+                self.behavior.handle(BehaviorInput::Pointer(proximity), now);
+                match proximity {
                     PointerProximity::SlowEvade | PointerProximity::FastEvade => {
                         self.apply_evade(decision.escape_velocity, delta_time, now);
                     }
@@ -727,6 +744,7 @@ impl PetRuntime {
             self.behavior.state(),
             self.movement.velocity().dx,
             now < self.caught_animation_until,
+            self.is_petted,
         )
     }
 
@@ -808,6 +826,7 @@ impl PetRuntime {
         now: f64,
         input: &TickInput,
         proximity: PointerProximity,
+        is_adored: bool,
         catch_is_armed: bool,
     ) -> PetSituation {
         let pointer = input.pointer;
@@ -864,7 +883,10 @@ impl PetRuntime {
                 0.0
             },
             walking_speed: self.tuning.walking_speed,
+            // Being petted owns the pet outright, and is not a glance: a
+            // glance is something the pet tires of, and this is not.
             is_pointer_owned: catch_is_armed
+                || is_adored
                 || matches!(
                     self.behavior.state(),
                     BehaviorState::Caught | BehaviorState::Dragged | BehaviorState::EvadePointer
@@ -872,7 +894,8 @@ impl PetRuntime {
                 || (self.is_pointer_avoidance_enabled
                     && proximity != PointerProximity::Far
                     && proximity != PointerProximity::Watching),
-            is_pointer_watching: self.is_pointer_avoidance_enabled
+            is_pointer_watching: !is_adored
+                && self.is_pointer_avoidance_enabled
                 && (proximity == PointerProximity::Watching
                     || self.behavior.state() == BehaviorState::LookAtPointer),
             is_evading: self.is_evade_transitioning,
