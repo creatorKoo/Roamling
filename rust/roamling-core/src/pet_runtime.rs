@@ -278,6 +278,39 @@ impl PetRuntime {
         self.activity.active_source_id()
     }
 
+    /// Whether the pet still owes the user the reaction the last event asked
+    /// for. True from the moment a located event arrives until the pet reaches
+    /// the seat it chose, so it is also the honest answer to "is the pet still
+    /// walking over there" -- which is what the working-app source needs, and
+    /// cannot work out from the two facts it is given.
+    pub fn has_arrival_reaction(&self) -> bool {
+        self.activity.has_arrival_reaction()
+    }
+
+    /// The event the pet last acted on. With `has_arrival_reaction` it says
+    /// whether a particular event has reached the pet *and* been worn, which
+    /// is what the working-app source times its greeting hop from.
+    pub fn last_dispatched_activity_id(&self) -> Option<&str> {
+        self.activity.last_dispatched_id()
+    }
+
+    /// Sitting, looking for a place to sleep, or asleep: the test the director
+    /// applies before it drops an event that does not wake the pet. The
+    /// working-app source reads the same test to hold its seat news back
+    /// rather than have it dropped.
+    pub fn is_resting(&self) -> bool {
+        self.behavior.state().is_resting()
+    }
+
+    /// Whether an agent is on duty: the director's own test for keeping the
+    /// desk from the pet. The working-app source reads it when the user
+    /// leaves and says no wave while it holds -- a wave passed over stayed in
+    /// the director until the end behind it, and an agent finishing meanwhile
+    /// handed it to the pet late.
+    pub fn agent_on_duty(&self, now: f64) -> bool {
+        self.activity.agent_on_duty(now)
+    }
+
     pub fn draws(&self) -> u64 {
         self.rng.draws()
     }
@@ -525,6 +558,7 @@ impl PetRuntime {
             let did_arrive = was_travelling
                 && !self.placement.is_travelling()
                 && self.activity.is_watching_window();
+            let mut wore_arrival_reaction = false;
 
             self.record(
                 "capture",
@@ -565,7 +599,7 @@ impl PetRuntime {
                 // Stepping out from under the user's text is the one thing that
                 // outranks a nap, and the only reason placement may end one.
                 self.cancel_rest_for_activity(now);
-                self.apply_intent(&intent, now, delta_time);
+                wore_arrival_reaction = self.apply_intent(&intent, now, delta_time);
             } else if self.update_rest_lifecycle(
                 input.user_idle_duration,
                 proximity,
@@ -578,7 +612,7 @@ impl PetRuntime {
             } else if now < self.landing_until {
                 // Landing. The cursor is only where it is because the user put
                 // the pet there, so the pet finishes the animation first.
-                self.apply_intent(&intent, now, delta_time);
+                wore_arrival_reaction = self.apply_intent(&intent, now, delta_time);
             } else if is_adored
                 || (self.is_pointer_avoidance_enabled
                     && !self.walk_outranks_glance(&intent, proximity))
@@ -594,21 +628,35 @@ impl PetRuntime {
                         self.movement.update(delta_time);
                         self.next_wander_at = swift_max(self.next_wander_at, now + 0.8);
                     }
-                    PointerProximity::Far => self.apply_intent(&intent, now, delta_time),
+                    PointerProximity::Far => {
+                        wore_arrival_reaction = self.apply_intent(&intent, now, delta_time);
+                    }
                 }
             } else {
-                self.apply_intent(&intent, now, delta_time);
+                wore_arrival_reaction = self.apply_intent(&intent, now, delta_time);
             }
 
             // After the move, so a seat taken this tick is where the reaction is
             // worn. The arrival reaction falls back to `observe` when nothing is
             // owed, which is what ends the walk: a pet that has arrived is
             // watching, not still walking.
+            //
+            // Skipped when holding the seat already wore it this tick. Both run
+            // on the tick a walk ends, and the second call finds nothing left
+            // owed, so it fell back to whatever lasting condition the seat
+            // carries: `observe` after `ActivityStarted`, which replaced the
+            // greeting hop in the same tick it was played, and a silent
+            // re-apply of `work` or `paw` after the other two. The visible loss
+            // was the hop -- nobody ever saw a pet arrive and greet.
             if did_arrive {
-                let effects = self
-                    .activity
-                    .deliver_arrival_reaction(self.behavior.state().is_resting(), now);
-                self.apply_activity(effects, now);
+                if !wore_arrival_reaction {
+                    let effects = self
+                        .activity
+                        .deliver_arrival_reaction(self.behavior.state().is_resting(), now);
+                    self.apply_activity(effects, now);
+                }
+                // Outside the guard: the pet has stopped somewhere new either
+                // way, and that is what is worth writing down.
                 self.persist_position = true;
             }
         }
@@ -924,31 +972,40 @@ impl PetRuntime {
     }
 
     /// Carries out the director's decision. Nothing here re-decides.
-    fn apply_intent(&mut self, intent: &PlacementIntent, now: f64, delta_time: f64) {
+    ///
+    /// Returns whether it spent the arrival reaction, because the caller has a
+    /// second chance to deliver one and delivering twice is how a greeting hop
+    /// gets replaced by the `observe` fallback on the tick it was played.
+    fn apply_intent(&mut self, intent: &PlacementIntent, now: f64, delta_time: f64) -> bool {
         match intent {
             PlacementIntent::Travel(destination, _) => {
                 let point = destination.point;
-                self.travel_to_seat(point, now, delta_time);
+                self.travel_to_seat(point, now, delta_time)
             }
-            PlacementIntent::Stroll(point) => self.begin_stroll(*point, now, delta_time),
+            PlacementIntent::Stroll(point) => {
+                self.begin_stroll(*point, now, delta_time);
+                false
+            }
             PlacementIntent::Escape(point) => {
                 self.begin_stroll(*point, now, delta_time);
                 self.escape_route_active = self.movement.has_route();
+                false
             }
             // `SleepInPlace` lands here when rest declined to start -- the
             // pointer came close, or the state machine was mid-transition. The
             // seat is kept either way.
             PlacementIntent::Hold | PlacementIntent::SleepInPlace | PlacementIntent::None => {
                 if self.activity.is_watching_window() {
-                    self.hold_seat(now, delta_time);
+                    self.hold_seat(now, delta_time)
                 } else {
                     self.update_roaming(now, delta_time);
+                    false
                 }
             }
         }
     }
 
-    fn travel_to_seat(&mut self, destination: WorldPoint, now: f64, delta_time: f64) {
+    fn travel_to_seat(&mut self, destination: WorldPoint, now: f64, delta_time: f64) -> bool {
         if !self.movement.has_route() || self.movement.destination() != Some(destination) {
             let route = DisplayTopology::new(self.displays.clone())
                 .route(self.movement.position(), destination);
@@ -957,8 +1014,7 @@ impl PetRuntime {
                 // watches from where it stands and the seat is judged there.
                 let owner = self.activity.active_source_id().map(str::to_owned);
                 self.placement.settle_in_place(owner.as_deref(), now);
-                self.hold_seat(now, delta_time);
-                return;
+                return self.hold_seat(now, delta_time);
             }
             self.movement.set_route(route.waypoints);
         }
@@ -968,11 +1024,12 @@ impl PetRuntime {
         self.movement.set_maximum_speed(self.tuning.walking_speed);
         self.next_wander_at = f64::INFINITY;
         self.movement.update(delta_time);
+        false
     }
 
     /// A parked pet keeps its seat. All that is left is wearing the reaction
-    /// the current event asked for.
-    fn hold_seat(&mut self, now: f64, delta_time: f64) {
+    /// the current event asked for. Returns whether it wore one.
+    fn hold_seat(&mut self, now: f64, delta_time: f64) -> bool {
         self.movement.cancel_route(false);
         self.movement.set_maximum_speed(self.tuning.walking_speed);
         self.movement.update(delta_time);
@@ -981,7 +1038,7 @@ impl PetRuntime {
                 .activity
                 .deliver_arrival_reaction(self.behavior.state().is_resting(), now);
             self.apply_activity(effects, now);
-            return;
+            return true;
         }
         match self.behavior.state() {
             BehaviorState::Observe
@@ -1003,6 +1060,7 @@ impl PetRuntime {
                 self.apply_activity(effects, now);
             }
         }
+        false
     }
 
     fn update_rest_lifecycle(

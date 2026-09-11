@@ -317,8 +317,13 @@ final class FakePointerProvider: PointerProviding {
 @MainActor
 final class FakeUserIdleProvider: UserIdleProviding {
     var duration: TimeInterval = 0
+    /// Since the last keystroke. Held apart from `duration` so a test can put
+    /// the user's hands on the keyboard without also waking the idle rules.
+    var keyboardDuration: TimeInterval = 3_600
 
     func idleDuration(at timestamp: TimeInterval) -> TimeInterval { duration }
+
+    func keyboardIdleDuration(at timestamp: TimeInterval) -> TimeInterval { keyboardDuration }
 }
 
 @MainActor
@@ -336,9 +341,15 @@ final class FakeCaptureProvider: CaptureProviding {
 final class FakeWindowProvider: WindowProviding {
     var windows: [WindowSnapshot] = []
     var hint: LocationHint?
+    /// Nil is "this app is in front", which is what the recorded session sees
+    /// for its whole forty seconds.
+    var frontmost: String?
+    var displayNames: [String: String] = [:]
 
     func currentWindows() -> [WindowSnapshot] { windows }
     func currentActivityLocationHint() -> LocationHint? { hint }
+    func frontmostApplicationIdentifier() -> String? { frontmost }
+    func applicationDisplayName(for identifier: String) -> String? { displayNames[identifier] }
 }
 
 @MainActor
@@ -414,6 +425,9 @@ final class TestClock: @unchecked Sendable {
 @MainActor
 struct RuntimeHarness {
     let runtime: RoamlingRuntime
+    /// Exposed so a test can say what is in front of the user, which is the
+    /// only thing the menu's list of work apps is built from.
+    let platform: FakePlatform
     private let defaults: TestDefaults
 
     init() throws {
@@ -424,7 +438,7 @@ struct RuntimeHarness {
             visibleFrame: WorldRect(x: 0, y: 25, width: 1440, height: 850),
             scale: 2
         )
-        let platform = FakePlatform(display: display, worldTop: 900)
+        platform = FakePlatform(display: display, worldTop: 900)
         defaults = try makeTestDefaults()
         runtime = RoamlingRuntime(
             services: platform.services,

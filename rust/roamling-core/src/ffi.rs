@@ -333,15 +333,16 @@ pub fn evaluate_seat(
 // ------------------------------------------------------- attention and reactions
 
 use crate::activity::{
-    CompanionEvent, CompanionEventKind, CompanionReaction, ReactingBehavior, UserContext,
+    ActivitySourceType, CompanionEvent, CompanionEventKind, CompanionReaction, ReactingBehavior,
+    UserContext,
 };
 use crate::attention::{AttentionModel, ReactionPolicy};
 use std::sync::Mutex;
 
 /// Enums cross as indices rather than as uniffi enums: the Swift side already
 /// has its own spellings of these, and mapping two names is cheaper than
-/// keeping three in step.
-const KINDS: [CompanionEventKind; 11] = [
+/// keeping three in step. New kinds go on the end: an index is a contract.
+const KINDS: [CompanionEventKind; 12] = [
     CompanionEventKind::ActivityStarted,
     CompanionEventKind::ActivityEnded,
     CompanionEventKind::Positive,
@@ -353,6 +354,7 @@ const KINDS: [CompanionEventKind; 11] = [
     CompanionEventKind::HighIntensity,
     CompanionEventKind::Calm,
     CompanionEventKind::Idle,
+    CompanionEventKind::Present,
 ];
 
 const CONTEXTS: [UserContext; 5] = [
@@ -363,10 +365,22 @@ const CONTEXTS: [UserContext; 5] = [
     UserContext::Idle,
 ];
 
+/// Swift's `ActivitySourceType` in declaration order. `custom` crosses without
+/// its name, which no rule reads.
+const SOURCE_TYPES: [ActivitySourceType; 5] = [
+    ActivitySourceType::Agent,
+    ActivitySourceType::Game,
+    ActivitySourceType::Media,
+    ActivitySourceType::System,
+    ActivitySourceType::Custom,
+];
+
 #[derive(uniffi::Record)]
 pub struct FfiActivityEvent {
     pub id: String,
     pub source_id: String,
+    /// An index into `SOURCE_TYPES`.
+    pub source_type: u8,
     pub timestamp: f64,
     pub kind: u8,
     pub intensity: f64,
@@ -390,6 +404,39 @@ impl From<&FfiActivityEvent> for CompanionEvent {
             }),
         )
         .with_context(value.context.map(|index| CONTEXTS[index as usize]))
+        .with_source_type(SOURCE_TYPES[value.source_type as usize])
+    }
+}
+
+/// The way back out, for the one source that is made here rather than
+/// delivered: `FocusActivity` builds events instead of consuming them.
+impl From<CompanionEvent> for FfiActivityEvent {
+    fn from(value: CompanionEvent) -> Self {
+        FfiActivityEvent {
+            id: value.id,
+            source_id: value.source_id,
+            source_type: SOURCE_TYPES
+                .iter()
+                .position(|candidate| *candidate == value.source_type)
+                .unwrap_or(0) as u8,
+            timestamp: value.timestamp,
+            kind: KINDS
+                .iter()
+                .position(|candidate| *candidate == value.kind)
+                .unwrap_or(0) as u8,
+            intensity: value.intensity,
+            hint_confidence: value.location_hint.as_ref().map(|hint| hint.confidence),
+            hint_region: value
+                .location_hint
+                .and_then(|hint| hint.approximate_region)
+                .map(FfiRect::from),
+            context: value.context.map(|context| {
+                CONTEXTS
+                    .iter()
+                    .position(|candidate| *candidate == context)
+                    .unwrap_or(4) as u8
+            }),
+        }
     }
 }
 
@@ -1277,6 +1324,23 @@ impl ActivityWatch {
                 .unwrap_or(0) as u8
         })
     }
+
+    /// The event the director last acted on. Read by the switch-over test.
+    pub fn last_dispatched_id(&self) -> Option<String> {
+        self.inner.lock().unwrap().last_dispatched_id().map(str::to_owned)
+    }
+
+    /// Whether nothing the desk says may reach the pet now. Read by the
+    /// switch-over test, which holds both directors to that by outcome.
+    pub fn agent_on_duty(&self, timestamp: f64) -> bool {
+        self.inner.lock().unwrap().agent_on_duty(timestamp)
+    }
+
+    /// The event queued for the pet once it is free. Read by the switch-over
+    /// test.
+    pub fn pending_event_id(&self) -> Option<String> {
+        self.inner.lock().unwrap().pending_event_id().map(str::to_owned)
+    }
 }
 
 /// Whether an event without a window of its own is worth asking the platform
@@ -1285,6 +1349,68 @@ impl ActivityWatch {
 #[uniffi::export]
 pub fn activity_wants_window_hint(kind: u8) -> bool {
     crate::activity_director::wants_window_hint(KINDS[kind as usize])
+}
+
+// --------------------------------------------------------- the app in front
+
+use crate::focus_activity::FocusActivity;
+
+/// The desk itself as an activity source: which app is in front and how long
+/// since a keystroke, turned into the same events an agent emits.
+///
+/// The shell samples; every judgement about what that sample means is inside.
+#[derive(uniffi::Object)]
+pub struct FocusWatch {
+    inner: Mutex<FocusActivity>,
+}
+
+#[uniffi::export]
+impl FocusWatch {
+    #[uniffi::constructor]
+    pub fn new() -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self { inner: Mutex::new(FocusActivity::new()) })
+    }
+
+    /// `app_id` is nil when this app itself is in front, or when the platform
+    /// cannot name what is -- which means "unknown", never "the user left".
+    /// `dispatched_event` and `arrival_pending` are
+    /// `PetLoop.last_dispatched_activity_id` and `PetLoop.has_arrival_reaction`:
+    /// between them they say whether its greeting has reached the pet and been
+    /// worn. `pet_resting` is `PetLoop.is_resting`: seat news is held back
+    /// while it is true, because the director would drop it. `agent_on_duty`
+    /// is `PetLoop.agent_on_duty`: a long stretch left while it is true ends
+    /// without a wave.
+    #[allow(clippy::too_many_arguments)]
+    pub fn observe(
+        &self,
+        app_id: Option<String>,
+        watched: bool,
+        seconds_since_key: f64,
+        dispatched_event: Option<String>,
+        arrival_pending: bool,
+        pet_resting: bool,
+        agent_on_duty: bool,
+        now: f64,
+    ) -> Vec<FfiActivityEvent> {
+        self.inner.lock().unwrap().observe(
+            app_id.as_deref(),
+            watched,
+            seconds_since_key,
+            dispatched_event.as_deref(),
+            arrival_pending,
+            pet_resting,
+            agent_on_duty,
+            now,
+        )
+            .into_iter()
+            .map(FfiActivityEvent::from)
+            .collect()
+    }
+
+    /// The apps the menu offers, most recent first.
+    pub fn recent_apps(&self) -> Vec<String> {
+        self.inner.lock().unwrap().recent_apps()
+    }
 }
 
 // ------------------------------------------------------------- the tick loop
@@ -1635,6 +1761,32 @@ impl PetLoop {
 
     pub fn active_source_id(&self) -> Option<String> {
         self.inner.lock().unwrap().active_source_id().map(str::to_owned)
+    }
+
+    /// Whether the pet still owes the reaction it was last told to wear. The
+    /// working-app source waits for this to go false before it says anything
+    /// after a greeting, so the hop is over before the next picture lands.
+    pub fn has_arrival_reaction(&self) -> bool {
+        self.inner.lock().unwrap().has_arrival_reaction()
+    }
+
+    /// The id of the event the pet last acted on, so the working-app source
+    /// can tell its own greeting reached the pet rather than merely went out.
+    pub fn last_dispatched_activity_id(&self) -> Option<String> {
+        self.inner.lock().unwrap().last_dispatched_activity_id().map(str::to_owned)
+    }
+
+    /// Whether the pet is sitting, looking for a place to sleep, or asleep --
+    /// the director's own test for dropping an event that does not wake it.
+    /// The working-app source holds its seat news back while this is true.
+    pub fn is_resting(&self) -> bool {
+        self.inner.lock().unwrap().is_resting()
+    }
+
+    /// Whether an agent is on duty -- the director's own test for keeping the
+    /// desk from the pet. The working-app source says no wave while it holds.
+    pub fn agent_on_duty(&self, now: f64) -> bool {
+        self.inner.lock().unwrap().agent_on_duty(now)
     }
 
     /// How many random numbers the pet has spent. Only the recorded-session

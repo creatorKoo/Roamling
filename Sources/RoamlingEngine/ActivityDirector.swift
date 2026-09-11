@@ -61,6 +61,7 @@ public extension ActivityDirecting {
     /// so the rule lives with the decision and the call stays with the caller.
     static func wantsWindowHint(_ kind: CompanionEventKind) -> Bool {
         kind == .activityStarted || kind == .highIntensity || kind == .attentionRequired
+            || kind == .present
     }
 }
 
@@ -78,8 +79,14 @@ public final class SwiftActivityDirector: ActivityDirecting {
     private var reactions = ReactionPolicy()
     private var recent: [String: CompanionEvent] = [:]
     private var pending: CompanionEvent?
-    private var lastDispatchedID: String?
+    /// The event queued for the pet once it is free. Read by the switch-over
+    /// test, which counts the queued desk words it sees dropped.
+    public var pendingEventID: String? { pending?.id }
+    /// The event last acted on. Read by the switch-over test.
+    public private(set) var lastDispatchedID: String?
     private var active: String?
+    /// What kind of source `active` is. Set and cleared with it.
+    private var activeType: ActivitySourceType?
     private var window: LocationHint?
     private var heardAt: TimeInterval = 0
     private var sustained: CompanionReaction?
@@ -127,7 +134,7 @@ public final class SwiftActivityDirector: ActivityDirecting {
         }
 
         recent[event.sourceID] = event
-        guard let selected = attention.select(from: live, at: timestamp),
+        guard let selected = attention.select(from: candidates(at: timestamp), at: timestamp),
               selected.id != lastDispatchedID else { return effects }
 
         if isHeldByPointer {
@@ -167,6 +174,9 @@ public final class SwiftActivityDirector: ActivityDirecting {
         var effects: [ActivityEffect] = []
         guard isIdle, let event = pending else { return effects }
         pending = nil
+        // Queued before an agent came back on duty: dropped, not dispatched.
+        // It is still in `recent` for when the agent lets go (plan §9.6b).
+        if event.sourceType == .system, agentOnDuty(at: timestamp) { return effects }
         dispatch(
             event, isHeldByPointer: isHeldByPointer, isResting: isResting,
             randomUnit: randomUnit, at: timestamp, into: &effects
@@ -231,6 +241,14 @@ public final class SwiftActivityDirector: ActivityDirecting {
                 event, sustained: .paw, reaction: reaction ?? .paw,
                 isResting: isResting, at: timestamp, into: &effects
             )
+        case .present:
+            // Walk over and sit, wearing nothing. It is re-sent every minute
+            // and every dispatch re-arms the arrival reaction, so it can only
+            // wear what replays invisibly.
+            beginWatching(
+                event, sustained: .calm, reaction: reaction ?? .calm,
+                isResting: isResting, at: timestamp, into: &effects
+            )
         case .positive:
             if let reaction {
                 applyReaction(reaction, isResting: isResting, at: timestamp, into: &effects)
@@ -245,6 +263,7 @@ public final class SwiftActivityDirector: ActivityDirecting {
             finishTransient(event, at: timestamp)
         case .setback:
             active = event.sourceID
+            activeType = event.sourceType
             heardAt = timestamp
             sustained = .observe
             effects.append(.settleInPlace(sourceID: event.sourceID))
@@ -277,6 +296,7 @@ public final class SwiftActivityDirector: ActivityDirecting {
             window = nil
         }
         active = event.sourceID
+        activeType = event.sourceType
         heardAt = timestamp
         sustained = newSustained
         guard window != nil else {
@@ -294,15 +314,40 @@ public final class SwiftActivityDirector: ActivityDirecting {
     }
 
     private func queueNextCandidate(at timestamp: TimeInterval) {
-        guard let next = attention.select(from: live, at: timestamp) else {
+        guard let next = attention.select(from: candidates(at: timestamp), at: timestamp) else {
             pending = nil
             return
         }
         pending = next.id == lastDispatchedID ? nil : next
     }
 
+    /// What attention may choose from: every source heard lately, except that
+    /// the desk is not a candidate at all while an agent is on duty. Not a
+    /// score -- attention is untouched -- and the desk's events stay in
+    /// `recent`, so the moment the agent lets go they are the next candidate.
+    private func candidates(at timestamp: TimeInterval) -> [CompanionEvent] {
+        let agentOnDuty = agentOnDuty(at: timestamp)
+        return live.filter { !(agentOnDuty && $0.sourceType == .system) }
+    }
+
+    /// An agent heard within the age attention still counts, or one holding
+    /// the seat that has not gone silent for good. Public for the switch-over
+    /// test, which holds both directors to the rule by what they act on.
+    public func agentOnDuty(at timestamp: TimeInterval) -> Bool {
+        let maximumAge = attention.configuration.maximumEventAge
+        let heardLately = recent.values.contains {
+            $0.sourceType == .agent
+                && timestamp - $0.timestamp <= maximumAge
+                && timestamp >= $0.timestamp
+        }
+        return heardLately
+            || (activeType == .agent
+                && !ActivityLifetime.hasFallenSilent(lastEventAt: heardAt, now: timestamp))
+    }
+
     private func clearActive(at timestamp: TimeInterval, into effects: inout [ActivityEffect]) {
         active = nil
+        activeType = nil
         sustained = nil
         arrival = nil
         window = nil

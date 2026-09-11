@@ -11,6 +11,8 @@
 "menu.avoidPointer" = "Avoid Pointer";
 "menu.catchDrag" = "Catch & Drag";
 "menu.tuning" = "Behavior Settings…";
+"menu.workApps" = "Work Apps";
+"menu.workApps.none" = "No apps seen yet";
 "menu.accessibility" = "Cursor Awareness";
 "menu.openPetFolder" = "Open Pet Folder…";
 "menu.copyDiagnostics" = "Copy Diagnostics";

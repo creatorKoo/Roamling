@@ -100,6 +100,11 @@ public struct AttentionModel: Sendable {
         // quietest kind, so it sits below a tool that changes something.
         case .inspecting: base = 60
         case .activityStarted: base = 50
+        // The user at their own work with nothing to show: the lowest kind
+        // that still takes a seat. Its best, 30 + 10 + 5 + 3, is under the
+        // worst an `activityStarted` can score, so it never draws the pet away
+        // from any agent event attention can still see.
+        case .present: base = 30
         case .calm: base = 30
         case .activityEnded, .idle: base = 0
         }

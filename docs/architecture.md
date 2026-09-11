@@ -67,6 +67,17 @@ module만 추출할 수 있다. 선행 Rust/C ABI는 만들지 않는다.
 - product-specific payload는 이 module 밖으로 나가지 않으며 prompt, transcript, tool input/output
   key를 decode model에 선언하지 않는다.
 
+**agent가 아닌 activity source도 하나 있다.** 사용자가 지정한 앱에서 일할 때 반응하는
+`focus_activity.rs`(Rust core)다. 이 module에는 없는데, 훅도 transport도 payload도 없기
+때문이다 — 셸이 0.5초마다 입력 일곱을 넘기면 core가 상태 기계를 돌려 같은 `CompanionEvent`를
+만든다. 기계에서 읽는 것은 앞에 있는 앱(`app`)과 마지막 키 입력 후 초(`seconds_since_key`) 둘이고,
+`watched`는 사용자 설정이며, 나머지 넷은 펫에게서 읽는다 — 마지막으로 처리한 이벤트
+(`dispatched_event`), 아직 갚지 못한 도착 반응이 있는지(`arrival_pending`), 쉬는 중인지(`pet_resting`),
+agent가 자리를 지키는 중인지(`agent_on_duty`). source가 늘어도 **agent 전용 어휘는 생기지
+않았다.** `CompanionEventKind`에 늘어난 것은 `present` 하나이고, 그것도 "사용자가 자기 일 앞에
+있고 반응할 것은 없다"는 domain 뜻이라 어느 source가 내도 된다(이유는 아래 Domain events 절).
+흐름은 `docs/behavior-flow.md` §5b.
+
 ### RoamlingEngine
 
 - `RoamlingRuntime`: main-actor orchestration and the only owner of input gating
@@ -86,8 +97,11 @@ module만 추출할 수 있다. 선행 Rust/C ABI는 만들지 않는다.
 - `MacDisplayProvider`: `NSScreen` -> display snapshots and coordinate transform,
   그리고 `NSApplication.didChangeScreenParametersNotification` 구독
 - `MacPointerProvider`: `NSEvent` global point sampling
-- `MacUserIdleProvider`: elapsed time since any local input, without an event tap
-- `MacWindowProvider`: title/content 없이 frontmost app의 coarse window bounds만 제공
+- `MacUserIdleProvider`: elapsed time since any local input, without an event tap.
+  키보드만 따로 묻는 것도 같은 API의 다른 eventType 하나다 — **무엇을 눌렀는지는 볼 수
+  없고 얼마나 지났는지만 나온다**
+- `MacWindowProvider`: title/content 없이 frontmost app의 coarse window bounds만 제공.
+  앞에 있는 앱의 bundle id와 표시 이름도 여기서 답한다 (`NSWorkspace`, 권한 없음)
 - `MacFocusProvider`: Accessibility-backed 캐럿·포커스 창 (MVP 3)
 - `MacCaptureProvider`: ScreenCaptureKit downsampled luminance (MVP 4)
 - `PetOverlayPanel` / `MacOverlayProvider`: transparent, non-activating, all-Spaces
@@ -112,6 +126,26 @@ struct CompanionEvent {
 `metadata`는 scalar만 허용하며 core가 그 key를 분기하지 않는다. source adapter가
 Claude/Codex payload를 일반 event로 정규화한다. `ActivitySource`는 event stream을
 내놓고 product-specific detail은 adapter 안에서 끝난다.
+
+**"agent events"가 아니라 "domain events"라는 것이 값을 하는 자리가 여기다.** 지정 앱
+source는 훅도 세션도 도구 호출도 없지만 `activityStarted` · `highIntensity` ·
+`attentionRequired` · `achievement` · `activityEnded`를 그대로 쓴다. **늘어난 것은 `present`
+하나다** — "사용자가 자기 일 앞에 있고, 반응할 것은 없다". 걸어와서 아무것도 안 입고 앉는 kind가
+없었고, 60초마다 재발신되므로 재생해도 안 보이는 `calm`을 입어야 했다. attention(자리를 잡는 kind
+중 최하위 점수) · reaction(반응 없음) · director(`calm`으로 자리 잡기)에 한 갈래씩 붙었고 placement ·
+애니메이션 해석은 그대로다. agent 정규화는 이 kind를 내지 않지만 agent 전용 어휘도 아니다.
+새 source를 붙이는 비용이 이 문서가 주장하는 만큼이라는 첫 번째 실측이다. kind는 FFI를
+인덱스로 건너므로 새 kind는 표의 **끝에만** 붙는다.
+
+**`sourceType`을 읽는 규칙이 하나 생겼다 (2026-09-11).** Swift에만 있던 필드였고 Rust로 넘어올 때
+버려졌다 — 읽는 규칙이 없었기 때문이다. 이제 director가 **agent가 자리를 지키는 동안 `system`
+이벤트를 attention 후보에서 뺀다**(`ActivityDirector::candidates`). 점수로는 표현할 수 없었다: 지정
+앱의 첫 키 입력 점프는 방금 시작된 agent 턴과 이력 여유 안에서 비겨 밀렸고, 갸웃
+(`attentionRequired`, 긴급)은 일하는 agent 자리를 곧바로 뺏었다. attention 자체(점수 · 이력 여유 ·
+dwell · 쿨다운)는 그대로이고 `system` 이벤트가 없으면 후보 목록도 예전과 같다 — 그래서 differential
+픽스처와 녹화 세션이 그대로 통과한다. Rust `CompanionEvent::new`의 기본값이 `Agent`인 이유도 같다
+(훅에서 온 기존 호출부가 전부 agent다). `custom(String)`의 문자열은 규칙이 읽지 않으므로 FFI
+경계에서 버린다. 흐름은 `docs/behavior-flow.md` §5b.
 
 MVP 1의 Claude transport는 `127.0.0.1:47831`에만 bind하고 임의 생성 token을
 `X-Roamling-Token` header로 확인한다. user가 menu에서 설치를 선택하기 전에는 Claude

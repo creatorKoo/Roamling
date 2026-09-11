@@ -209,10 +209,12 @@ enum RustCore {
     }
 
     /// Kinds and reactions cross as indices. Two spellings kept in step is
-    /// cheaper than three, and the vocabulary is closed on both sides.
+    /// cheaper than three, and the vocabulary is closed on both sides. New
+    /// kinds go on the end, the same as `KINDS` in `ffi.rs`.
     private static let kindOrder: [CompanionEventKind] = [
         .activityStarted, .activityEnded, .positive, .negative, .achievement,
-        .setback, .attentionRequired, .inspecting, .highIntensity, .calm, .idle
+        .setback, .attentionRequired, .inspecting, .highIntensity, .calm, .idle,
+        .present
     ]
     private static let contextOrder: [UserContext] = [
         .working, .gaming, .watchingMedia, .browsing, .idle
@@ -226,12 +228,55 @@ enum RustCore {
         FfiActivityEvent(
             id: event.id,
             sourceId: event.sourceID,
+            sourceType: sourceTypeIndex(event.sourceType),
             timestamp: event.timestamp,
             kind: UInt8(kindOrder.firstIndex(of: event.kind) ?? 0),
             intensity: event.intensity,
             hintConfidence: event.locationHint?.confidence,
             hintRegion: event.locationHint?.approximateRegion.map(rect),
             context: event.context.map(contextIndex)
+        )
+    }
+
+    /// `SOURCE_TYPES` in `ffi.rs`: Swift's declaration order. A custom source
+    /// crosses without its name, which no rule reads.
+    static func sourceTypeIndex(_ type: ActivitySourceType) -> UInt8 {
+        switch type {
+        case .agent: 0
+        case .game: 1
+        case .media: 2
+        case .system: 3
+        case .custom: 4
+        }
+    }
+
+    static func sourceType(at index: UInt8) -> ActivitySourceType {
+        switch index {
+        case 0: .agent
+        case 1: .game
+        case 2: .media
+        case 3: .system
+        default: .custom("")
+        }
+    }
+
+    /// The way back: the working-app source builds events rather than
+    /// consuming them, and it is the only thing on this side that does.
+    static func companionEvent(_ event: FfiActivityEvent) -> CompanionEvent {
+        let region = event.hintRegion.map {
+            WorldRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height)
+        }
+        return CompanionEvent(
+            id: event.id,
+            sourceID: event.sourceId,
+            sourceType: sourceType(at: event.sourceType),
+            timestamp: event.timestamp,
+            kind: kindOrder[Int(event.kind)],
+            intensity: event.intensity,
+            context: event.context.map { contextOrder[Int($0)] },
+            locationHint: event.hintConfidence.map {
+                LocationHint(approximateRegion: region, confidence: $0)
+            }
         )
     }
 
@@ -848,6 +893,17 @@ public final class RustActivityDirector: ActivityDirecting {
         handle.sustainedReaction().flatMap(RustCore.reaction(at:))
     }
 
+    /// The event the director last acted on, and whether an agent is on duty.
+    /// Read only by the switch-over test, which holds both directors to the
+    /// desk rule by what they act on.
+    public var lastDispatchedID: String? { handle.lastDispatchedId() }
+    /// The event queued for the pet once it is free.
+    public var pendingEventID: String? { handle.pendingEventId() }
+
+    public func agentOnDuty(at timestamp: TimeInterval) -> Bool {
+        handle.agentOnDuty(timestamp: timestamp)
+    }
+
     public func handle(
         _ event: CompanionEvent,
         isHeldByPointer: Bool,
@@ -899,6 +955,58 @@ public final class RustActivityDirector: ActivityDirecting {
     }
 }
 
+/// The desk as an activity source: which app is in front, and how long since a
+/// keystroke.
+///
+/// Nothing here decides anything. The shell samples the two facts, this hands
+/// them over, and what they mean -- greet, sit, work, wave, leave -- is
+/// `focus_activity.rs`.
+public final class RustFocusActivity {
+    private let handle = FocusWatch()
+
+    public init() {}
+
+    /// `dispatchedEvent` and `arrivalPending` are the runtime's
+    /// `lastDispatchedActivityID` and `hasArrivalReaction`. Together they say
+    /// whether the greeting has reached the pet and been worn, which is what
+    /// the beat after the hop is timed from. The event and not the seat's
+    /// owner, because the pet is already sitting at this app's seat when the
+    /// first keystroke comes.
+    ///
+    /// `petResting` is the runtime's `isResting`. Seat news is held back while
+    /// it is true -- the director would drop it -- and sent the first sample
+    /// the pet is awake.
+    ///
+    /// `agentOnDuty` is the runtime's `agentOnDuty(at:)`. A long stretch left
+    /// while it is true ends without a wave: the director would keep one from
+    /// the pet but not forget it, and an agent finishing a moment later would
+    /// hand it over late.
+    public func observe(
+        application: String?,
+        watched: Bool,
+        secondsSinceKey: TimeInterval,
+        dispatchedEvent: String?,
+        arrivalPending: Bool,
+        petResting: Bool,
+        agentOnDuty: Bool,
+        at timestamp: TimeInterval
+    ) -> [CompanionEvent] {
+        handle.observe(
+            appId: application,
+            watched: watched,
+            secondsSinceKey: secondsSinceKey,
+            dispatchedEvent: dispatchedEvent,
+            arrivalPending: arrivalPending,
+            petResting: petResting,
+            agentOnDuty: agentOnDuty,
+            now: timestamp
+        ).map(RustCore.companionEvent)
+    }
+
+    /// Most recent first, this app excluded.
+    public var recentApplications: [String] { handle.recentApps() }
+}
+
 /// The tick body, with every decision on the Rust side.
 ///
 /// The shell around it keeps only what is not a decision: the timer, the
@@ -948,6 +1056,16 @@ public final class RustPetLoop {
     public var isPlacementTravelling: Bool { handle.isPlacementTravelling() }
     public var isWatchingWindow: Bool { handle.isWatchingWindow() }
     public var activeSourceID: String? { handle.activeSourceId() }
+    /// Whether the pet still owes the reaction it was last told to wear.
+    public var hasArrivalReaction: Bool { handle.hasArrivalReaction() }
+    /// The event the pet last acted on.
+    public var lastDispatchedActivityID: String? { handle.lastDispatchedActivityId() }
+    /// Sitting, looking for a place to sleep, or asleep -- the director's own
+    /// test for dropping an event that does not wake the pet.
+    public var isResting: Bool { handle.isResting() }
+    /// Whether an agent is on duty -- the director's own test for keeping the
+    /// desk from the pet.
+    public func agentOnDuty(at now: TimeInterval) -> Bool { handle.agentOnDuty(now: now) }
     public var randomDraws: UInt64 { handle.draws() }
 
     public func preferredTickInterval(at now: TimeInterval) -> TimeInterval {

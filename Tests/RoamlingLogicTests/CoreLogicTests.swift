@@ -177,7 +177,8 @@ func coreLogicTests() -> [LogicTest] {
 
             let kinds: [CompanionEventKind] = [
                 .activityStarted, .activityEnded, .positive, .negative, .achievement,
-                .setback, .attentionRequired, .inspecting, .highIntensity, .calm, .idle
+                .setback, .attentionRequired, .inspecting, .highIntensity, .calm, .idle,
+                .present
             ]
             let contexts: [UserContext] = [.working, .gaming, .watchingMedia, .browsing, .idle]
 
@@ -422,7 +423,8 @@ func coreLogicTests() -> [LogicTest] {
 
                 let kinds: [CompanionEventKind] = [
                     .activityStarted, .activityEnded, .positive, .negative, .achievement,
-                    .setback, .attentionRequired, .inspecting, .highIntensity, .calm, .idle
+                    .setback, .attentionRequired, .inspecting, .highIntensity, .calm, .idle,
+                    .present
                 ]
                 let contexts: [UserContext] = [.working, .gaming, .watchingMedia, .browsing, .idle]
 
@@ -433,6 +435,21 @@ func coreLogicTests() -> [LogicTest] {
                     )
                 }
 
+                // The desk's rule -- no desk event is a candidate while an
+                // agent is on duty -- only bites with both in one run, so a
+                // source keeps one type: `s0` an agent, `s1` the desk, `s2`
+                // anything, including the types no rule reads, which still
+                // have to cross the boundary intact.
+                let anyType: [ActivitySourceType] = [.agent, .system, .game, .media, .custom("x")]
+                var deskEvents = 0
+                var deskBesideAgent = 0
+                var callsWithAgentOnDuty = 0
+                // Desk words queued for the pet and dropped at the resume
+                // because an agent came on duty meanwhile (plan §9.6b). A
+                // random script reaches that path rarely, so it is counted.
+                var deskWordsDropped = 0
+                var typeOfEvent: [String: ActivitySourceType] = [:]
+
                 var compared = 0
                 var counter = 0
                 for run in 0..<40 {
@@ -440,12 +457,24 @@ func coreLogicTests() -> [LogicTest] {
                     let rustDirector = RustActivityDirector()
                     var now = 100.0 + unit() * 20
                     let sources = 1 + pick(3)
+                    let sourceTypes: [ActivitySourceType] = [.agent, .system, anyType[pick(anyType.count)]]
 
                     for call in 0..<20 {
                         now += step() % 11 == 0 ? unit() * 400 : unit() * 6
                         let isResting = step() % 6 == 0
                         let isHeld = step() % 9 == 0
                         let roll = unit()
+                        // Whether nothing the desk says may reach the pet on
+                        // this call, and what the pet acted on last before it.
+                        let agentOnDuty = swiftDirector.agentOnDuty(at: now)
+                        try expect(
+                            agentOnDuty == rustDirector.agentOnDuty(at: now),
+                            "whether an agent is on duty differs at run \(run) call \(call)"
+                        )
+                        let actedOnBefore = swiftDirector.lastDispatchedID
+                        // A desk word queued for the pet that this call's
+                        // resume has to drop rather than hand over.
+                        var droppingDeskWord: String?
 
                         let swiftEffects: [ActivityEffect]
                         let rustEffects: [ActivityEffect]
@@ -455,6 +484,10 @@ func coreLogicTests() -> [LogicTest] {
                             rustEffects = rustDirector.expireSilent(isResting: isResting, at: now)
                         case 9:
                             let isIdle = step() % 3 != 0
+                            if isIdle, agentOnDuty, let queued = swiftDirector.pendingEventID,
+                               typeOfEvent[queued] == .system {
+                                droppingDeskWord = queued
+                            }
                             swiftEffects = swiftDirector.resumePendingIfReady(
                                 isIdle: isIdle, isHeldByPointer: isHeld,
                                 isResting: isResting, randomUnit: roll, at: now
@@ -476,10 +509,11 @@ func coreLogicTests() -> [LogicTest] {
                         default:
                             counter += 1
                             let hasHint = step() % 3 != 0
+                            let source = pick(sources)
                             let event = CompanionEvent(
                                 id: "e\(counter)",
-                                sourceID: "s\(pick(sources))",
-                                sourceType: .agent,
+                                sourceID: "s\(source)",
+                                sourceType: sourceTypes[source],
                                 timestamp: now - unit() * 3,
                                 kind: kinds[pick(kinds.count)],
                                 intensity: step() % 5 == 0 ? unit() * 0.2 : unit(),
@@ -494,6 +528,15 @@ func coreLogicTests() -> [LogicTest] {
                                       )
                                     : nil
                             )
+                            typeOfEvent[event.id] = event.sourceType
+                            if event.sourceType == .system {
+                                deskEvents += 1
+                                if let active = swiftDirector.activeSourceID,
+                                   let seated = Int(active.dropFirst()),
+                                   sourceTypes[seated] == .agent {
+                                    deskBesideAgent += 1
+                                }
+                            }
                             swiftEffects = swiftDirector.handle(
                                 event, isHeldByPointer: isHeld, isResting: isResting,
                                 randomUnit: roll, at: now
@@ -514,13 +557,49 @@ func coreLogicTests() -> [LogicTest] {
                                 && swiftDirector.activeSourceID == rustDirector.activeSourceID
                                 && swiftDirector.hint == rustDirector.hint
                                 && swiftDirector.hasArrivalReaction == rustDirector.hasArrivalReaction
-                                && swiftDirector.sustainedReaction == rustDirector.sustainedReaction,
+                                && swiftDirector.sustainedReaction == rustDirector.sustainedReaction
+                                && swiftDirector.lastDispatchedID == rustDirector.lastDispatchedID
+                                && swiftDirector.pendingEventID == rustDirector.pendingEventID,
                             "director state differs at run \(run) call \(call)"
                         )
+                        // The outcome, not just the tally: while an agent is on
+                        // duty nothing the desk said is acted on -- neither an
+                        // event handed over now nor one queued before the agent
+                        // came back (plan §9.6b).
+                        if agentOnDuty {
+                            callsWithAgentOnDuty += 1
+                            if let actedOn = swiftDirector.lastDispatchedID, actedOn != actedOnBefore {
+                                try expect(
+                                    typeOfEvent[actedOn] != .system,
+                                    "the desk's \(actedOn) was acted on while an agent was on duty "
+                                        + "at run \(run) call \(call)"
+                                )
+                            }
+                        }
+                        // A desk word queued before the agent came on duty is
+                        // dropped at the resume: not acted on, and not left
+                        // queued either (plan §9.6b).
+                        if let dropped = droppingDeskWord {
+                            try expect(
+                                swiftDirector.lastDispatchedID != dropped
+                                    && swiftDirector.pendingEventID != dropped,
+                                "the desk's queued \(dropped) was not dropped while an agent was "
+                                    + "on duty at run \(run) call \(call)"
+                            )
+                            deskWordsDropped += 1
+                        }
                         compared += 1
                     }
                 }
                 try expect(compared == 800, "only \(compared) calls compared")
+                try expect(
+                    deskEvents > 0 && deskBesideAgent > 0 && callsWithAgentOnDuty > 0
+                        && deskWordsDropped > 0,
+                    "the desk rule went unexercised: \(deskEvents) desk events, "
+                        + "\(deskBesideAgent) while an agent had the seat, "
+                        + "\(callsWithAgentOnDuty) calls with an agent on duty, "
+                        + "\(deskWordsDropped) queued desk words dropped"
+                )
             }
         },
         LogicTest(name: "the capability wire order matches the capability list") {
@@ -954,7 +1033,7 @@ func coreLogicTests() -> [LogicTest] {
         LogicTest(name: "a sleeping pet is woken only for what the user would want to see") {
             // An agent emits an event per tool call. If each of them woke the
             // pet it could doze for one beat and never longer.
-            for routine in [CompanionEventKind.activityStarted, .inspecting, .highIntensity, .positive, .calm] {
+            for routine in [CompanionEventKind.activityStarted, .inspecting, .highIntensity, .positive, .calm, .present] {
                 try expect(!routine.wakesRestingPet, "\(routine) is the work the pet is sitting next to")
             }
             // The end of a watch is handled by the watch ending, not by a wake.

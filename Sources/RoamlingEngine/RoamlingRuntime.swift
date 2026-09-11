@@ -19,6 +19,11 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         static let positionX = "roamling.position.x"
         static let positionY = "roamling.position.y"
         static let hasPosition = "roamling.position.exists"
+        /// The first list-shaped setting: comma-separated app identifiers, the
+        /// same key and the same format on Windows. Absent means empty, which
+        /// is the default -- the pet reacts to nothing until the user names an
+        /// app, because guessing wrong here is the annoying kind of wrong.
+        static let workApps = "roamling.workApps"
     }
 
     public var isRoamingEnabled: Bool {
@@ -43,6 +48,10 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             }
         }
     }
+
+    /// The apps the user has called work. The pet greets, sits beside and
+    /// waves goodbye to these and no others.
+    public private(set) var workApps: [String]
 
     public private(set) var asset: PetAsset
     public private(set) var installedPets: [PetDescriptor]
@@ -90,6 +99,14 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     private let catalog: PetCatalog
     private let loader: PetLoader
     private let agents: [any AgentIntegration]
+
+    /// The activity source with no agent behind it. Everything it decides is
+    /// in `focus_activity.rs`; this side only samples and forwards.
+    private let focusActivity = RustFocusActivity()
+    private var focusSampledAt: TimeInterval = -.infinity
+    /// Twice a second, the cadence the idle provider already samples at. Both
+    /// answers this reads are cached by the OS, so the cost is a comparison.
+    private static let focusSampleInterval: TimeInterval = 0.5
 
     private var displays: [DisplaySnapshot]
     /// Stored in the services so the providers see every move of the origin.
@@ -184,6 +201,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             tuning: runtimeTuning,
             seed: randomSeed
         )
+        workApps = Self.loadWorkApps(defaults: defaults)
         isRoamingEnabled = defaults.bool(forKey: DefaultsKey.roaming)
         isPointerAvoidanceEnabled = defaults.bool(forKey: DefaultsKey.avoidPointer)
         areInteractionsEnabled = defaults.bool(forKey: DefaultsKey.interactions)
@@ -243,6 +261,32 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
 
     public func reloadCatalog() {
         installedPets = catalog.discover()
+    }
+
+    /// The apps the user has had in front lately, most recent first, so the
+    /// menu can offer them. This app is never among them.
+    public var recentApplications: [String] { focusActivity.recentApplications }
+
+    /// What to call an app identifier in the menu, or nil when the platform
+    /// cannot say -- an app that is named in the list but not running.
+    public func applicationDisplayName(for identifier: String) -> String? {
+        windowProvider.applicationDisplayName(for: identifier)
+    }
+
+    /// Adds or removes one app. Written as a comma-separated string, and the
+    /// key is removed once the list is empty rather than stored blank -- the
+    /// same rule the tuning panel follows, for the same reason.
+    public func toggleWorkApp(_ identifier: String) {
+        if let index = workApps.firstIndex(of: identifier) {
+            workApps.remove(at: index)
+        } else {
+            workApps.append(identifier)
+        }
+        guard !workApps.isEmpty else {
+            defaults.removeObject(forKey: DefaultsKey.workApps)
+            return
+        }
+        defaults.set(workApps.joined(separator: ","), forKey: DefaultsKey.workApps)
     }
 
     @discardableResult
@@ -363,6 +407,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     /// what the pet does about any of it is `pet_runtime.rs`.
     public func tick() {
         let now = self.now()
+        sampleWorkingApplication(at: now)
         // Two questions have to go back out mid-tick. This is the first: an
         // accessibility query is a synchronous round trip, so it only runs
         // while there is a window whose caret the answer would move the pet
@@ -484,6 +529,43 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             // Receiver state is shown in the menu. Both integrations swallow
             // loopback delivery failures and never block agent work.
         }
+    }
+
+    /// Asks the desk what the user is doing and lets the core say what that
+    /// means. Both readings are cheap and cached by the OS; the throttle is
+    /// here so that a sixty-per-second tick does not turn them into a poll.
+    ///
+    /// Whatever comes back goes down the ordinary path, so a working app is
+    /// located, reacted to and forgotten exactly as an agent's turn is.
+    private func sampleWorkingApplication(at timestamp: TimeInterval) {
+        guard timestamp - focusSampledAt >= Self.focusSampleInterval else { return }
+        focusSampledAt = timestamp
+        let frontmost = windowProvider.frontmostApplicationIdentifier()
+        let events = focusActivity.observe(
+            application: frontmost,
+            watched: frontmost.map(workApps.contains) ?? false,
+            secondsSinceKey: userIdleProvider.keyboardIdleDuration(at: timestamp),
+            // The two facts this side does not read from the machine but from
+            // the pet: which event it last acted on, and whether it still owes
+            // a reaction for it. Together they mean "the greeting reached the
+            // pet and was worn", which is what the beat after the hop is timed
+            // from -- the seat is already this app's when the user starts
+            // typing, so the seat's owner cannot say it.
+            dispatchedEvent: core.lastDispatchedActivityID,
+            arrivalPending: core.hasArrivalReaction,
+            // And whether it would hear anything now. The key that wakes a
+            // sleeping pet does so later in this tick than this sample, and
+            // the director drops what a resting pet is told, so the source
+            // holds its news until the first sample the pet is awake.
+            petResting: core.isResting,
+            // And whether an agent is on duty. A long stretch left beside one
+            // ends without a wave: the director would keep it from the pet but
+            // not forget it, and the agent finishing a moment later would hand
+            // it over late.
+            agentOnDuty: core.agentOnDuty(at: timestamp),
+            at: timestamp
+        )
+        for event in events { handleActivityEvent(event) }
     }
 
     private func handleActivityEvent(_ event: CompanionEvent) {
@@ -654,6 +736,13 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             return .standard
         }
         return decoded.normalized
+    }
+
+    private static func loadWorkApps(defaults: UserDefaults) -> [String] {
+        (defaults.string(forKey: DefaultsKey.workApps) ?? "")
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
     }
 
     private static func initialPosition(

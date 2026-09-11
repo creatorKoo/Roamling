@@ -16,6 +16,7 @@ public enum MenuAction: Equatable, Sendable {
     case togglePointerAvoidance
     case toggleInteractions
     case showTuning
+    case toggleWorkApp(id: String)
     case installAgent(id: String)
     case removeAgent(id: String)
     case testAgentReaction(id: String)
@@ -111,6 +112,7 @@ public enum ShellMenu {
                 localized("menu.catchDrag"),
                 .check(.toggleInteractions, isOn: runtime.areInteractionsEnabled)
             ),
+            MenuItem(localized("menu.workApps"), .submenu(workAppItems(for: runtime))),
             MenuItem(localized("menu.tuning"), .command(.showTuning), shortcut: ","),
         ]
         // One submenu per agent, in the order the app handed them over. An app
@@ -192,6 +194,26 @@ public enum ShellMenu {
             ))
         }
         return items
+    }
+
+    /// The apps the pet treats as work, and the ones it could.
+    ///
+    /// Recently seen first, because the app someone just used is the one they
+    /// are about to name. Anything already chosen but not seen lately follows,
+    /// checked: a list you cannot uncheck from because the app happens to be
+    /// closed is a trap.
+    private static func workAppItems(for runtime: RoamlingRuntime) -> [MenuItem] {
+        var identifiers = runtime.recentApplications
+        identifiers += runtime.workApps.filter { !identifiers.contains($0) }
+        guard !identifiers.isEmpty else {
+            return [MenuItem(localized("menu.workApps.none"), .caption)]
+        }
+        return identifiers.map { identifier in
+            MenuItem(
+                runtime.applicationDisplayName(for: identifier) ?? identifier,
+                .check(.toggleWorkApp(id: identifier), isOn: runtime.workApps.contains(identifier))
+            )
+        }
     }
 
     public static let scaleChoices: [(label: String, value: Double)] = [

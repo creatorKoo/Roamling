@@ -13,7 +13,9 @@ use roamling_core::{
 
 const NIL: f64 = -1.0;
 
-const KINDS: [CompanionEventKind; 11] = [
+/// `Present` came after the fixture was recorded and is never named by it; it
+/// is listed so the table stays the same contract as `ffi.rs`.
+const KINDS: [CompanionEventKind; 12] = [
     CompanionEventKind::ActivityStarted,
     CompanionEventKind::ActivityEnded,
     CompanionEventKind::Positive,
@@ -25,6 +27,7 @@ const KINDS: [CompanionEventKind; 11] = [
     CompanionEventKind::HighIntensity,
     CompanionEventKind::Calm,
     CompanionEventKind::Idle,
+    CompanionEventKind::Present,
 ];
 
 const CONTEXTS: [UserContext; 5] = [

@@ -27,6 +27,17 @@ pub enum CompanionEventKind {
     HighIntensity,
     Calm,
     Idle,
+    /// The user is at their own work and nothing calls for a reaction: an app
+    /// they named as work came to the front. The pet walks over and sits.
+    ///
+    /// Only the working-app source says this; agent normalization never does.
+    /// No other kind walks the pet over without dressing it in something, and
+    /// this one is re-sent every minute to keep the seat, so what it wears has
+    /// to be the one reaction whose replay cannot be seen -- `Calm`.
+    ///
+    /// Last in the list because kinds cross the FFI as indices, and every
+    /// fixture recorded before it existed names the others by position.
+    Present,
 }
 
 impl CompanionEventKind {
@@ -35,7 +46,8 @@ impl CompanionEventKind {
     /// An agent emits an event per tool call. If each of them woke the pet it
     /// could doze for one beat and never longer, so routine progress -- the
     /// thing the pet is already sitting next to -- lets it sleep, and only a
-    /// result or a request for the user gets it up.
+    /// result or a request for the user gets it up. A work app merely coming
+    /// to the front (`Present`) is not either.
     pub fn wakes_resting_pet(self) -> bool {
         matches!(
             self,
@@ -53,10 +65,31 @@ pub enum UserContext {
     Idle,
 }
 
+/// What kind of thing an event came from. Ported from Swift's
+/// `ActivitySourceType`, without the name `custom` carries there: no rule reads
+/// it, so it stops at the boundary.
+///
+/// One rule reads the rest. While an agent holds the pet's attention, what the
+/// desk says about the user's own app is not a candidate at all
+/// (`ActivityDirector`): the pet is beside the agent the user started, and
+/// typing next to it is not a reason to walk away.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ActivitySourceType {
+    Agent,
+    Game,
+    Media,
+    /// The desk itself: the app in front, from `focus_activity.rs`.
+    System,
+    Custom,
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct CompanionEvent {
     pub id: String,
     pub source_id: String,
+    /// `Agent` unless said otherwise. Every source there was before the desk
+    /// was an agent's hook, and every fixture recorded then is one.
+    pub source_type: ActivitySourceType,
     pub timestamp: f64,
     pub kind: CompanionEventKind,
     pub intensity: f64,
@@ -78,6 +111,7 @@ impl CompanionEvent {
         Self {
             id: id.into(),
             source_id: source_id.into(),
+            source_type: ActivitySourceType::Agent,
             timestamp,
             kind,
             intensity: clamped(intensity, 0.0, 1.0),
@@ -88,6 +122,11 @@ impl CompanionEvent {
 
     pub fn with_context(mut self, context: Option<UserContext>) -> Self {
         self.context = context;
+        self
+    }
+
+    pub fn with_source_type(mut self, source_type: ActivitySourceType) -> Self {
+        self.source_type = source_type;
         self
     }
 }

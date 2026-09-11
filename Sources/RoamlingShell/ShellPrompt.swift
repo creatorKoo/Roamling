@@ -250,6 +250,9 @@ public enum ShellController {
             return .rebuildMenu
         case .showTuning:
             return .openTuningPanel
+        case let .toggleWorkApp(id):
+            runtime.toggleWorkApp(id)
+            return .rebuildMenu
         case let .installAgent(id):
             guard let agent = runtime.agentIntegration(id: id),
                   let copy = ShellPrompt.AgentCopy.forAgent(id) else { return .none }

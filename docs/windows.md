@@ -1627,6 +1627,82 @@ GitHub Pages도, 전용 브랜치도 필요 없고, 빌드를 올리는 그 CI �
 않았다. 이유는 `CLAUDE.md`의 리소스 번들 절에 있다. 게이트는 `.build`를 치운 상태에서
 `ROAMLING_SMOKE_TEST=1`로 도는데, 그 조건이어야 결함이 보이기 때문이다.
 
+### W8 — 지정 앱 활동 source (Windows 셸 배선) ⏳ 미완
+
+**결정 로직은 2026-09-11에 끝났고(같은 날 v2로 규칙을 고침) macOS 쪽만 붙어 있다.**
+`rust/roamling-core/src/focus_activity.rs`가 상태 기계 전부를 들고 있으므로 Windows는 **셸
+배선만** 하면 된다 — Rust 크레이트를 rlib으로 직접 링크하니 FFI도 없다. 규칙과 이유는
+`docs/behavior-flow.md` §5b.
+
+```text
+지정 앱이 앞에 옴           present              옆으로 와서 그냥 앉음(idle), 점프·갸웃 없음
+그 세션의 첫 키 입력         activity_started     점프, 이어서 high_intensity
+세션 안의 다음 키 입력       high_intensity       running
+마지막 키 뒤 10초            attention_required   갸웃
+갸웃 5초                     activity_ended       자리를 비우고 돌아다님
+돌아다니는 중 다시 키 입력   high_intensity       걸어와서 running, 점프 없음
+키 없이 보기만 함            60초마다 present     계속 앉아 있음
+3초 이상 떠남                activity_ended       세션 타이핑 3분 이상이면 achievement 먼저 — 자리를
+                                                  비운 뒤라도, 펫이 있는 자리에서 흔든다
+앞의 앱을 모름(None)         보내지 않음          "모름"이지 "떠남"이 아니다. 단 손 흔들기 뒤 보류된
+                                                  activity_ended는 None 동안에도 나간다
+agent가 자리를 지킴          위 무엇이든          후보가 아님 — agent 옆에 그대로. 떠날 때 손 흔들기는
+                                                  보내지 않는다(agent_on_duty). Stop·activity_ended로
+                                                  자리가 비면 곧바로, 5분 침묵 만료면 다음 재발신
+                                                  (최대 15초) 때 이어받는다
+```
+
+셸이 0.5초마다 `observe`에 입력 일곱을 넘긴다 — `app`, `watched`, `seconds_since_key`,
+`dispatched_event`, `arrival_pending`, `pet_resting`, `agent_on_duty`. 기계에서 새로 읽어야 하는 것은
+`app`과 `seconds_since_key` 둘이고(아래 첫 두 항목), `watched`는 설정(셋째 항목), 나머지 넷은
+`app.pet`이 이미 답한다(넷째 항목).
+
+- `rust/roamling-win/src/focus.rs` (이미 있는 파일 — 창 위치·캐럿을 묻는 곳에 더한다) —
+  `pub fn foreground_application() -> Option<String>`:
+  `GetForegroundWindow` → `GetWindowThreadProcessId` →
+  `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` → `QueryFullProcessImageNameW` → 파일명만
+  (`Hwp.exe`). 자기 PID면 `None`. **0.5초마다만 부른다.**
+- `rust/roamling-win/src/platform.rs` — 키보드만의 idle. `GetLastInputInfo`의 시각이
+  갱신됐는데 포인터 좌표가 직전 샘플과 같으면 키보드로 본다. `keyboard_idle_duration()`.
+  한계를 문서에 적어 둘 것: 휠·클릭이 키보드로 잡힐 수 있다. **`WH_KEYBOARD_LL` 훅은 쓰지
+  않는다** — 타임스탬프만 본다 해도 키로거로 보인다. macOS도 같은 이유로
+  `CGEventSource.secondsSinceLastEventType(_:eventType:)` 하나만 쓴다.
+- `rust/roamling-win/src/settings.rs` — `WORK_APPS = "roamling.workApps"`. **키와 형식이
+  macOS와 같다**(쉼표로 구분한 한 줄, 비면 키를 지운다). 기본값은
+  `"Hwp.exe,Hshow.exe,Hcell.exe"`를 검토하되 **그 기계에서 실제 exe 이름을 확인할 것**
+  (작업 관리자 → 세부 정보). 한컴오피스 2020/2022 기준의 추정치다.
+- `rust/roamling-win/src/main.rs`의 `tick` — agent_events를 배수하기 직전에
+  `app.focus_activity.observe(...)` 결과를 `pending`에 합친다. 창 위치·handle 경로는
+  그대로다(`present` · `activity_started` · `high_intensity` · `attention_required` 넷 다
+  `wants_window_hint`가 참이라 기존 코드가 채운다).
+  **`observe`에 `dispatched_event = app.pet.last_dispatched_activity_id()`와
+  `arrival_pending = app.pet.has_arrival_reaction()`을 넘긴다.** 둘이 같이 "인사가 펫에게
+  닿아 입혀졌는가"를 뜻한다. 없으면 인사 점프가 걷는 동안 지워진다 — 코어는 그것을 셸을
+  통해서만 알 수 있다. **좌석 주인(`active_source_id`)으로 대신하지 않는다** — 첫 키 입력 때
+  펫은 이미 그 앱의 `present` 자리에 앉아 있어서 곧바로 참이 된다.
+  **`pet_resting = app.pet.is_resting()`도 넘긴다.** director가 쉬는 펫에게 온 이벤트를 버릴 때
+  쓰는 같은 술어라, source는 쉬는 동안 자리 소식을 보내지 않고 깬 첫 샘플에 보낸다. 없으면
+  자리에서 잠든 펫에게 첫 키 입력의 점프가 사라진다 — 키가 펫을 깨우는 판정이 샘플보다 뒤에
+  돌기 때문이다(macOS에서 재현하고 고쳤다, `docs/behavior-flow.md` §5b). 이 값을 넘기면 샘플을
+  틱 안의 어디서 불러도 점프는 남는다 — 앞이면 한 샘플 늦을 뿐이다.
+  **`agent_on_duty = app.pet.agent_on_duty(now)`도 넘긴다.** director가 agent가 자리를 지키는
+  동안 지정 앱 이벤트를 후보에서 뺄 때 쓰는 같은 술어다. source는 떠날 때 이것이 참이면 손
+  흔들기를 보내지 않는다 — 걸러진 손 흔들기는 뒤따르는 자리 비움(최대 5초)까지 director에 남아서,
+  그 사이 agent가 끝나면 사용자가 떠난 뒤에 늦게 반응했다(`docs/behavior-flow.md` §5b).
+  **출처 종류는 셸이 할 일이 없다.** director는 agent가 자리를 지키는 동안 `System` 이벤트를
+  후보에서 뺀다(`docs/behavior-flow.md` §5b). Windows의 agent 이벤트는 `CompanionEvent::new`의
+  기본값으로 `Agent`가 되고(`test_reaction`도 마찬가지), 지정 앱 이벤트는 core가 `System`으로
+  만든다.
+  **앞에 있는 앱을 못 알아내면 `None`을 넘긴다. 그건 "모름"이지 "사용자가 떠남"이 아니다** —
+  자기 창(트레이 메뉴·설정 창)이 앞에 온 것을 이탈로 읽으면 세션이 끝나 버린다.
+- `rust/roamling-win/src/tray.rs` — `MenuState.work_apps: Vec<(String, bool)>`, 하위 메뉴,
+  명령 id 블록 하나(agent처럼 10단위), `main.rs` 메뉴 핸들러에 toggle. 문자열은
+  `menu.workApps` · `menu.workApps.none`.
+
+**macOS 쪽 기본값은 빈 목록이다.** Windows에서 기본을 채울지는 그 기계에서 이름을 확인한
+뒤에 정한다 — 틀린 이름을 기본값으로 넣으면 아무 일도 안 일어나는 것을 사용자가
+"고장"으로 읽는다.
+
 ## 5. 매핑 표에 더할 것
 
 `docs/architecture.md`의 표는 맞다. 다만 몇 군데는 더 싼 길이 있다.

@@ -158,6 +158,11 @@ impl AttentionModel {
             // the quietest kind, so it sits below a tool that changes something.
             CompanionEventKind::Inspecting => 60.0,
             CompanionEventKind::ActivityStarted => 50.0,
+            // The user at their own work with nothing to show: the lowest kind
+            // that still takes a seat. Its best, 30 + 10 + 5 + 3, is under the
+            // worst an `ActivityStarted` can score, so it never draws the pet
+            // away from any agent event attention can still see.
+            CompanionEventKind::Present => 30.0,
             CompanionEventKind::Calm => 30.0,
             CompanionEventKind::ActivityEnded | CompanionEventKind::Idle => 0.0,
         };
@@ -289,7 +294,12 @@ impl ReactionPolicy {
                 CompanionReaction::Observe
             }),
             CompanionEventKind::Calm => Some(CompanionReaction::Calm),
-            CompanionEventKind::ActivityEnded | CompanionEventKind::Idle => None,
+            // Nothing happened that deserves a reaction. The director seats
+            // the pet in `Calm` on its own, and answering `None` keeps this
+            // kind out of the throttle it would otherwise reset every minute.
+            CompanionEventKind::Present
+            | CompanionEventKind::ActivityEnded
+            | CompanionEventKind::Idle => None,
         };
 
         if result.is_some() {

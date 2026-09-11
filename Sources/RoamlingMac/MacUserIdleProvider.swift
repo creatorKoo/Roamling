@@ -13,6 +13,8 @@ public final class MacUserIdleProvider: UserIdleProviding {
     private let sampleInterval: TimeInterval
     private var sampledAt: TimeInterval?
     private var sampledIdleDuration: TimeInterval = 0
+    private var keyboardSampledAt: TimeInterval?
+    private var sampledKeyboardIdleDuration: TimeInterval = 0
 
     public init(sampleInterval: TimeInterval = 0.5) {
         self.sampleInterval = max(0.1, sampleInterval)
@@ -30,5 +32,23 @@ public final class MacUserIdleProvider: UserIdleProviding {
         sampledAt = timestamp
         sampledIdleDuration = duration.isFinite ? max(0, duration) : 0
         return sampledIdleDuration
+    }
+
+    /// The same counter asked about one event type instead of all of them. It
+    /// says how long ago, never what was pressed, and needs no permission --
+    /// which is the whole reason the working-app source can exist without an
+    /// input hook.
+    public func keyboardIdleDuration(at timestamp: TimeInterval) -> TimeInterval {
+        if let keyboardSampledAt, timestamp - keyboardSampledAt < sampleInterval {
+            return sampledKeyboardIdleDuration + max(0, timestamp - keyboardSampledAt)
+        }
+
+        let duration = CGEventSource.secondsSinceLastEventType(
+            .combinedSessionState,
+            eventType: .keyDown
+        )
+        keyboardSampledAt = timestamp
+        sampledKeyboardIdleDuration = duration.isFinite ? max(0, duration) : 0
+        return sampledKeyboardIdleDuration
     }
 }

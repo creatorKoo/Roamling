@@ -7,6 +7,9 @@ public enum ActivitySourceType: Codable, Hashable, Sendable {
     case agent
     case game
     case media
+    /// The desktop itself rather than something running on it: the app the
+    /// user has in front, from `focus_activity.rs`. No hook, no transport, no
+    /// payload -- and the same events as an agent's.
     case system
     case custom(String)
 }
@@ -27,18 +30,28 @@ public enum CompanionEventKind: String, Codable, Hashable, Sendable {
     case highIntensity
     case calm
     case idle
+    /// The user is at their own work and nothing calls for a reaction: an app
+    /// they named as work came to the front. The pet walks over and sits.
+    ///
+    /// Only the working-app source says this; agent normalization never does.
+    /// It is re-sent every minute to keep the seat, so it wears the one
+    /// reaction whose replay cannot be seen, `calm`. Last in the list because
+    /// kinds cross to Rust as indices.
+    case present
 
     /// Whether this event is worth getting a sleeping pet up for.
     ///
     /// An agent emits an event per tool call. If each of them woke the pet it
     /// could doze for one beat and never longer, so routine progress -- the
     /// thing the pet is already sitting next to -- lets it sleep, and only a
-    /// result or a request for the user gets it up.
+    /// result or a request for the user gets it up. A work app merely coming
+    /// to the front is not either.
     public var wakesRestingPet: Bool {
         switch self {
         case .attentionRequired, .achievement, .negative, .setback:
             true
-        case .activityStarted, .inspecting, .highIntensity, .positive, .calm, .idle, .activityEnded:
+        case .activityStarted, .inspecting, .highIntensity, .positive, .calm, .idle, .activityEnded,
+             .present:
             false
         }
     }

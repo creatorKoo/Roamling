@@ -77,6 +77,19 @@ public protocol WindowProviding: AnyObject {
     /// available without any permission, so it is the fallback the pet uses
     /// when accessibility is refused.
     func currentActivityLocationHint() -> LocationHint?
+
+    /// Which app is in front, named the way the user's list names it -- a
+    /// bundle identifier here, an executable name on Windows. Nil for this app
+    /// itself, so the pet never counts being clicked as the user working.
+    ///
+    /// Asked every half second, so it must not be a synchronous round trip to
+    /// the window server.
+    func frontmostApplicationIdentifier() -> String?
+
+    /// What to call that identifier in a menu, or nil when the platform cannot
+    /// say. The engine only ever holds strings: naming an app is the one part
+    /// of this that needs the platform's own application list.
+    func applicationDisplayName(for identifier: String) -> String?
 }
 
 @MainActor
@@ -87,6 +100,12 @@ public protocol PointerProviding: AnyObject {
 @MainActor
 public protocol UserIdleProviding: AnyObject {
     func idleDuration(at timestamp: TimeInterval) -> TimeInterval
+
+    /// Since the last keystroke alone, ignoring the mouse. Typing is the one
+    /// signal that says the user is doing something rather than merely sitting
+    /// at a lit screen, and reading it must not need an input hook: nothing
+    /// here may see *which* key, only how long ago.
+    func keyboardIdleDuration(at timestamp: TimeInterval) -> TimeInterval
 }
 
 @MainActor

@@ -54,6 +54,22 @@ public final class MacWindowProvider: WindowProviding {
         }
     }
 
+    /// `NSWorkspace` keeps this in memory and updates it from a notification,
+    /// so reading it every half second costs nothing -- unlike
+    /// `currentWindows()`, which is a round trip to the window server.
+    public func frontmostApplicationIdentifier() -> String? {
+        guard let app = NSWorkspace.shared.frontmostApplication,
+              app.processIdentifier != ProcessInfo.processInfo.processIdentifier
+        else { return nil }
+        return app.bundleIdentifier
+    }
+
+    public func applicationDisplayName(for identifier: String) -> String? {
+        NSWorkspace.shared.runningApplications
+            .first { $0.bundleIdentifier == identifier }?
+            .localizedName
+    }
+
     public func currentActivityLocationHint() -> LocationHint? {
         let windows = currentWindows()
         guard let focused = windows

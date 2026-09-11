@@ -16,6 +16,7 @@ pub mod capability;
 pub mod coordinate_space;
 pub mod emptiness;
 pub mod ffi;
+pub mod focus_activity;
 pub mod interest;
 pub mod geometry;
 pub mod movement;
@@ -31,8 +32,8 @@ pub mod world;
 pub use coordinate_space::DesktopCoordinateSpace;
 pub use geometry::{clamped, swift_max, swift_min, WorldPoint, WorldRect, WorldSize, WorldVector};
 pub use activity::{
-    ActivityLifetime, CompanionEvent, CompanionEventKind, CompanionReaction, ReactingBehavior,
-    UserContext,
+    ActivityLifetime, ActivitySourceType, CompanionEvent, CompanionEventKind, CompanionReaction,
+    ReactingBehavior, UserContext,
 };
 pub use activity_director::{
     wants_window_hint, ActivityDirector, ActivityEffect,
@@ -42,6 +43,7 @@ pub use animation::{
     Borrow, Coverage, PetAnimationFrame, PetAnimationPlayer, PetAnimationTrack, PetdexState,
     Provenance,
 };
+pub use focus_activity::FocusActivity;
 pub use attention::{
     AttentionConfiguration, AttentionModel, ReactionConfiguration, ReactionPolicy,
 };

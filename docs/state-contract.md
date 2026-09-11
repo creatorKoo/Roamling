@@ -241,6 +241,16 @@ L0가 이미 분류를 갖고 있다(`main.zig:1955`).
 | `postToolUseFailure` · `stopFailure` | `failed` | `fail` → `failed` | 일치 (Codex엔 이벤트 없음) |
 | `subagentStart` | `running` | `highIntensity` → `work` → `running` | 일치 |
 | `sessionEnd` | — | 5분 침묵 후 `.calm` → idle | Roamling 전용 |
+| (훅 아님) 지정 앱이 앞으로 옴 | — | `present` → `calm` → idle | Roamling 전용 — 반응 없이 자리만 잡는다 |
+
+훅이 아닌 source(지정 앱, `docs/behavior-flow.md` §5b)를 위해 `present`가 하나 더 늘었다. Petdex
+행을 새로 요구하지 않는다 — `calm`을 입어 idle로 떨어지고, 지정 앱의 나머지 박자는 위 표의
+`activityStarted` · `highIntensity` · `attentionRequired` · `activityEnded`를 그대로 쓴다.
+
+이 층에는 kind 말고 **출처 종류(`sourceType`)**도 실린다. 읽는 규칙은 하나다 — agent가 자리를
+지키는 동안 지정 앱(`system`) 이벤트는 attention 후보가 아니다. 그래서 위 표의 훅 행은 지정 앱이
+무엇을 보내든 그대로 재생되고, 지정 앱의 박자는 agent 자리가 빈 뒤에 이어진다. Petdex 행과 반응
+매핑은 바뀌지 않았다.
 
 읽는 것은 tool의 **이름**뿐이고, 그것도 `ToolActivity`의 고정 목록과 대조하기 위해서다.
 프롬프트·전사·툴 인자·결과는 여전히 모델에 없다 — 정규화기가 지키겠다고 적어 둔 선은

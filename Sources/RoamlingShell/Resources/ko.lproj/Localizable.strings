@@ -11,6 +11,8 @@
 "menu.avoidPointer" = "포인터 피하기";
 "menu.catchDrag" = "잡기·끌기";
 "menu.tuning" = "동작 세부 설정…";
+"menu.workApps" = "일하는 앱";
+"menu.workApps.none" = "아직 본 앱이 없어요";
 "menu.accessibility" = "커서 인식";
 "menu.openPetFolder" = "펫 폴더 열기…";
 "menu.copyDiagnostics" = "진단 기록 복사";

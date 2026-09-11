@@ -95,7 +95,10 @@ public struct ReactionPolicy: Sendable {
             result = effectiveIntensity >= 0.5 ? .work : .observe
         case .calm:
             result = .calm
-        case .activityEnded, .idle:
+        case .present, .activityEnded, .idle:
+            // Nothing happened that deserves a reaction. The director seats the
+            // pet in `calm` on its own, and answering nil keeps this kind out
+            // of the throttle it would otherwise reset every minute.
             result = nil
         }
 
