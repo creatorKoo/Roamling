@@ -696,6 +696,77 @@ func stuckTravelLogicTests() -> [LogicTest] {
                     "the pet moved only \(travelled) points in three seconds with the cursor beside its path"
                 )
             }
+        },
+        LogicTest(name: "a stroll to where the pet already stands never wears the walk") {
+            try MainActor.assumeIsolated {
+                // Seen on 2026-09-12: the pet wore the walking frames without
+                // moving, about six seconds of it. `begin_stroll` claimed the
+                // walking state and only then laid a route -- and the route was
+                // empty, because the destination was the point the pet was
+                // already standing on. It waited two seconds, asked again, got
+                // the same point, and stood there walking.
+                //
+                // A display too small to inset is what makes that certain here:
+                // the pet is 96x104, so anything under about 132x128 leaves no
+                // safe area at all. `random_wander_point` gives up on an empty
+                // one and returns the display centre, so every candidate is the
+                // same point -- which is exactly the shape the clamp produced in the
+                // captured session, where one coordinate came up eight times.
+                let clock = TestClock(startingAt: 1_000)
+                let platform = FakePlatform(
+                    display: DisplaySnapshot(
+                        id: "1",
+                        name: "small",
+                        frame: WorldRect(x: 0, y: 0, width: 120, height: 110),
+                        visibleFrame: WorldRect(x: 0, y: 0, width: 120, height: 110),
+                        scale: 2
+                    ),
+                    worldTop: 110
+                )
+                // Far outside the display, not merely at its corner: on a
+                // screen this small every point on it is inside the awareness
+                // radius, and the pet spends the whole run evading instead of
+                // strolling.
+                platform.pointer.position = WorldPoint(x: 5_000, y: 5_000)
+                platform.userIdle.duration = 0
+                platform.capture.isAuthorized = false
+
+                let suite = try makeTestDefaults()
+                defer { suite.discard() }
+                suite.defaults.set(true, forKey: "roamling.roaming")
+                let runtime = RoamlingRuntime(
+                    services: platform.services,
+                    agents: [],
+                    defaults: suite.defaults,
+                    catalog: PetCatalog(roots: []),
+                    clock: clock.read
+                )
+                runtime.start(drivingTicks: false)
+
+                // Long enough for several wander delays, so the pet reaches the
+                // one reachable point and is then asked for it again.
+                var standingStill = 0
+                var worst = 0
+                var previous = runtime.position
+                for _ in 0..<3_600 {
+                    clock.advance(1.0 / 30)
+                    runtime.tick()
+                    let moved = runtime.position.distance(to: previous) > 0.01
+                    previous = runtime.position
+                    if runtime.behaviorState == .wander, !moved {
+                        standingStill += 1
+                        worst = max(worst, standingStill)
+                    } else {
+                        standingStill = 0
+                    }
+                }
+                // Half a second of the walk without moving is already more than
+                // a real walk ever shows; the fault held it for two at a time.
+                try expect(
+                    worst < 15,
+                    "the pet wore the walk while standing still for \(Double(worst) / 30) s"
+                )
+            }
         }
     ]
 }

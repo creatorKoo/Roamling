@@ -1238,19 +1238,33 @@ impl PetRuntime {
 
     fn begin_stroll(&mut self, point: WorldPoint, now: f64, delta_time: f64) {
         self.is_evade_transitioning = false;
-        // Claim the walking state before laying a route. Setting the route
-        // first left it in place when the state machine refused the transition,
-        // so the pet walked the whole leg wearing the idle frames.
-        if self.behavior.handle(BehaviorInput::BeginWander, now).to != BehaviorState::Wander {
-            self.next_wander_at = now + 2.0;
-            return;
-        }
         let route =
             DisplayTopology::new(self.displays.clone()).route(self.movement.position(), point);
         self.movement.set_maximum_speed(self.tuning.walking_speed);
         self.movement.set_route(route.waypoints);
+
+        // A destination the pet is already standing on leaves nothing to walk:
+        // `set_route` hands the single waypoint straight to its arrival check
+        // and it is consumed. Claiming the walking state before finding that
+        // out is what put the pet in the walk frames going nowhere, once every
+        // two seconds until a different point came up -- roughly six seconds of
+        // running on the spot in the session this was found in.
         if !self.movement.has_route() {
             self.next_wander_at = now + 2.0;
+            self.movement.update(delta_time);
+            return;
+        }
+
+        // Only now is the state claimed. The route is laid first because the
+        // question "is there anywhere to go" cannot be answered without it, and
+        // it is cancelled again if the state machine refuses -- otherwise the
+        // pet walks the whole leg wearing the idle frames, which is the fault
+        // this ordering was reversed to fix in the first place.
+        if self.behavior.handle(BehaviorInput::BeginWander, now).to != BehaviorState::Wander {
+            self.movement.cancel_route(false);
+            self.next_wander_at = now + 2.0;
+            self.movement.update(delta_time);
+            return;
         }
         self.movement.update(delta_time);
     }
@@ -1259,8 +1273,16 @@ impl PetRuntime {
     /// cheapest way to keep an aimless walk off the user's text without making
     /// roaming look calculated.
     fn stroll_candidates(&mut self) -> Vec<WorldPoint> {
+        let position = self.movement.position();
+        let radius = self.movement.configuration().arrival_radius;
+        // Somewhere the pet already stands is not a destination. It comes up
+        // because `random_wander_point` ends in a clamp: every target past the
+        // safe area folds onto the same edge, so a pet parked on that edge is
+        // handed its own position back. Filtered after the draw, not instead of
+        // it -- the sampler's random draws stay in the same order.
         (0..WANDER_CANDIDATE_COUNT)
             .filter_map(|_| self.random_wander_point())
+            .filter(|candidate| position.distance(*candidate) > radius)
             .collect()
     }
 
