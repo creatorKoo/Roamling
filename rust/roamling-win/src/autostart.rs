@@ -10,8 +10,8 @@
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::ERROR_SUCCESS;
 use windows::Win32::System::Registry::{
-    RegCloseKey, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW,
-    HKEY, HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_SZ,
+    RegCloseKey, RegDeleteValueW, RegOpenKeyExW, RegQueryValueExW, RegSetValueExW, HKEY,
+    HKEY_CURRENT_USER, KEY_QUERY_VALUE, KEY_SET_VALUE, REG_SZ,
 };
 
 const RUN_KEY: &str = "Software\\Microsoft\\Windows\\CurrentVersion\\Run";
@@ -27,7 +27,13 @@ fn open(access: windows::Win32::System::Registry::REG_SAM_FLAGS) -> Option<HKEY>
     let path = wide(RUN_KEY);
     let mut key = HKEY::default();
     let status = unsafe {
-        RegOpenKeyExW(HKEY_CURRENT_USER, PCWSTR(path.as_ptr()), 0, access, &mut key)
+        RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            PCWSTR(path.as_ptr()),
+            0,
+            access,
+            &mut key,
+        )
     };
     (status == ERROR_SUCCESS).then_some(key)
 }
@@ -35,11 +41,11 @@ fn open(access: windows::Win32::System::Registry::REG_SAM_FLAGS) -> Option<HKEY>
 /// Whether the value is there. Whatever it holds counts: a path from an older
 /// install location still means "the user asked for this".
 pub fn is_enabled() -> bool {
-    let Some(key) = open(KEY_QUERY_VALUE) else { return false };
-    let name = wide(VALUE);
-    let status = unsafe {
-        RegQueryValueExW(key, PCWSTR(name.as_ptr()), None, None, None, None)
+    let Some(key) = open(KEY_QUERY_VALUE) else {
+        return false;
     };
+    let name = wide(VALUE);
+    let status = unsafe { RegQueryValueExW(key, PCWSTR(name.as_ptr()), None, None, None, None) };
     unsafe {
         let _ = RegCloseKey(key);
     }
@@ -59,12 +65,9 @@ pub fn set(enabled: bool) -> Result<(), String> {
     let name = wide(VALUE);
     let result = if let Some(exe) = exe {
         let data = wide(&format!("\"{}\"", exe.display()));
-        let bytes: &[u8] = unsafe {
-            std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 2)
-        };
-        let status = unsafe {
-            RegSetValueExW(key, PCWSTR(name.as_ptr()), 0, REG_SZ, Some(bytes))
-        };
+        let bytes: &[u8] =
+            unsafe { std::slice::from_raw_parts(data.as_ptr() as *const u8, data.len() * 2) };
+        let status = unsafe { RegSetValueExW(key, PCWSTR(name.as_ptr()), 0, REG_SZ, Some(bytes)) };
         if status == ERROR_SUCCESS {
             Ok(())
         } else {

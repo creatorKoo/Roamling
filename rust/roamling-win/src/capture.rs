@@ -68,7 +68,13 @@ impl Capturer {
         let at = std::time::Instant::now();
         let outcome = duplication.next_frame(|pixels, frame| {
             let started = std::time::Instant::now();
-            samples = Some(average(pixels, frame.width, frame.height, frame.stride, rows));
+            samples = Some(average(
+                pixels,
+                frame.width,
+                frame.height,
+                frame.stride,
+                rows,
+            ));
             shrink_ms = started.elapsed().as_secs_f64() * 1000.0;
         });
         result.read_ms = (at.elapsed().as_secs_f64() * 1000.0 - shrink_ms).max(0.0);
@@ -130,7 +136,9 @@ fn average(pixels: &[u8], width: usize, height: usize, stride: usize, rows: usiz
 
     // Which column each source x falls in, worked out once rather than as a
     // division inside the inner loop.
-    let column_for: Vec<usize> = (0..width).map(|x| (x * COLUMNS / width).min(COLUMNS - 1)).collect();
+    let column_for: Vec<usize> = (0..width)
+        .map(|x| (x * COLUMNS / width).min(COLUMNS - 1))
+        .collect();
 
     // A screen far beyond 4K would make reading every row cost more than the
     // answer is worth. Skipping rows keeps the horizontal resolution, which is
@@ -149,9 +157,7 @@ fn average(pixels: &[u8], width: usize, height: usize, stride: usize, rows: usiz
         let row = &pixels[line..line + width * 4];
         for (x, pixel) in row.chunks_exact(4).enumerate() {
             let at = target + column_for[x];
-            totals[at] += BLUE * pixel[0] as u64
-                + GREEN * pixel[1] as u64
-                + RED * pixel[2] as u64;
+            totals[at] += BLUE * pixel[0] as u64 + GREEN * pixel[1] as u64 + RED * pixel[2] as u64;
             counts[at] += 1;
         }
     }
@@ -181,7 +187,9 @@ pub fn mean_gradient(field: &roamling_core::LuminanceField) -> f64 {
     let mut count = 0usize;
     for row in 0..field.rows {
         for column in 0..field.columns {
-            let Some(value) = field.sample(column as i64, row as i64) else { continue };
+            let Some(value) = field.sample(column as i64, row as i64) else {
+                continue;
+            };
             if column + 1 < field.columns {
                 if let Some(right) = field.sample(column as i64 + 1, row as i64) {
                     total += (right - value).abs();

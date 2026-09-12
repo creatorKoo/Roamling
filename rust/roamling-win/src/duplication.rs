@@ -21,9 +21,9 @@
 use windows::core::Interface;
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP};
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D,
-    D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAPPED_SUBRESOURCE,
-    D3D11_MAP_READ, D3D11_SDK_VERSION, D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
+    D3D11CreateDevice, ID3D11Device, ID3D11DeviceContext, ID3D11Texture2D, D3D11_CPU_ACCESS_READ,
+    D3D11_CREATE_DEVICE_BGRA_SUPPORT, D3D11_MAPPED_SUBRESOURCE, D3D11_MAP_READ, D3D11_SDK_VERSION,
+    D3D11_TEXTURE2D_DESC, D3D11_USAGE_STAGING,
 };
 use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_SAMPLE_DESC};
 use windows::Win32::Graphics::Dxgi::{
@@ -194,7 +194,10 @@ impl Duplication {
             let mut resource: Option<IDXGIResource> = None;
             // Zero timeout: this runs on the message loop and must never wait
             // for the compositor to draw something.
-            match self.duplication.AcquireNextFrame(0, &mut info, &mut resource) {
+            match self
+                .duplication
+                .AcquireNextFrame(0, &mut info, &mut resource)
+            {
                 Ok(()) => {}
                 Err(error) if error.code() == DXGI_ERROR_WAIT_TIMEOUT => return Ok(false),
                 Err(error) if error.code() == DXGI_ERROR_ACCESS_LOST => {
