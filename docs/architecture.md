@@ -583,14 +583,15 @@ frame swap에 scene graph가 필요하지 않다. particle/effect가 복잡해�
 failure 전용 fallback이다. 이 내부 atlas는 third-party asset license에 의존하지 않으며
 Petdex loader는 사용자 package와 fixtures로 계속 검증한다.
 
-## Future migration
+## 플랫폼 seam — 양쪽이 다 채워져 있다
 
-실측·결정·게이트 순서는 `docs/history/windows.md`에 있다. 아래 표는 그 문서의 5절에서 몇 군데가
-더 싼 경로로 갱신됐다 — capture는 BitBlt, focus는 `GetGUIThreadInfo`를 먼저 시도한다.
+**이 절은 한때 "Windows 쪽에서 채울 자리"였다. 2026-09-04에 W7까지 닫히면서 양 플랫폼이
+같은 seam을 실제로 채웠다.** 남은 것은 W8(지정 앱 source의 Windows 배선) 하나다 —
+`docs/windows.md`.
 
-**W1(2026-09-02)이 그 채울 자리를 실제로 만들어 뒀다.** `RoamlingRuntime`은 이제
-`RoamlingEngine`에 있고 `PlatformServices` 하나만 받는다. Windows 쪽 작업은
-`MacPlatform.makeServices()`에 대응하는 함수 하나를 쓰고 아래 protocol을 채우는 것이다.
+런타임이 기계에 닿는 통로는 `PlatformServices` 하나다. macOS 쪽 조립은
+`MacPlatform.makeServices()`에, Windows 쪽은 `rust/roamling-win/src/platform.rs`에 모여
+있다. **Win32 타입도 AppKit 타입도 그 파일을 넘지 않는다.**
 
 ```text
 DisplayProviding        currentDisplaySet()
@@ -605,22 +606,24 @@ PetOverlayProviding     setPosition/setVisible/setInteractionEnabled/setScale/
                         setHitRegionScale/setFrameImage/containsPet + inputHandler
 ```
 
-플랫폼별 구현이 채울 자리는 아래와 같다.
+각 자리를 무엇으로 채웠는지. **오른쪽 열은 계획이 아니라 실물이다** — 몇 군데는 계획했던
+API보다 싼 길이 실측으로 이겼고, 그 근거는 `docs/history/windows.md` 5절과 W5에 있다.
 
 ```text
 DisplayProvider    NSScreen             -> EnumDisplayMonitors
-WindowProvider     CGWindow/AX          -> HWND/Win32
+WindowProvider     CGWindow/AX          -> HWND/Win32 (DWMWA_EXTENDED_FRAME_BOUNDS)
 PointerProvider    NSEvent              -> GetCursorPos
 UserIdleProvider   CGEventSource        -> GetLastInputInfo
-FocusProvider      AXUIElement          -> UI Automation
-SafeZoneProvider   visibleFrame/work area candidates
+FocusProvider      AXUIElement          -> GetGUIThreadInfo  (UI Automation이 아니다)
+SafeZoneProvider   visibleFrame         -> MONITORINFO.rcWork
 OverlayProvider    NSPanel              -> layered click-through window
-CaptureProvider    ScreenCaptureKit     -> Windows Graphics Capture
+CaptureProvider    ScreenCaptureKit     -> Desktop Duplication  (BitBlt·WGC 둘 다 아니다)
 ```
 
-HWND/UIAutomation COM type은 adapter를 넘지 않는다. pure geometry/movement/event/
-reaction test가 그대로 통과하는지 확인한 후에만 언어 추출을 논의한다.
+**권한 모델은 여기서 갈린다.** Windows는 캡처에 프롬프트가 없어서 "OS 승인이 곧 동의"가
+성립하지 않는다 — 그쪽 캡처는 opt-in 설정 뒤에 둔다. `docs/windows.md`의 권한 모델 절.
 
 Game/media도 동일하다. official telemetry/local event를 먼저 쓰며 occasional visual
 detection은 opt-in fallback이다. injection, process memory, anti-cheat-sensitive hook은
-Roamling의 관찰자 모델과 맞지 않아 금지한다.
+Roamling의 관찰자 모델과 맞지 않아 금지한다. 붙일 때의 상태 낱말은
+`docs/state-sources.md`가 이미 자리를 잡아 뒀다.

@@ -178,8 +178,8 @@ import하지 않는다.** macOS SDK에 다 있어서 컴파일러는 이걸 못 
 
 **펫이 무엇을 할지 결정하는 코드는 이제 전부 `rust/roamling-core`에 있다.** geometry ·
 world · topology · emptiness · 배치 · attention · 반응 · 튜닝 · 활동 지휘 · tick 본체 ·
-애니메이션 해석까지. macOS 앱이 그것을 쓰고 있고 `RoamlingRuntime`은 1,664줄에서 700줄
-아래로 줄었다 — 타이머 · UserDefaults · 진단 파일 · agent 구독 · 스프라이트 시트, 즉 결정이
+애니메이션 해석까지. macOS 앱이 그것을 쓰고 있고 `RoamlingRuntime`은 1,664줄에서 777줄로
+줄었다 — 타이머 · UserDefaults · 진단 파일 · agent 구독 · 스프라이트 시트, 즉 결정이
 아닌 것들뿐이다.
 **Windows 게이트는 W7까지 전부 닫혔다 (2026-09-04).** W4 최소 루프 · W5 provider 셋 ·
 W5b agent 연동 · W6 패키징(Inno Setup, per-user) · W7 자동 업데이트(공유 Rust 업데이터 +
