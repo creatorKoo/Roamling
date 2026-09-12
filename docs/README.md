@@ -10,7 +10,8 @@
 | 묻는 것 | 문서 | 줄 |
 |---|---|---|
 | 사용자가 원한다고 말했는데 아직 없는 것 | [`requests.md`](requests.md) | ~100 |
-| 잠깐 숨기기와 끄기 발견성 (R2·R3) — 설계 | [`hiding.md`](hiding.md) | ~80 |
+| 잠깐 숨기기와 끄기 발견성 (R2·R3) | [`hiding.md`](hiding.md) | ~90 |
+| 색 팔레트 (R1) — 설계, 코드 없음 | [`palette.md`](palette.md) | ~110 |
 | 모듈이 어떻게 갈리고 의존이 어디로 흐르나 | [`architecture.md`](architecture.md) | ~630 |
 | 어떤 상황에 펫이 어떤 그림을 입나, 얼마나 오래 | [`behavior-flow.md`](behavior-flow.md) | ~560 |
 | 펫이 **어디에 설지**를 어떻게 정하나 | [`placement.md`](placement.md) | ~510 |
@@ -21,6 +22,7 @@
 | 프레임을 새로 그릴 때의 불변식 | [`art/mochi-animation-handoff.md`](art/mochi-animation-handoff.md) | ~140 |
 | 도구 없이 손으로 프레임을 만들 때의 프롬프트 | [`art/mochi-animation-prompts-ko.md`](art/mochi-animation-prompts-ko.md) | ~150 |
 | Windows에서 지금 유효한 것, 남은 게이트(W8) | [`windows.md`](windows.md) | ~300 |
+| Android 첫 프로젝트를 어디까지 만들면 좋은가 | [`android.md`](android.md) | ~45 |
 | 서명·dmg·배포를 어떻게 하나 | [`release.md`](release.md) | ~90 |
 | 무엇이 실제로 배터리를 먹나 | [`battery.md`](battery.md) | ~90 |
 
