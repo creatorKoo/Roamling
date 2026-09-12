@@ -1,0 +1,2407 @@
+# Windows port — 결정과 닫힌 게이트 (기록)
+
+> **닫힌 기록이다. W0~W7은 전부 완료됐다.** 지금 유효한 것(빌드·설치 경로·권한 모델·
+> 자동 업데이트 운영·미완 게이트 W8)은 `docs/windows.md`에 있다. 이 문서는 **왜 그렇게
+> 정했는지**의 근거다 — 언어 선택 네 가지 비교(3절), W0 스파이크 실행 결과(9절),
+> 캡처 경로가 실측으로 뒤집힌 과정(5절·W5), 1 ULP 부동소수점 처방(W4), macOS 스파이크(12절).
+> **결정을 뒤집으려 할 때 읽는다.**
+
+`docs/architecture.md`의 "Future migration"이 provider 매핑 표를 남겨뒀다. 이 문서는 그
+표를 실행 계획으로 승격한 것이다 — **지금 코드가 macOS에 얼마나 묶여 있는지 실측한 결과**,
+그로부터 나오는 두 개의 결정, 그리고 게이트 순서.
+
+측정 시점은 2026-09-01, `main` 기준이다.
+
+## 1. 실측 — 이식 비용은 모듈마다 다르다
+
+| 모듈 | 크기 | 플랫폼 의존 | 이식 비용 |
+|---|---|---|---|
+| `RoamlingCore` | 3,156줄 / 20파일 | `import Foundation` 뿐 | **0** |
+| `RoamlingSources` | 950줄 / 8파일 | `Network`, `/usr/bin/curl` | 작다 |
+| `RoamlingPet` | 2,094줄 / 10파일 | `CoreGraphics`/`ImageIO` (4파일) | **크다** |
+| `RoamlingMac` | 3,272줄 / 12파일 | AppKit 전면 | 다시 쓴다 |
+
+`RoamlingCore`에 플랫폼 타입이 하나도 없다는 것이 이 포트의 전제다. 경계를 지켜온
+값이 여기서 돌아온다.
+
+### 좌표계는 이미 맞다
+
+Core world plane이 **top-left, y-down**이다(`Sources/RoamlingCore/CoordinateSpace.swift`).
+이건 Windows 가상 화면 좌표계와 같은 규약이라 `DesktopCoordinateSpace`가 Windows에서는
+사실상 항등 변환이 된다. AppKit의 좌하단 원점은 Mac adapter 밖으로 새지 않았다.
+
+`WorldPoint`가 negative x/y를 허용하는 것도 그대로 필요하다 — Windows 가상 화면도 primary
+monitor 왼쪽/위에 있는 디스플레이에 음수 좌표를 준다.
+
+### 테스트는 거의 그대로 돈다
+
+`RoamlingLogicTests`가 XCTest가 아니라 dependency-free executable이라 Windows에서 그대로
+빌드된다. W0 시점의 예외 둘은 **모두 풀렸다** — `SourceLogicTests.swift`는 W3가,
+`PetLogicTests.swift`는 W2b가 (2026-09-07). 후자는 두 갈래였다: `ImageIO`로 시트를 디코드하던
+것과, `CGImageDestination`으로 픽스처를 **인코드**하던 것. 앞쪽은 공유 Rust 디코더가
+가져갔고 뒤쪽은 하네스 안의 작은 PNG writer(`PortablePNG.swift`)가 됐다 — deflate의
+stored 블록을 쓰므로 압축이 없고, 픽스처는 크기를 신경 쓰지 않는다.
+
+`scripts/test.sh`의 import 게이트가 이제 `Tests/RoamlingLogicTests`도 본다. 되돌아가면
+컴파일러가 아니라 그 grep이 잡는다.
+
+## 2. 블로커는 세 개다
+
+### B1. 앱의 두뇌가 macOS 모듈에 있다 — **W1에서 해소 (2026-09-02)**
+
+아래는 W1 착수 전의 진단이다. 지금 `RoamlingRuntime`은 `RoamlingEngine`에 있고
+`PlatformServices` 하나만 받는다.
+
+
+`Sources/RoamlingMac/RoamlingRuntime.swift`는 1,718줄이고 AppKit **타입**이 나오는 곳은 넷뿐이다:
+
+- `NSObject` 상속
+- `PetOverlayViewDelegate` 3개 메서드의 `NSPoint`
+- `NSApplication.didChangeScreenParametersNotification` 관찰
+- `corePoint(fromAppKitScreenPoint:)`
+
+**그러나 진짜 이음새는 타입이 아니라 소유권이다.** 런타임은 `init`에서 Mac provider 8개를
+직접 생성하고(`MacDisplayProvider`, `MacBasicSafeZoneProvider`, `MacUserIdleProvider`,
+`MacCaptureProvider`, `MacPointerProvider`, `MacWindowProvider`, `MacFocusProvider`,
+`MacOverlayProvider`), 그중 6개를 **`PlatformServices.swift`의 프로토콜에 없는 멤버로**
+호출한다:
+
+| provider | 프로토콜 밖에서 쓰는 것 |
+|---|---|
+| Display | `snapshotSet()` — 프로토콜의 `currentDisplays()`는 한 번도 안 불린다 |
+| SafeZone | 동기 `currentSafeZones(in:)` — 프로토콜의 async 버전은 안 불린다 |
+| Window | `currentActivityLocationHint()` |
+| Focus / Capture | `isAuthorized`, `requestAuthorization()` |
+| Overlay | `scale`, `objectSize`, `setScale`, `setHitRegionScale`, `setFrameImage(CGImage?)`, `containsPet(atWorldPoint:)`, `view`, settable `coordinateSpace` |
+
+순수하게 프로토콜로만 쓰이는 건 `MacUserIdleProvider`와 `MacPointerProvider` 둘뿐이다.
+그래서 Windows adapter를 아무리 잘 써도 런타임이 그걸 못 받는다 — 자기 것을 직접 만들기
+때문이다. **프로토콜을 실제 호출 모양으로 고치고 provider를 주입받는 것**이 W1의 본체이고,
+`NSPoint` 치환은 그 뒤에 남는 잔업이다.
+
+나머지 전부가 플랫폼 비의존 오케스트레이션이다. 이대로 두면 Windows는 1,700줄을 복제하거나
+포크된다. **Windows를 하지 않더라도 고칠 값어치가 있는 항목**이고, 이 포트에서 가장 큰
+단일 작업이다.
+
+### B2. `RoamlingPet`의 공개 API가 `CGImage`다 — **W2에서 해소 (2026-09-02)**
+
+아래는 W2 착수 전의 진단이다. 지금 `PetAsset.atlas`는 `PetImage`(RGBA8 premultiplied,
+위 행부터)이고 `RoamlingPet`은 Foundation만 import한다.
+
+`PetAsset.atlas`가 `CGImage`이고(`Sources/RoamlingPet/PetAsset.swift`), 아틀라스 합성과
+프레임 크롭이 `CGContext`/`CGImageSource` 위에 있다. 모듈 경계상 공용이어야 하는 계층이
+macOS 전용이다.
+
+### B3. WebP 디코더가 Windows에 없다
+
+내장 Mochi 아틀라스가 `.webp`이고, 더 중요하게 **Petdex/Codex 펫 패키지의
+`spritesheet.webp`는 항상 webp다.** 내장 에셋만 PNG로 바꿔도 `~/.codex/pets` 로딩이 안 된다.
+macOS에서는 ImageIO가 공짜로 해주던 일이라 결정이 필요한 줄 몰랐던 항목이다.
+
+**Windows가 대신 해주지 않는다는 것을 2026-09-02에 확인했다.** WIC는 PNG·JPEG·GIF·BMP·TIFF를
+내장하지만 **WebP는 Microsoft Store의 "WebP Image Extensions"를 깔아야** 붙는다. 사용자
+머신에 그게 있다고 가정할 수 없으므로 **진짜 디코더를 직접 실어야 한다.** W2가 디코딩을
+`PetImageSourcing` 뒤로 밀어 둔 것은 이 문제를 없앤 것이 아니라 **결정을 언어 결정과 같은
+자리로 옮긴 것**이다 — A로 가면 libwebp를 SwiftPM C 타겟으로 벤더링하고(약 4만 줄),
+D로 가면 Rust `image` 크레이트가 WebP와 PNG를 함께 준다.
+
+### 그 밖의 작은 것들
+
+- ~~`LoopbackHookReceiver`의 `NWListener`~~ — **W3에서 해소**
+- ~~두 hook installer의 하드코딩된 `/usr/bin/curl`~~ — **W3에서 해소**
+- ~~`PetCatalog`의 `Library/Application Support/Roamling/Pets`~~ — **W3에서 해소**
+- `scripts/test.sh`가 zsh, `scripts/build-app.sh`가 codesign 전제
+- ~~`Localizable.strings`를 `Bundle.module`로 읽는 경로~~ — **9절에서 해소됐다.
+  Windows에서 그대로 동작하므로 할 일이 아니다.**
+
+## 3. 결정
+
+### 왜 지금 다시 여는가
+
+`docs/architecture.md`의 "Swift core now, extraction later"가 원래 결정이다.
+
+> **Chosen:** Swift pure module. boundary와 tests는 얻되 미확인 Windows 요구를 위해
+> FFI를 선행하지 않는다.
+
+Swift가 최선이라서가 아니라 **의도적인 유예**였다. Windows가 아직 가정일 때 FFI 세금을
+미리 내지 않고 경계와 테스트만 확보해 둔 것이고, 그 규율이 지켜져서 3,156줄이 되도록
+Core에 플랫폼 import가 들어가지 않았다. 지금 선택지를 논할 수 있는 것이 그 결과다.
+**"Windows가 실제가 되면 다시 연다"가 계획이었고 지금이 그 시점이다.**
+
+### 선택지는 넷이다
+
+**Options:**
+
+| | 코드베이스 | Swift가 Windows에서 빌드돼야? | Win32 난이도 | 새로 쓸 코드 | 영구 비용 |
+|---|---|---|---|---|---|
+| **A. Swift 단일** | 1벌 | 예 | 높음 | ~1,500줄 | 없다 |
+| **A′. Swift core + C# 쉘** | 1.5벌 | 예 | 낮음 | ~2,000줄 | 두 언어 seam |
+| **B. C# 전체** | **2벌** | 아니오 | 낮음 | ~13,000줄 | **로직 영구 중복** |
+| **C. Rust 전면 재작성** | 1벌 | 아니오 | 중간 | ~16,000줄 | macOS까지 재검증 |
+
+**~~Chosen: A.~~ 2026-09-02에 D로 바뀌었다. 아래 "결정: D" 절을 읽는다.** 아래는 A를
+고른 당시의 근거이고, 무엇이 틀렸는지가 다음 결정의 정보이므로 지운다.
+
+이유는 "Swift가 Windows에서 좋아서"가 아니다 — **포팅 대상의 88%가 UI가
+아니기 때문이다.** 1절 표대로 진짜 macOS 전용 코드는 1,540줄뿐이고 나머지 11,481줄
+(로직 7,932 + 테스트 3,549)은 이미 쓰여 있고 이미 게이트를 통과했다. 포트의 어려운 부분은
+작지만 하필 Swift가 제일 약한 영역이고, 큰 부분은 Swift가 제일 강한 영역이다.
+
+재구현 안(B·C)의 숨은 비용은 코드가 아니라 **검증**이다. MVP 0~0.7의 값들 — walk 40pt/s,
+pause 12초, catch radius 74pt, notice 170pt — 은 유닛테스트가 아니라 사용자가 3-display
+앞에 앉아 닫은 값이다. 재구현하면 그 판정을 전부 다시 받아야 하고, "귀엽다"는 회귀
+테스트로 잡히지 않는다.
+
+### 결정: D — Rust core + Swift macOS 셸 (2026-09-02)
+
+**사용자가 Windows 지원을 확정했고, 그것이 A를 무너뜨린다.** A는 Swift-on-Windows에 건
+베팅인데 그 대가가 셋이다 — 17파일 56 MB 배포(10절), libwebp 약 4만 줄 벤더링(W2b),
+그리고 툴체인 추진력(Browser Company 인수 이후, 12절). D는 셋을 동시에 없앤다.
+
+12절과 W0m.3이 D의 세 축을 이미 닫았다: 포팅 정확성(402 world, 불일치 0), FFI 비용
+(tick당 0.03%, 아틀라스 크로싱 15.3 ms를 실행당 두 번), 두 언어 빌드·서명(번들 안의 서명된
+실행 파일이 rpath로 Rust dylib을 로드해 실제로 동작).
+
+**C로 끝까지 가지 않는 이유.** D에 도달한 뒤 macOS 셸까지 Rust로 옮기면 더 얻는 것은
+**"macOS 빌드의 언어가 하나"뿐**이다. 단일 파일은 못 얻는다 — macOS는 언어와 무관하게
+`.app` 번들이어야 한다(`LSUIElement`, TCC가 권한을 붙이는 `CFBundleIdentifier`,
+`NSScreenCaptureUsageDescription`, 서명·notarize가 전부 번들 전제). Windows 단일 exe와
+WebP는 D가 이미 준다. 대가는 `NSPanel` 오버레이·Spaces·fullscreen·TCC·ScreenCaptureKit·
+`AXUIElement` 캐럿을 objc2로 다시 만들고 **전부 재검증**하는 것이고, 12절 W0m.1이 그중
+캐럿과 실제 캡처 프레임은 재지 않았다.
+
+**그래서 C는 계획하지 않되 닫지도 않는다.** 다시 여는 조건은 둘 중 하나다 — Swift 툴체인이
+macOS에서 실제로 문제를 일으키기 시작하거나, `RoamlingMac`이 충분히 얇아져 재작성 비용이
+재검증 비용을 밑돌 때(W3b가 608→189줄로 줄인 방향이 계속될 경우).
+
+### 조각내서 갈아탄다 — 빅뱅으로 옮기지 않는다
+
+**항상 실제로 쓰이는 로직은 1벌이고, 어느 시점에 멈춰도 앱이 돈다.** 한 단위를 Rust로
+옮기고 → macOS가 Rust판을 부르기 시작하고 → **Swift 원본을 대조군으로 남겨** 같은 입력에
+같은 출력이 나오는지 확인하고 → 일치하면 Swift판을 지운다.
+
+대조가 필수인 이유는 W0m.2에 있다. `BasicSafeZonePlanner`는 **Swift `max(by:)`가 동점에서
+마지막 원소를 돌려준다**는 것까지 맞춰야 14,070개 질의에서 불일치 0이 나왔다. tie-breaking을
+그대로 옮기지 않으면 조용히 다른 모서리에 앉는다. **포팅이 기계적이라는 말이 안전하다는
+뜻은 아니다.**
+
+경계는 두 모양이다. 가끔 불리는 것은 **A. 계산만 넘긴다**(값 변환, 측정 3.9 µs). 매 tick
+불리는 것은 반드시 **B. 상태를 Rust가 들고 핸들로 부른다**(측정 4.7 µs) — A로 하면 60 Hz에
+변환 비용이 곱해진다.
+
+| 단위 | 내용 | 줄 | 모양 |
+|---|---|---:|---|
+| 1 | Geometry + CoordinateSpace ✅ 2026-09-02 | 175 | Rust 내부용 |
+| 2 | BasicSafeZone + DesktopWorld + DisplayTopology ✅ 2026-09-03 | 499 | A |
+| 3a | VisualEmptiness + CandidateScoring ✅ 2026-09-03 | 207 | A |
+| 3b | InterestPlacement ✅ 2026-09-03 | 229 | A |
+| 4 | AttentionModel + ReactionPolicy + Activity ✅ 2026-09-03 | 289 | **B** |
+| 5a | Movement + Pointer + Behavior + Timing ✅ 2026-09-03 | 576 | **B** |
+| 5b | **PlacementDirector** ✅ 2026-09-03 | 551 | **B** |
+| 6a | RuntimeTuning ✅ 2026-09-03 | 244 | A |
+| 6b | 활동 오케스트레이션 ✅ 2026-09-03 | 244 | **B** |
+| 6c | tick 본체 (rest · roaming · evade · 배치 적용) ✅ 2026-09-03 | ~800 | **B**, tick 2회 |
+| 7 | 애니메이션 해석·재생 (resolver · player · PetdexState) ✅ 2026-09-03 | 480 | A + 플레이어는 B |
+
+단위 4도 B가 됐다 — `AttentionModel`은 어느 소스를 보고 있었는지와 언제 떠났는지를,
+`ReactionPolicy`는 마지막 반응 시각을 tick 사이에 들고 있다. Swift가 핸들만 쥐고 이벤트만
+넘긴다. 선택된 이벤트는 **id만 돌려받는다** — Swift가 자기 표에서 되찾으므로 이벤트 전체를
+마샬링해 돌려보낼 이유가 없다.
+
+**단위 5는 5a와 5b로 갈랐다.** 5a는 tick 루프가 매 프레임 미는 세 state machine
+(`MovementController` · `PointerInteractionModel` · `BehaviorController`+`BehaviorTiming`)이고,
+5b가 그 위에 앉는 `PlacementDirector`다. "매 tick 불리는 것"과 "그것을 지휘하는 것"의
+경계로 자르는 편이 검증이 선명하다. (이 표에 있던 969줄은 실측이 아니라 어림이었다 —
+여섯 파일을 세어 보면 1,371줄이다.)
+
+**단위 6은 6a·6b·6c로 갈랐고, 여기서 방법이 한 번 바뀐다.** 지금까지는 "Swift 원본을 Core에
+대조군으로 남기고 런타임이 Rust를 부른다"였는데, **런타임 자신은 그 방법으로 옮길 수 없다** —
+스위치를 쥔 상위 호출자가 없다. 그래서 6b는 런타임의 private 필드 7개와 메서드 10개를 먼저
+`SwiftActivityDirector`로 **들어올려** 타입으로 만들고, 그것을 대조군으로 삼았다. 런타임의
+사본은 같은 커밋에서 지웠으므로 살아 있는 구현은 여전히 1벌이다.
+
+**6b는 답을 effect 목록으로 돌려준다.** 활동 디렉터는 펫을 움직일 수 없다 — movement ·
+behavior · placement 핸들은 런타임 것이다. 그래서 `[CancelRest, SettleInPlace, CancelRoute,
+SetNextWanderAt, ApplyReaction, RequestLuminance]` 중 필요한 것을 **순서대로** 돌려주고
+런타임이 수행한다. **순서가 곧 답이다** — setback은 자리를 확정하고, 경로를 끊고, *그 다음*
+반응한다. 버릴 코드가 아니다: 6c에서 런타임이 건너가면 이 effect들이 직접 호출로 바뀐다.
+
+플랫폼 호출은 규칙과 분리했다. "이 이벤트에 창 위치를 물어볼 가치가 있는가"는 Rust가 답하고
+(`wants_window_hint`), 실제 질의는 Swift가 한다 — 그 질의가 동기 왕복이라서.
+
+**`RuntimeTuning`은 5b에서 빼서 6a가 됐다.** 다른 단위는 Swift 원본을 Core에 대조군으로
+남기고 **런타임이** Rust를 부르는 모양인데, tuning은 타입 자체가 API다 — clamp가 `init`에
+있고 `RuntimeTuning.standard`·Codable 디코드가 Core 안에서 그 `init`을 직접 부른다.
+`RoamlingCore`는 `RoamlingEngine`을 못 부르므로(의존 방향은 항상 바깥 → Core), Rust가
+clamp를 맡으려면 타입을 Engine으로 **옮겨야** 하고 그러면 대조군이 사라진다. 살아 있는
+구현이 항상 1벌이라는 규칙과 대조 테스트 중 하나를 포기해야 하는 자리라서, 타입의 실제
+주인인 런타임이 건너갈 때 같이 옮긴다. 6a에서 타입을 `RoamlingEngine`으로 올리고 규칙을 `tuning.rs`로 옮겼다.
+Codable과 11개 저장 필드는 그대로라 읽는 쪽은 아무것도 안 바뀐다. clamp가 순서에 의존하므로
+(`catchArmDistance`는 **이미 clamp된** awareness에 걸린다) fixture 13,701 케이스 중 대부분이
+범위 밖 값이다 — clamp가 실제로 걸릴 때만 순서가 보인다.
+
+**6c에서 방법이 또 한 번 바뀌었다 — 대조군을 쓰지 않는다.** 런타임 위에는 스위치를 쥔
+호출자가 없고, 6b처럼 들어올려 대조군을 만들면 600줄짜리 전사(轉寫)를 하나 더 만들어 그
+전사가 맞다는 것만 증명하게 된다. 그래서 **실물을 녹화했다**: fake provider 위에서 진짜
+런타임을 40초 돌린 것 — 배회 · 커서 접근 · 낚아채기 · 드래그 · agent 턴 한 바퀴 · 낮잠 ·
+디스플레이 추가 — 을 tick 단위로 적어 `Tests/RoamlingLogicTests/RuntimeTrace.txt`에 커밋하고,
+포팅 후 **바이트 단위로 같은 답**을 요구한다. behavior state 19종 중 18종이 그 안에 나온다.
+
+녹화가 가능하려면 세 가지를 먼저 고쳐야 했다. (1) **무작위성을 인자로 받는다** — 시스템
+생성기를 5곳에서 직접 불러서 매 실행이 다른 세션이었다. (2) **`start(drivingTicks:)`** —
+tick 타이머와 agent 이벤트 배달이 같은 run loop에 있어서, 배달을 위해 loop를 돌리면 그
+사이에 tick이 몇 번 도는지 예측할 수 없었다. (3) `drainActivityEvents`가 실제 시간을
+진행시키지 않게. 셋 다 Windows 셸에도 필요한 것들이다 — 프레임 루프를 이미 가진 플랫폼은
+런타임의 타이머를 쓰지 않는다.
+
+**tick이 2회 호출로 갈라졌다.** 중간에 플랫폼에 물어봐야 하는 것이 있기 때문이다:
+`begin_tick`이 "이번 tick에 accessibility 왕복 비용을 낼 가치가 있는가"를 답하고(창을 보고
+있을 때만, 0.5초에 한 번), 셸이 물어본 뒤 `finish_tick`에 넘긴다. 캡처 요청도 같은 이유로
+출력으로 나간다 — 권한 · Task · 스로틀은 결정이 아니라 플랫폼의 몫이다.
+
+**런타임은 1,664줄에서 667줄로 줄었다.** 남은 것은 결정이 아닌 것들뿐이다 — 타이머,
+UserDefaults, 진단 파일, agent 구독, 스프라이트 시트.
+
+**남았던 6c 정의는 아래와 같았다.** rest lifecycle · roaming · evade · 배치 적용(`apply` ·
+`travelToSeat` · `holdSeat`). 콜백으로 방향을 뒤집을 필요는 없었다 — 플랫폼에 물어볼 것이
+두 개뿐이라 tick을 2회로 가르는 것으로 충분했다.
+
+**단위 7에서 그리기까지 갔다.** capability → 트랙 → 프레임 인덱스를 잇는 resolver와
+player, 그리고 Petdex 9행의 어휘가 `animation.rs`에 있다. tick이 답한 capability를
+Windows 셸이 아틀라스 칸으로 바꾸는 데 필요한 것은 이제 전부 Rust에 있다.
+
+여기서도 **정렬 안 된 컬렉션이 결정을 하고 있었다 — 네 번째다.** 패키지가 `idle` 행을
+선언하지 않으면 resolver가 `tracks.values.first`로 대역을 골랐는데, Swift는 딕셔너리 순회
+순서를 프로세스마다 바꾼다. 두 행짜리 패키지가 **실행할 때마다 다른 행을 그렸다.** 이번엔
+포팅이 아니라 fixture가 첫 줄에서 잡았다.
+
+**W4에 남은 것은 매니페스트 로딩과 아틀라스다** — `PetLoader` 246줄, `PetManifest` 162줄,
+`PetCatalog` 108줄, `MascotPetFactory` 621줄. 마지막 것은 내장 마스코트의 트랙을 코드로
+짓는 것이라 MVP 0의 Windows가 실제로 쓸 물건이다. 디코더는 W2b이고 D에서는 `image` crate
+한 줄이다. **W2b는 2026-09-07에 닫혔다** — 아래 W2b 절 참조.
+
+**5a가 A 대 B 비용 주장을 실제로 검증한 자리다.** tick당 크로싱 8회로 재보니 Rust 경로가
+4.706 µs/tick, Swift 원본이 0.099 µs/tick(둘 다 release) — 차액 4.6 µs는 60 Hz 프레임 예산의
+**0.03%**이고, 12절이 미리 잰 4.7 µs와 같은 값이다. 벤치는 `output/w-unit5/bench.swift`.
+
+**5b는 grid를 tick마다 보내지 않는다.** `PetSituation`은 world 전체를 들고 있고 그 안의
+luminance grid는 64열 × 40행 = 2,560개 double이다. tick마다 보내면 20 µs/tick인데,
+디스플레이 목록과 grid를 **바뀔 때만** 밀면(캡처는 3초에 한 번) 2.75 µs/tick이다 — 7배
+차이고, 이는 **바꾸기 전 Swift director의 2.86 µs와 같다.** Swift director는 review 때마다
+scene을 마샬링해 Rust planner를 불렀으므로, 방향을 뒤집어 상태를 Rust에 두니 크로싱이
+오히려 줄었다. 벤치는 `output/w-unit5/bench-director.swift`.
+
+5a에서 **경계 자체가 결함을 하나 냈고, 대조 테스트가 잡았다.** `RustPointerModel`이
+`init` 안에서 `configuration`에 대입했는데 **Swift는 `init` 안의 대입에 `didSet`을 실행하지
+않는다** — 핸들이 첫 튜닝 변경 전까지 기본값(awareness 170 / catch 74)으로 남아서 펫이
+커서를 잘못된 속도로 봤다. 알고리즘은 fixture가 비트 단위로 맞다고 증명한 뒤였다. 크로싱은
+fixture가 증명해 주지 않는다.
+
+`PlacementDirector` 551줄은 원래 단위 3에 있었는데 5로 옮겼다 — tick 사이에 상태(자리, 여정,
+마지막 리뷰)를 들고 있어서 호출마다 변환하는 A가 아니라 상태를 Rust가 들고 핸들로 부르는
+B다. 3b는 그 director가 **묻는 대상**(`InterestPlacing`)만 Rust로 넘겼다.
+
+`RoamlingCore`의 잎이 얇아서 이 순서가 성립한다 — `MovementController`는 `WorldPoint`와
+`WorldVector`만 알고 `DesktopWorld`를 모른다.
+
+**단위 2에서 macOS가 처음 갈아탔고, 배선이 예상보다 단순했다.** dylib 대신 **정적 링크**를
+쓰면 W0m.3이 측정한 rpath·`install_name` 교정·재서명이 전부 필요 없다 — 실행 바이너리에
+Rust 심볼 109개가 들어가고 동적 의존은 0, 번들은 8.4 → 9.0 MB. `scripts/build-rust-core.sh`가
+uniffi 바인딩을 생성하고 정적 아카이브를 놓으며, `test.sh`와 `build-app.sh`가 먼저 부른다.
+C 모듈은 `systemLibrary` 타깃이어야 한다 — `-I` 플래그는 그 타깃 안에서만 유효해서
+`RoamlingEngine`까지 전파되지 않는다.
+
+전환 확인은 **두 구현을 나란히 돌려 비교하는 테스트**가 한다(200개 배치, 400+ zone과 rest
+destination 전부 일치). Swift 원본은 그 대조군으로 남아 있고, 지울 때 이 테스트도 같이 간다.
+
+**differential fixture는 경계값을 일부러 심어야 한다.** 5a의 fixture를 난수만으로 만들었더니
+`age >= BehaviorTiming.x`를 `>`로 바꾸는 변이 7개가 전부 살아남았다 — 부동소수 난수가 정확히
+공표된 길이에 떨어질 리 없기 때문이다. `enteredAt + length`를 그냥 쓰는 것으로도 부족하다
+(`(e+l)-e != l`). 그래서 생성기가 `t - base == offset`이 성립하는 double을 nextUp/nextDown으로
+찾아 쓰고, 7개 transient 상태 각각을 길이 -1ulp / 정확히 / +1ulp 세 지점에서 tick한다. 그
+스윕을 넣은 뒤 변이 7개가 모두 죽는다.
+
+**5b에서 같은 문제가 더 크게 나왔다.** director의 답 6종 중 난수 시뮬레이션이 낸 것은
+4종뿐이고, `escape`(사용자 문단 위에서 비켜서기)는 8,699줄에 한 번, `coveringCaret`·
+`coveringWork`(앉은 자리가 나중에 틀려짐)는 0번이었다. 원인은 세 가지였고 전부 실측으로
+찾았다 — (1) emptiness는 밝기가 아니라 **평탄도**를 재는데(이웃 차이 0.02면 이미 "꽉 참")
+난수 필드는 어디나 busy라 앉을 자리가 아예 없었다. 배경은 평평하게 두고 busy 사각형을
+몇 개 얹는 식으로 바꿨다. (2) `escape`는 2.5초의 parked dwell을 요구하는데 run이 34 tick
+× 1/30초라 도달 자체가 불가능했다. (3) 도착 후의 자리는 **정의상** caret과 content를 피해
+고른 것이라, 화면이 그 위에서 바뀌지 않는 한 두 규칙은 발동하지 않는다.
+
+그래서 fixture 꼬리를 **스크립트**로 만들었다: 앉힌 다음 caret을 펫 위로 옮기고, 창을
+채우고, 8초 타임아웃을 넘기고, arrival tolerance에 정확히 서 본다. 이 절을 넣은 뒤
+intent 6종·travel 사유 6종이 모두 나오고, 타임아웃·arrival `<=`·caret 규칙·abandon clamp
+변이가 전부 죽는다. **타임아웃은 사용자가 제보한 제자리 걷기 버그를 구조하던 바로 그
+분기다** — 난수만으로는 한 번도 실행되지 않았다.
+
+### 양 플랫폼이 붙는 방식이 다르다
+
+```text
+macOS  :  Swift 셸  --FFI(uniffi)-->  Rust core
+Windows:  Rust 셸   --직접 호출-->     Rust core   (같은 crate)
+```
+
+**Windows에는 FFI가 없다.** Rust가 Rust를 부르므로 경계도 직렬화도 없고, 오늘 측정한
+4.7 µs/tick은 **macOS에만 붙는 비용**이다.
+
+그 대신 **Windows는 조각 단위로 시작할 수 없다.** Rust 셸이 부를 상대는 오케스트레이터인데
+그것이 아직 Swift면 부를 것이 없고, Rust는 Swift를 부르지 못한다. W4에 필요한 양은
+**Core 2,463 + Engine 1,453 + Pet 1,587 ≈ 5,500줄**이다(`RoamlingSources` 1,010줄은 MVP 0에
+필요 없으므로 나중에 — 그것을 가능하게 하려고 agent 주입 이음새를 먼저 넣었다).
+
+**조각내기가 사주는 것은 "Windows가 빨리"가 아니라 "안전하게, 그리고 언제든 멈출 수 있게"다.**
+대조 테스트가 계속 어긋나거나 두 언어 빌드가 예상보다 아프면 **W4를 Swift로 하면 되고**,
+그 경우에도 W1~W3b는 하나도 버려지지 않는다.
+
+### 착수 전에 정한 것
+
+- **테스트는 로직을 따라간다.** 지금 3,663줄이 Swift 하네스다. Core가 Rust로 가면
+  `cargo test`로 같이 가야 differential test를 쓰고 버릴 수 있다.
+- **FFI는 tick당 한 번, 스냅샷 in → 지시 out.** 프로퍼티마다 부르는 모양으로 새면 측정한
+  숫자가 무너진다. W1의 `PlatformServices`가 이미 그 모양이므로 지키기만 하면 된다.
+- **`RoamlingPet`은 로직과 함께 간다.** W2b의 디코더가 Rust `image`이므로 자연스럽다.
+- **빌드·서명**: `build-app.sh`에 cargo 단계, `install_name`을 `@rpath`로 교정(W0m.3에서 실측).
+
+### A′는 A의 대안이 아니라 대피로다
+
+경계 후보 타입이 전부 `Codable`이라(`DisplaySnapshot`, `WindowSnapshot`,
+`PointerSnapshot`, `FocusSnapshot`, `DesktopWorldSnapshot`, `WorldPoint`, `WorldRect`)
+구조체 마샬링을 손으로 쓸 필요가 없다. 경계는 "스냅샷 in → 표시할 프레임 out"에 둔다.
+프레임 rect 표를 시작할 때 한 번 넘기면 C# 쪽은 아틀라스 규격을 몰라도 되고
+`CLAUDE.md`의 행별 프레임 수 계약이 두 언어로 갈라지지 않는다.
+
+다만 **A′도 Swift가 Windows에서 빌드돼야 한다** — Core를 Windows DLL로 만들어야 하므로
+W0의 1·2번은 그대로 남고 회피되는 것은 4번뿐이다. 대가는 한 앱에 두 언어·두 빌드
+시스템·두 디버거, `RoamlingPet` 2,094줄의 분할, 그리고 Swift 런타임 DLL과 .NET 런타임을
+모두 싣는 가장 무거운 배포다.
+
+### Rust는 포팅 결정이 아니라 재작성 결정이다
+
+**C를 "A가 실패하면 가는 대피로"로 두지 않는다.** 대피로는 원래 계획보다 작아야 하는데
+C는 신규 ~16,000줄에 더해 **이미 동작하는 macOS 앱까지 갈아엎는다.** Swift-on-Windows가
+막혔다는 사실이 C를 싸게 만들어주지도 않는다 — C의 비용은 처음부터 그 값이다. A의 작은
+대피로는 A′다.
+
+장기적으로 C가 최선의 최종 형태인 것은 맞다. 1벌이고, 바이너리 하나로 배포되며(Swift는
+Windows에서 런타임 DLL 동봉), `windows-rs`가 Microsoft 공식이고, `image` 크레이트가
+WebP를 그냥 디코드해 B3가 사라진다.
+
+**다만 배터리 이득은 기대만큼 크지 않다.** `docs/architecture.md`의 성능 모델대로 이 앱의
+비용은 active travel의 60Hz 재그리기와 capture 주기(1회 62ms, 3~6초 간격)가 지배하며 둘 다
+언어와 무관하다. Swift도 ARC가 붙은 네이티브 코드지 VM이 아니다. 실제 이득은 배포 단순함과
+메모리 소폭, 그리고 1벌이라는 구조다.
+
+**판단 시점은 "A가 실패했을 때"가 아니라 "Swift 코드베이스가 제 역할을 다했을 때"다.**
+MVP 4는 2026-09-02에 닫혔고 사다리는 사실상 여기서 멈춘다 — MVP 5(저작 UI)는 이름만 있는
+항목이라 필요해질 때 정의하고, MVP 6은 존재하지 않는다. 그래도 재작성 결정은 지금 하지
+않는다: 아래 "리팩터가 먼저"대로 W1·W2가 어떤 언어로 가든 이식 명세가 되므로, 그 둘을
+끝낸 뒤 실제 경계를 보고 결정하는 편이 싸다.
+
+### W0가 판정표다
+
+**2026-09-01에 W0를 실행했고 분기는 A로 닫혔다. 실측치는 9절에 있다.** 아래는 그때
+세워둔 판정 기준이며, 되돌아와 재검토할 때를 위해 남긴다.
+
+```text
+W0 1·2번(툴체인/Core 빌드/테스트) 통과 + 4번(layered window) 통과
+        -> A. Swift 단일. 가장 단순하다.
+
+W0 1·2번 통과 + 4번이 Swift에서 지옥
+        -> A'. Core는 살리고 UI만 C#으로.
+
+W0 1·2번부터 막힘
+        -> B. Swift on Windows 자체를 포기한다.
+
+어느 경우든 C는 여기서 고르지 않는다.
+```
+
+### 리팩터가 먼저, Windows 코드는 나중
+
+**Options:** Windows adapter를 먼저 세우고 맞춰 리팩터, 리팩터를 먼저 끝내고 adapter 작성.
+
+**Chosen:** 리팩터 선행. W1·W2는 Windows 코드가 0줄이고 전부 macOS에서 검증된다. 이걸 먼저
+끝내면 Windows 작업이 "adapter 채우기"로 줄어든다. 순서를 뒤집으면 검증되지 않은 두 플랫폼
+위에서 동시에 리팩터하게 된다.
+
+**W1·W2는 A·A′·B 어느 쪽으로 가도 버려지지 않는다.** Runtime을 macOS 모듈에서 빼내고
+`PetAsset`을 `CGImage`가 아닌 데이터 포맷으로 만드는 일은, 어떤 언어로 포팅하든
+"무엇을 재구현해야 하는가"를 정의해준다. C로 가더라도 그 경계가 이식 명세가 된다.
+즉 이 리팩터는 언어 선택에 건 베팅이 아니다.
+
+## 4. 게이트
+
+`docs/history/mvp.md`와 같은 규칙이다 — 한 게이트의 exit 조건을 닫기 전에 다음으로 넘어가지 않는다.
+
+### W0 — 스파이크 ✅ 완료 2026-09-01 (버리는 코드, **Windows 머신에서 했다**)
+
+**결과는 9절에 있다. 아래는 실행 전에 세운 질문이고, 예측이 빗나간 곳은 그대로 둔다 —
+무엇을 잘못 예상했는지가 다음 게이트의 정보다.**
+
+1. Windows 툴체인에서 `RoamlingCore`가 빌드되는가 (`Package.swift`의 `.linkedFramework`에
+   `.when(platforms:)` 조건이 필요할 것이다) — **빌드된다. 조건은 필요 없었다.**
+2. `RoamlingLogicTests`가 Windows에서 통과하는가 — **Core 72개 통과**
+3. **`Bundle.module`이 리소스를 찾고 `.lproj`/`Localizable.strings`가 읽히는가** — **읽힌다**
+4. `WinSDK` import로 layered window에 per-pixel alpha가 찍히는가 — **찍힌다**
+
+3번과 4번이 진짜 미지수라고 봤는데, 실제로는 **둘 다 통과했고 예상하지 못한 곳(툴체인
+환경변수, 그리고 남은 공백인 다중 디스플레이 미검증)에서 비용이 나왔다.**
+
+#### 4번은 Rust로도 만든다 — 대조군
+
+오버레이 창이 이 포트에서 가장 위험한 단일 항목이다: per-pixel alpha + click-through +
+always-on-top + 멀티모니터 + per-monitor DPI v2. 이걸 Swift(`WinSDK`)와
+Rust(`windows-rs`) **양쪽으로 각각 200줄쯤** 만든다.
+
+Swift 하나만 해서 실패하면 **Swift 탓인지 Windows 탓인지 구분되지 않는다.** 판정은 이렇다:
+
+- 둘 다 된다 → 제품 요구가 Windows에서 성립한다. Swift가 얼마나 더 아픈지 실측치를 얻는다
+- Rust만 된다 → 문제는 Windows가 아니라 Swift다. A′ 또는 B로 간다
+- 둘 다 안 된다 → 언어 문제가 아니라 **요구사항을 다시 봐야 한다.** 가장 중요한 정보다
+
+**엄격히 오버레이 창만 만든다.** 로직을 Rust로 옮겨 "느낌을 보는" 순간 그것이 C의
+시작이고, C는 W0에서 고르는 선택지가 아니다.
+
+### W1 — Runtime 추출 (macOS, 동작 변화 0) ✅ 완료 2026-09-02
+
+구현이 끝난 같은 날 사용자가 서명 빌드를 실사용해서 달라진 점이 없다고 확인했고, 그것으로
+exit가 닫혔다. 테스트 126개가 통과한다. 실제로 생긴 것:
+
+- `Sources/RoamlingEngine/` — `RoamlingRuntime`, `PlatformServices`,
+  `PetOverlayProviding`/`PetOverlayInputHandling`, `BasicSafeZoneProvider`
+- `Sources/RoamlingMac/MacPlatform.swift` — `makeServices()` 한 함수. Windows 쪽 대응물이
+  이것 하나가 된다
+- `CoordinateSpaceSource`(Core) — provider가 읽고 런타임만 쓰는 공유 좌표계.
+  `handleDisplayChange`가 오버레이에 좌표계를 손으로 밀어 넣던 줄이 사라졌다
+- `scripts/test.sh`의 import 게이트
+- `Tests/RoamlingLogicTests/RuntimeLogicTests.swift` — 가짜 provider로 런타임을 만들고
+  클럭을 손으로 감아 rest 경로 전체를 통과시키는 테스트 2개. 둘 다 mutation으로 확인했다
+
+아래는 착수 시점에 정한 게이트 정의다.
+
+`RoamlingRuntime`을 AppKit 없이 컴파일되는 새 모듈 **`RoamlingEngine`**으로 옮긴다.
+클래스 이름은 그대로 둔다 — 모듈과 타입이 같은 이름이면 Swift에서 서로를 가린다.
+
+**목표는 Windows 작업을 "`PlatformServices` 채우기"로 줄이는 것이다.** 부수적으로,
+로직 하네스가 가짜 provider로 런타임을 만들어 `tick()`을 돌릴 수 있게 된다 — 지금은
+앱을 실행하지 않고는 오케스트레이션 한 줄도 검증할 수 없다.
+
+**In scope**
+
+- B1의 표대로 `PlatformServices.swift`의 프로토콜을 **런타임이 실제로 호출하는 모양**으로
+  고친다. `MacDisplaySnapshotSet` → Core의 `DisplaySnapshotSet`, SafeZone은 async를 버리고
+  동기, Focus/Capture에 `isAuthorized`/`requestAuthorization()`.
+- 새 타겟 `RoamlingEngine`: 런타임, DI 구조체 `PlatformServices`,
+  `PetOverlayProviding`/`PetOverlayInputHandling`, `BasicSafeZoneProvider`
+  (이미 Foundation만 쓰므로 같이 옮긴다).
+- `NSObject`·`@objc` selector 타이머·`NSApplication` 알림·`NSPoint` delegate 제거.
+  타이머는 클로저 `Timer`, 화면 변경은 `DisplayChangeObserving`.
+- 하네스 seam: `clock`·`UserDefaults`·`PetCatalog` 주입, public `tick()`, 상태 읽기 프로퍼티.
+- `scripts/test.sh`에 AppKit import 게이트.
+
+**Out of scope** — 동작·타이밍·기본값·진단 문자열 변경 전부. `CGImage`는 W2까지,
+`Network`는 W3까지 그대로 둔다.
+
+**Acceptance**
+
+- `Sources/RoamlingEngine`에 `import AppKit|Cocoa|SwiftUI|ScreenCaptureKit|ApplicationServices`
+  가 없다. **컴파일러는 이걸 못 잡는다** — macOS SDK에 AppKit이 있어 링크 설정 없이도
+  빌드된다. `scripts/test.sh`가 grep으로 실패시킨다.
+- `RoamlingMac`에 남는 것: Mac provider들 + 오버레이 패널 + `MacPlatform.makeServices()` +
+  메뉴/튜닝 UI + app delegate + 로컬라이즈 문자열.
+- 기존 테스트 전부 + 런타임을 실제로 tick 시키는 테스트 최소 1개가 통과한다.
+- app delegate가 쓰는 public API는 그대로다 (`init`만 `init(services:)`).
+- identity 서명 빌드에서 Accessibility·Screen Recording 권한이 유지된다.
+
+**Exit** — 서명 빌드를 실사용해서 **달라진 점을 사용자가 못 느낀다**: 배회 · 포인터 회피 ·
+잡기 · 드래그 · agent 착석 · 취침 · 디스플레이 연결 변경 · 권한 프롬프트 · scale 변경.
+
+### W2 — 이미지 파이프라인 탈-CoreGraphics (macOS) ✅ 완료 2026-09-02
+
+**원래 계획은 디코더까지 한 게이트에 묶는 것이었는데 둘로 갈랐다.** 문서의 B2(공개 API
+탈-`CGImage`)와 B3(WebP 디코더)는 성격이 다르다 — B2는 어느 언어로 가도 이식 명세가 되고,
+B3는 4만 줄짜리 C를 저장소에 들이는 결정이라 **언어 결정과 같은 결정**이다. 그래서 W2는
+B2까지, 디코더는 W2b로 미뤘다.
+
+실제로 생긴 것:
+
+- `PetImage` — RGBA8 premultiplied, 위 행부터, 행 패딩 없음. `CGContext`가 이미 만들던
+  레이아웃이라 경계를 건너는 바이트가 예전에 화면에 닿던 바이트와 같다
+- `PetFrame` — 시트 위의 사각형. 프레임을 복사하지 않는다(아래 참조)
+- `PetImageCanvas` — 합성용 블리터. nearest-neighbour + 수평 미러
+- `PetImageSourcing` — 디코딩과 placeholder 드로잉. macOS 구현은 `MacPetImageSource`
+- `RoamlingPet`은 Foundation만 import하고 `RoamlingEngine`은 프레임워크를 하나도 링크하지
+  않는다. `scripts/test.sh`의 import 게이트가 이미지 프레임워크까지 막는다
+- `PreW2FrameHashes` — 바뀌기 전 파이프라인에서 뜬 336개 프레임 해시
+
+**두 가지는 고쳐 쓰지 않고 지켰다.**
+
+1. 오버레이는 이미 보여주는 프레임을 다시 받으면 재그리지 않고, 그 판단을 **항등성**으로
+   한다. 프레임을 복사본으로 만들면 매 tick이 새 프레임으로 보여 60Hz로 재그린다. 그래서
+   프레임은 사각형으로 남기고, Mac 쪽이 시트당 `CGImage` 하나를 캐시해 셀마다 crop한다 —
+   `CGImage.cropping`이 공짜로 주던 것과 같은 구조다. 셀을 복사하면 펫당 16 MB가 붙는다.
+2. `PlaceholderPetFactory`의 시트는 안티에일리어싱된 베지어 아트라 어떤 이식 가능한
+   블리터도 재현하지 못한다. **매니페스트와 트랙은 데이터라 남기고 드로잉만**
+   `RoamlingMac`으로 한 줄도 바꾸지 않고 옮겼다.
+
+**게이트: 336프레임 전부 바이트 동일.** 내장 mochi(96) · 내장 fat-mochi(56) ·
+shipped `mochi-v3` 패키지(96) · placeholder(88). 크롭에 1픽셀 오프셋을 넣으면 테스트가
+즉시 실패하는 것을 mutation으로 확인했다. 실행 중인 앱의 RSS는 75.8 MB → 80.9 MB(+5.1 MB).
+
+**Exit**: 서명 빌드 실사용에서 펫이 전과 같아 보인다 — 2026-09-02 사용자가 확인했다.
+
+### W2b — 이식 가능한 디코더 (B3) ✅ 완료 2026-09-07
+
+D를 골랐으므로 벤더링은 없었다. `image` 크레이트가 WebP와 PNG를 함께 주고, 이미
+`roamling-pet`이 쓰고 있었다. 남은 일은 macOS가 그것을 부르게 하는 것이었다.
+
+**디코더는 `roamling-core`로 내려갔다.** `roamling-pet`이 core를 의존하므로 그 반대는
+순환이고, 셸이 부를 수 있으려면 core여야 했다. `roamling-pet`은 `pub use`로 재수출하므로
+`roamling-win`과 `package.rs`는 한 줄도 안 바뀌었다. uniffi로는 `decode_pet_image` 하나가
+늘었다.
+
+#### 두 디코더는 같은 답을 내지 않고 있었다
+
+바꾸기 전에 대조부터 했고, 그게 결함을 찾았다. 시트 아홉 장(PNG·WebP, 내장·패키지,
+v1·v2·v3)을 ImageIO와 Rust로 각각 디코드해 바이트를 비교했다:
+
+| | ImageIO | Rust (고치기 전) |
+|---|---|---|
+| `mochi-standard-atlas.webp` | `099042fa…` | `1d6943ac…` |
+| `mochi-extension-atlas.webp` | `b91016c2…` | `b91016c2…` |
+| `fat-mochi-runtime-atlas.png` | `5f3d4458…` | `51c7deba…` |
+
+표준 시트에서 **2,875,392 픽셀 중 47,678개(1.66%)**가 달랐다. 최대 채널 차는 **1**이고,
+다른 픽셀은 **전부 부분 투명**이었다 — 불투명(alpha 255) 0개, 완전 투명 0개.
+
+premultiply 반올림이었다. CoreGraphics는 반올림하고 `roamling-pet`은 버리고 있었다.
+어느 공식인지는 스트레이트 알파를 뽑아 후보를 전수 대조해서 특정했다:
+
+| 공식 | 불일치 픽셀 |
+|---|---|
+| `c*a/255` (버림, 원래 코드) | 47,678 |
+| `(c*a+127)/255` | **0** |
+| `(c*a+128)/255` | 380 |
+| `div255` 근사 | 0 |
+| `round(c*a/255.0)` | 0 |
+
+`+128`이 380개를 틀리는 이유는 `c*a/255`가 `k + 127/255 ≈ k+0.498`인 경우를 올려버리기
+때문이다. `+127`을 골랐다 — 정수 연산이고, 동점이 생길 수 없어(`2*c*a`가 255의 홀수배여야
+하는데 255가 홀수다) 반올림 규칙을 고를 필요가 없다.
+
+고친 뒤 **아홉 장 전부 바이트 단위로 일치한다.**
+
+이건 잠복해 있던 결함이기도 하다. Windows는 이 디코더를 이미 쓰고 있었으므로, 그동안
+부드러운 가장자리를 macOS보다 한 단계 어둡게 그리고 있었다. 눈에 보이는 차이는 아니지만
+**프레임 해시는 정확히 비교한다** — 두 플랫폼이 같은 픽스처를 공유할 수 없는 상태였다.
+
+#### 하네스가 풀렸다
+
+`PetLogicTests`는 두 갈래로 macOS에 묶여 있었다. 디코딩은 위가 가져갔고, 남은
+`CGImageDestination` 픽스처 **인코딩**은 하네스 안의 PNG writer로 바꿨다
+(`PortablePNG.swift`). deflate의 stored 블록을 쓰므로 압축 코드가 없고, 바이트가
+예측 가능해서 읽어 되비교하는 파일에 오히려 맞다.
+
+그 과정에서 테스트 하나가 위아래 뒤집힘을 잡았다. `CGContext`는 원점이 왼쪽 **아래**라
+`y: 0` 채우기가 이미지의 **마지막** 행이었는데, 그걸 top-down으로 읽어 옮기면 시트가
+뒤집힌다. "frame zero slices visual top row"가 그것을 말한다.
+
+**`scripts/test.sh`의 import 게이트가 이제 `Tests/RoamlingLogicTests`도 본다.** 다섯 모듈과
+하네스 모두 Apple 이미지·윈도우 프레임워크 import가 0이다.
+
+#### 남은 것
+
+`PetImageSourcing`은 그대로 있다. `placeholderAtlas`는 안티에일리어싱된 벡터 그림이라
+데이터 변환이 아니고, 플랫폼마다 자기 방식으로 그리는 것이 맞다. Windows 셸은 그 자리를
+자기 것으로 채운다.
+
+### W3 — Sources 이식 ✅ 완료 2026-09-02
+
+W0가 Windows 빌드를 멈춘 **두 줄 중 나머지 하나**(`import Network`)가 사라졌다. 다른 하나
+(`import CoreGraphics`)는 W2가 없앴다. **이제 포터블 다섯 모듈에 Apple 전용 import가 없다.**
+
+- `LoopbackSocket` — BSD 소켓으로 쓴 loopback 리스너. `#if canImport(Darwin|Glibc|WinSDK)`
+  세 갈래뿐이고 그 위의 HTTP 파싱·토큰 검사·크기 상한은 한 줄도 안 바뀌었다.
+  `127.0.0.1` 바인드는 기본값이 아니라 요구사항이다 — 이 소켓으로 토큰이 오간다.
+- `accept`는 블로킹이고, `stop()`은 **자기 자신에게 한 번 접속해서** 그것을 깨운다.
+  폴링하면 한 번 일어날 종료를 잡으려고 CPU를 영원히 깨우게 된다.
+- `HookCommand` — 두 installer가 쓰던 `/usr/bin/curl` 하드코딩을 한곳으로 모으고
+  경로·따옴표·출력 무음화를 OS별로 갈랐다. Windows는 10 build 1803부터 System32에
+  진짜 `curl.exe`가 있어 경로만 다르다.
+- `PetCatalog.userPetFolder` — Roamling 자기 폴더만 `%APPDATA%\Roamling\Pets`로 갈린다.
+  agent 폴더(`.codex/pets` · `.petdex/pets`)는 agent들이 홈에 두므로 그대로다.
+  메뉴의 "펫 폴더 열기"도 같은 값을 읽어서 아무도 안 읽는 디렉터리를 열 수 없다.
+
+**옮기면서 결함 하나를 만들고 잡았다.** 읽지 않은 요청 바이트가 남은 소켓을 닫으면 커널이
+RST를 보내 방금 쓴 응답을 버린다 — 크기 초과로 거절당한 hook이 400 대신 **아무 답도 못 받는**
+것처럼 보였다. `shutdown(WR)` 뒤 상한을 둔 drain으로 고쳤고, 거절 뒤에도 다음 hook을 계속
+받는지까지 테스트가 고정한다. `NWConnection.cancel()`이 공짜로 해주던 일이다.
+
+**검증**: 로직 테스트 134개, 그리고 서명 빌드의 실제 receiver 두 개에 curl —
+204 · 401 · 20회 연속 전부 204 · 2 MB 거절 후에도 계속 동작 · 두 포트 모두 `127.0.0.1`에만
+바인드.
+
+### W3b — 셸 표면을 데이터로 (macOS, 동작 변화 0) ✅ 완료 2026-09-02
+
+**W4가 두 번째 셸을 만드는 순간 갈라질 것들을 먼저 모은다.** W1이 런타임에 한 것과 같은
+일을 UI 표면에 한다 — 구조는 포터블 모듈에 데이터로 두고, 각 플랫폼은 렌더만 한다.
+2026-09-02에 `RoamlingMac` 13개 파일을 전수 검토해 넷을 찾았다.
+
+**1. 메뉴 트리** — `RoamlingAppDelegate.swift` 608줄, `NSMenuItem` 34개, 서브메뉴 6개
+(펫 · 크기 · Claude · Codex · 손쉬운 사용 · 시각 배치). macOS는 메뉴바 `NSStatusItem`,
+Windows는 시계 옆 트레이(`Shell_NotifyIcon`)라 **렌더러는 당연히 다르지만 트리는 같아야
+한다.** 지금 구조로 가면 항목 하나 추가할 때마다 양쪽을 고쳐야 하고, 한쪽만 고치면 조용히
+어긋난다. 메뉴가 호출하는 런타임 public API 32개는 이미 공유되므로 남은 것은 트리뿐이다.
+
+**2. 튜닝 패널의 범위 — 이미 어긋나 있다.** `RuntimeTuningWindowController`의 슬라이더 11개가
+범위와 스텝을 직접 들고 있는데, 같은 범위가 `RuntimeTuning.init`의 clamp에도 있다. 한 진실이
+두 벌이고 **`catchArmDistance`가 실제로 갈라졌다**:
+
+```text
+Core : catchArmDistance.clamped(to: 40...self.pointerAwarenessDistance)   -> 최대 360
+UI   : range: 40...140                                                     -> 최대 140
+```
+
+pointer awareness를 360까지 올려도 catch arm은 140을 못 넘는다. **이건 Windows 문제가 아니라
+지금 있는 결함이고**, 셋째 사본이 생기기 전에 닫는 것이 맞다. 범위·스텝·단위는 Core가
+정본이어야 한다.
+
+**3. 사용자에게 보이는 문자열 91개** — `Sources/RoamlingMac/Resources/{en,ko}.lproj`에 있다.
+9절이 Windows에서 `.lproj`가 무수정으로 읽힌다고 확인했지만 **그 번들은 AppKit 모듈 것**이라
+Windows 셸이 못 읽는다. `LocalizedText.swift`는 이미 Foundation 20줄이므로 옮길 것은
+리소스 위치뿐이다.
+
+**4. 알림 8개** — `NSAlert` 8곳. *무엇을 말할지*는 정책이고 *어떻게 띄울지*가 플랫폼이다.
+설치 결과·권한 안내 문구가 셸에 박혀 있으면 3번과 같은 이유로 갈라진다.
+
+**올바르게 플랫폼에 남는 것** (옮기지 않는다): provider 7종, 오버레이 패널,
+`MacPlaceholderArt`, `MacPetImageSource`, `MacPlatform.makeServices()`, 그리고 앱 수명주기
+(`NSApp.setActivationPolicy(.accessory)`, terminate).
+
+**실제로 생긴 것** (2026-09-02):
+
+- `RoamlingShell` — `ShellMenu.items(for:)`(런타임 상태의 순수 함수), `MenuAction`(닫힌 집합),
+  `ShellController.perform`, `ShellPrompt`, 그리고 문자열 91개. **위젯은 하나도 없다.**
+- `RoamlingAppDelegate`는 608줄 → **189줄**. 남은 것은 렌더와 모달뿐이다.
+- `RuntimeTuningKey` + `RuntimeTuning.limits(for:)`(Core) — 슬라이더 범위의 정본.
+  `catchArmDistance`가 실제로 넓어졌다: pointer awareness 360에서 이제 300을 받는다.
+- 테스트 5개가 붙었다. 메뉴가 값이 된 덕에 **처음으로 검증된다** — 펫·크기가 정확히 하나만
+  체크되는지, 토글이 자기가 뒤집는 상태를 보고하는지, 설정·권한을 건드리는 동작이 전부
+  먼저 묻고 되돌릴 수 있는 동작은 묻지 않는지, 번역 안 된 키가 제목으로 새지 않는지.
+  전체 133개 통과.
+- import 게이트가 `Sources/RoamlingShell`까지 덮는다.
+
+**남은 것**: `RuntimeTuningWindowController`(SwiftUI)의 *레이아웃*은 아직 macOS 전용이다.
+필드 목록·범위·단위는 Core와 Shell이 들고 있으므로 Windows는 렌더러만 쓰면 되지만, 섹션 제목과
+순서는 아직 SwiftUI 뷰 안에 있다. W4에서 트레이를 만들 때 같이 뺀다.
+
+**Exit**: W1·W2와 같다 — 메뉴·튜닝 패널·알림이 실사용에서 전과 같고, `catchArmDistance`만
+Core의 범위대로 넓어진다(이건 의도된 수정이므로 따로 확인받는다).
+
+**언어 결정과의 관계**: D로 가면 이 데이터 트리가 Rust에 살고 양 플랫폼이 렌더만 한다.
+A로 가면 Swift 포터블 모듈에 산다. **어느 쪽이든 필요한 일이라 결정을 기다리지 않는다** —
+W1·W2와 같은 성질이다.
+
+### W4 — Windows 최소 루프 ✅ 완료 2026-09-04
+
+tray + layered window + Display/Pointer/Idle provider.
+**exit 조건: MVP 0 수준(배회 · 포인터 회피 · 잡기 · 드래그)이 Windows에서 돌고 사용자가
+실사용으로 확인한다.**
+
+#### 착수 시점의 상태 (2026-09-03)
+
+**펫이 무엇을 할지 결정하는 코드는 전부 Rust에 있다.** 단위 1~7이 끝났고
+`rust/roamling-core`가 geometry · world · topology · emptiness · 배치 · attention ·
+반응 · 튜닝 · 활동 지휘 · tick 본체 · 애니메이션 해석까지 들고 있다. macOS 앱이 그것을
+쓰고 있고, `RoamlingRuntime`은 1,664줄에서 667줄로 줄어 결정이 아닌 것만 남았다.
+
+**Windows 셸이 부를 대상은 `PetRuntime`(FFI 이름 `PetLoop`) 하나다.** FFI를 거치지 않고
+crate를 직접 링크하면 된다 — `crate-type`에 `rlib`이 이미 있다.
+
+```rust
+let mut pet = PetRuntime::new(position, RuntimeTuning::default(), seed);
+pet.set_displays(displays);          // 데스크가 바뀔 때만
+pet.set_object_size(size);
+loop {
+    let wants_focus = pet.begin_tick(now);        // AX 왕복이 값어치 있나
+    let focus = if wants_focus { platform.focus() } else { None };
+    let out = pet.finish_tick(&TickInput { .. });
+    // out.position / out.capability / out.look_direction_degrees / out.locomotion_rate
+    // out.luminance_requests / out.diagnostics / out.persist_position
+}
+```
+
+MVP 0에는 focus도 capture도 필요 없다 — `focus_authorized: false`,
+`capture_authorized: false`로 두면 배회 · 회피 · 잡기 · 드래그가 전부 돈다.
+
+#### 첫 번째로 할 일 — fixture가 Windows에서도 통과하는지
+
+**차등 fixture 10개(14 MB, 6만+ 케이스)는 전부 macOS/arm64에서 생성됐고, Windows에서는
+한 번도 돌려본 적이 없다.**
+
+```sh
+cd rust && cargo test --release
+```
+
+`sqrt`는 IEEE가 정확값을 요구하지만 **`hypot` · `atan2` · `round`는 아니다.** 이 셋은
+`geometry.rs`(거리), `pointer.rs`(시선 각도), `animation.rs`(방향 16분할)에 있고, x86_64
+MSVC의 libm이 1 ulp라도 다르면 fixture가 그 자리에서 깨진다. **깨지면 그것이 포팅 실패가
+아니라 발견이다** — 어느 함수인지 fixture가 줄 단위로 짚어 준다. 대응은 두 갈래다:
+(1) 해당 연산을 자체 구현으로 바꾸거나, (2) fixture를 플랫폼별로 나눈다. 어느 쪽이든
+**Windows 코드를 쓰기 전에 알아야 한다.**
+
+#### 실행 결과 — 2026-09-03, Windows 11 / x86_64 / MSVC
+
+**깨졌다. 그리고 예측한 그 자리다.** 10개 중 5개 실패:
+
+| 통과 | 실패 |
+|---|---|
+| activity · animation · attention · emptiness · tuning | geometry · interest · mechanics · placement · world |
+
+**포팅 결함이 아니다.** Swift도 Rust도 똑같이 `hypot`/`atan2`를 부르고, 차이는 **플랫폼 libm**에서
+온다 — macOS는 정확 반올림을 하고 MSVC UCRT는 하지 않는다. 첫 불일치:
+
+```text
+point.distance   macOS  868.9620581941424
+                 Win    868.9620581941423     1 ULP
+```
+
+##### 재본 것
+
+```text
+hypot   600 케이스   std(Win) 583 · libm crate 559 · naive sqrt 583 · borges+fma 561
+atan2 3,057 케이스   std(Win) 3053 · libm crate 2771
+
+std::hypot == naive sqrt(a2+b2)          600 / 600   (완전히 같다)
+hypot 불일치 17건                         전부 정확히 1 ULP (그보다 큰 것 0건)
+atan2 불일치 4건이 16방향 버킷을 바꾸는가   0 / 4
+비용                                      hypot 7.82 ns · naive 2.68 ns (2.91배)
+```
+
+**`libm` 크레이트는 두 함수 모두에서 std보다 나쁘다.** 반사적으로 집지 말 것 — 실제로 걸어봤더니
+mechanics가 142→60행, world가 4250→76행으로 더 일찍 깨졌다.
+
+**하류 실패는 값이지 결정이 아니다.** 세 곳을 열어봤고 전부 같은 답을 골랐다:
+
+```text
+placement.decide  [2.0, 104.248…, 265.709…, 35.0915637166929(6→7), 0.0, 0.0, 1.0]
+                   ↑결정 종류   ↑x        ↑y   전부 동일, 거리값만 마지막 자리
+world.safeZone.destination   목적지·플래그·점수 동일, 거리만 1 ULP
+interest.evaluateSeat        점수가 ~8 ULP (하류에서 누적), 나머지 필드 동일
+```
+
+#### 처방 — 두 함수의 답이 다르다 (✅ 2026-09-03 시행)
+
+##### `hypot`을 버린다 — 테스트 때문이 아니라 더 나은 계산이라서
+
+`hypot`이 존재하는 이유는 극단적 크기에서의 오버플로 방지다. **화면 좌표에는 그 보호가 사줄
+것이 없다** — 좌표가 ≲10⁵이라 제곱해도 10¹⁰이고 f64 한계는 10³⁰⁸다. 즉 쓰지도 않을 보호를
+위해 **2.9배 비싼 연산**을 쓰면서 **플랫폼 의존성까지** 얻고 있었다.
+
+```text
+hypot(dx, dy)  ->  (dx*dx + dy*dy).sqrt()
+```
+
+`*` · `+` · `sqrt`는 IEEE가 정확값을 규정하므로 **모든 플랫폼에서 같은 비트**가 나온다.
+Windows의 현재 답과 600/600 일치가 이미 증명됐다. 배터리 절대량은 무시할 수준이지만(비용은
+60Hz 재그리기와 capture가 지배한다) **어차피 바꿀 이유가 있는데 더 싸다.**
+
+##### `atan2`는 그대로 두고 한 필드만 면제한다
+
+결정적 대안이 없고(직접 구현은 위험, `libm`은 실측으로 더 나쁨), 어긋남이 4/3,057이며,
+**결과가 즉시 16방향으로 양자화되어 4건 중 0건이 다른 프레임에 떨어진다.** 관측 가능한
+영향이 0으로 측정된 차이다.
+
+`mechanics_differential`의 `look_direction_degrees` 필드에만 1 ULP를 허용하고 위 숫자를
+근거로 주석에 남긴다. **나머지는 비트 정확 그대로다** — 오차 허용이 코드베이스 전체로
+번지지 않게 한 필드로 묶어 둔다.
+
+#### 시행 결과 — 2026-09-03, macOS
+
+처방대로 넷을 바꾸고 fixture를 재생성했다. **바뀐 fixture 5개가 Windows에서 깨진 5개와
+정확히 같다** — geometry · world · interest · mechanics · placement. 통과했던 다섯
+(activity · animation · attention · emptiness · tuning)은 바이트 단위로 그대로다.
+`hypot`이 유일한 원인이었다는 확증이다.
+
+**재생성 전에 생성기 10개가 기존 fixture를 바이트 단위로 재현하는지 먼저 확인했다.**
+그러지 않으면 그동안 생성기에 생긴 다른 변화가 이 커밋에 조용히 섞인다.
+
+**녹화된 세션은 한 바이트도 바뀌지 않았다**(`RuntimeTrace.txt`). 40초 동안 어떤 비교도
+뒤집히지 않았다는 뜻이다 — 값이 마지막 자리에서 달라져도 펫이 고른 답은 전부 같았다.
+diff는 3만 줄 중 491줄이고 줄 수는 그대로다.
+
+`atan2`는 `mechanics_differential`의 `look_direction_degrees` 한 필드만 1 ULP 면제했다.
+허용폭이 정확히 1 ULP인지 확인했다 — +1 ULP는 통과하고 +3은 실패한다.
+
+`Sources/RoamlingMac/PetOverlayPanel.swift:92`의 `hypot`은 처방대로 두었다. AppKit 드래그
+거리이고 `distance > 4` 임계값으로만 쓰이며, Windows 셸은 자기 것을 따로 계산한다.
+
+#### 원래의 처방 — 이 변경은 원자적이어야 하고, 맥에서 해야 한다
+
+바꿀 곳은 넷이고 fixture 재생성이 따라붙는다.
+
+```text
+Sources/RoamlingCore/Geometry.swift:18   distance   hypot -> squareRoot()
+Sources/RoamlingCore/Geometry.swift:45   length     hypot -> squareRoot()
+rust/roamling-core/src/geometry.rs:55    distance   hypot -> sqrt
+rust/roamling-core/src/geometry.rs:86    length     hypot -> sqrt
+그리고 output/w-unit1/gen 으로 fixture 재생성 (생성기가 Swift라 맥에만 있다)
+```
+
+**셋 중 하나만 바꾸면 빌드가 깨진다.** Rust만 고치면 macOS의 차등 테스트가 즉시 빨개진다 —
+fixture에 옛 `hypot` 값이 들어 있기 때문이다. 그래서 **Windows에서 Rust만 먼저 고치는 것은
+이득이 없다**: Windows의 `hypot`은 이미 naive와 같은 답을 내므로 로컬 결과가 바뀌지 않는다.
+
+`Sources/RoamlingMac/PetOverlayPanel.swift:92`의 `hypot`은 드래그 임계값이라 코어 로직이 아니고
+바꿀 필요가 없다.
+
+#### 그래서 Windows 작업은 이걸 기다리지 않는다
+
+**fixture 실패가 막는 것은 게이트지 셸이 아니다.** Windows 셸은 `roamling-core`를 링크해서
+그냥 돈다 — 1 ULP 차이로 펫이 멈추지 않는다. `cargo test`가 빨간 것뿐이다.
+
+그리고 "Windows에서 처음 할 일은 `cargo test`"의 의도는 **"Windows 코드를 쓰기 전에 알아라"**
+였고, 이제 원인·범위·영향·처방까지 측정으로 확정됐다.
+
+```text
+맥:      hypot 결정화 + fixture 재생성 ──┐
+                                          ├─→ 게이트 초록
+윈도우:  W4 셸 (창·트레이·포인터·틱) ────┘
+```
+
+#### 그 다음 — 아직 Swift에 남은 것
+
+| 남은 것 | 줄 | W4에 필요한가 |
+|---|---:|---|
+| `MascotPetFactory` (내장 마스코트 트랙 구성) | 621 | **필요** — 그릴 것이 있어야 한다 |
+| `PetLoader` + `PetManifest` + `PetCatalog` | 516 | 아니오 — 내장 펫만 쓰면 된다 |
+| 아틀라스 디코딩 (W2b) | — | **필요** — D에서는 `image` crate |
+| `RoamlingSources` (agent 연동) | 1,010 | 아니오 — MVP 0 밖 |
+
+가장 짧은 경로는 **`MascotPetFactory`를 옮기고 `image` crate로 WebP를 읽는 것**이다.
+그러면 Windows 셸에 필요한 것은 창 · 트레이 · 포인터 · 디스플레이 열거뿐이다.
+
+#### 세워진 것 — `rust/roamling-win` (2026-09-03)
+
+셸 크레이트가 워크스페이스에 들어갔고 **코어가 Windows에서 펫을 몰기 시작했다.** 45초 로그:
+
+```text
+1 display(s):  \.\DISPLAY1 2560x1600 at (0,0)  scale 1.50
+    0.0s  Idle -> Sit                      at (1280, 764)
+    2.5s  Sit -> FindSleepSpot             at (1280, 764)
+    7.4s  FindSleepSpot -> LookAtPointer   at (842, 999)
+```
+
+상태기가 돌고, 좌표가 실제로 걸었고, 포인터를 알아챘다 — `MovementController` ·
+`PlacementDirector` · `PointerInteractionModel`이 전부 Rust에서 동작한다. FFI는 없다.
+
+| 파일 | 무엇 |
+|---|---|
+| `src/platform.rs` | 디스플레이 · 포인터 · 버튼 · idle을 코어 도메인 값으로. `MacPlatform.makeServices()`의 대응물 |
+| `src/sprite.rs` | layered window 픽셀. 지금은 blob이고 아틀라스가 오면 여기만 바뀐다 |
+| `src/main.rs` | 창, tick 루프, 포인터 상호작용, click-through 전환 |
+
+**Win32 타입은 `platform.rs`를 넘지 않는다** — `HMONITOR` · `POINT` · `RECT`가 런타임에
+닿지 않는다. 기존 규칙 그대로다.
+
+`preferred_tick_interval`을 따라 타이머를 다시 건다. 쉴 때 물러나는 것이 이 앱 비용의
+대부분이다(`docs/battery.md`).
+
+**`roamling-win`은 workspace의 `default-members`에 없다.** 맥에서 `scripts/test.sh`가
+부르는 맨 `cargo test`가 `windows` 크레이트를 빌드하려다 깨지기 때문이다. Windows에서는
+명시적으로 짓는다:
+
+```sh
+cargo build -p roamling-win     # 그리고 cargo test 는 코어만 짓는다
+```
+
+#### 그림도 붙었다 — `rust/roamling-pet`, 그리고 B3가 닫혔다
+
+**Mochi가 Windows 화면에 있다.** 경로 전체가 통했다:
+
+```text
+WebP 디코드 -> premultiply -> 프레임 위치 -> nearest-neighbour 블릿 -> UpdateLayeredWindow
+```
+
+**`image` 크레이트가 WebP를 디코드한다 — B3가 사라졌다.** libwebp 약 4만 줄을 벤더링할
+필요가 없고, PNG도 같이 온다. 이것이 3절에서 D를 고른 세 이유 중 하나였고, 이제 실물로
+확인됐다. W2b의 Windows 쪽은 이걸로 닫힌다.
+
+`roamling-pet`은 `MascotPetFactory.makeStandardMochi`의 이식이다. shipped `mochi-v3`
+경로만 옮겼다 — 옛 authored 시트와 pose-derived 비상 fallback은 필요해질 때까지 Swift에
+남는다. 테스트 4개가 계약을 고정한다: 시트 형태(8×9와 8×3, 셀 192×208), **모든 트랙의 모든
+프레임이 실재하는 칸에 떨어지는지**, 확장 시트가 인덱스를 이어받는지, 그리고 디코드 결과가
+premultiplied인지.
+
+**두 가지가 조용히 틀리기 쉬운 자리였다.**
+
+- **`image`는 straight alpha로 디코드한다.** Swift `PetImage`의 계약은 premultiplied다.
+  곱하지 않으면 시트의 모든 부드러운 경계가 후광으로 렌더된다. 테스트가 이걸 잡는다.
+- **시트는 2x 에셋이다.** 셀은 192×208인데 오버레이의 발자국은 96×104다
+  (`PetOverlayPanel.baseSize`). 셀 크기를 그대로 쓰면 펫이 두 배로 나온다.
+  그리고 픽셀아트이므로 **nearest neighbour**로 샘플링한다 — macOS의
+  `NSImageInterpolation.none`과 같다.
+
+#### 트레이 — 문자열은 공유하고, 메뉴는 아직 공유하지 않는다
+
+`Shell_NotifyIcon` 아이콘과 메뉴가 붙었다. **아이콘은 펫의 idle 프레임**이다 — 시트가 이미
+디코드돼 있고 그 칸이 캐릭터의 승인된 얼굴이라, 일반 앱 아이콘을 쓸 이유가 없다.
+
+**문자열은 `Sources/RoamlingShell/Resources/{en,ko}.lproj/Localizable.strings`에서 온다.**
+macOS는 `Bundle`이 알아서 하지만 Windows에는 대응물이 없으므로 두 파일을 컴파일에 넣고
+`CLAUDE.md`의 규칙을 손으로 지킨다 — **테이블을 한 번 고르고 그 뒤로는 키만 찾는다.**
+`GetUserDefaultUILanguage`가 한국어면 ko를 en 위에 덮으므로, ko에 없는 키도 사라지지 않고
+영어로 떨어진다. 번들이 하던 것과 같다.
+
+**테스트가 두 파일의 키가 같은지 강제한다.** `CLAUDE.md`가 "en이 base라 ko를 빠뜨리면
+조용히 영어로 나온다"고 경고만 하던 것을, 이제 Windows 쪽에서 실패로 만든다.
+
+**메뉴 트리 자체는 공유하지 않는다** — `ShellMenu`(235줄, 액션 17종)가 Swift이라 값으로
+가져올 수 없다. 그래서 이 셸이 같은 트리를 손으로 들고 있다. 2026-09-04 기준으로 순서도
+문구도 macOS와 같고, 빠진 것은 셸이 아직 못 하는 것뿐이다.
+
+| macOS 항목 | Windows | 비고 |
+|---|---|---|
+| 제목 캡션 | ✅ | `menu.title` |
+| Pet > 내장 · 설치된 펫 · 커버리지 | ✅ | 아래 |
+| Size (0.75~1.5×) | ✅ | `roamling.scale`, 같은 키 |
+| 배회 · 포인터 피하기 · 잡기·끌기 | ✅ | |
+| Behavior Tuning… | ✅ | Win32 트랙바 패널. 아래 |
+| agent 하위 메뉴 | ✅ | 상태 두 줄 · 설치/복구 · 제거 · 테스트 반응 |
+| 접근성 · 빈 공간 배치 | ✅ (형태가 다름) | 아래 |
+| 펫 폴더 열기 · 진단 복사 | ✅ | |
+| 펫 다시 읽기 | ✅ | |
+| 정보 · 소스 보기 · 종료 | ✅ | 아래 |
+
+**접근성과 빈 공간 배치는 macOS에서 하위 메뉴다** — OS가 소유한 권한을 보고하고 설정으로
+보내는 것 말고 할 수 있는 일이 없기 때문이다. Windows는 둘 다 그냥 준다. 보낼 설정 창도,
+물어볼 프롬프트도 없으므로 **동의가 곧 체크 표시다.** 토글 하나를 하위 메뉴로 감싸면
+말이 늘어나는 게 아니라 줄어든다. 6절 참조.
+
+~~**"소스 보기"는 항목이고 macOS에서는 버튼이다.**~~ **틀렸다 (2026-09-04 정정).**
+`MessageBoxW`가 버튼 이름을 못 바꾸는 것은 맞지만, **`TaskDialogIndirect`는 바꾼다** —
+그리고 comctl32 v6는 튜닝 패널 트랙바 때문에 이미 매니페스트로 요청해 두었다. 그래서
+정보 창이 `[확인] [소스 보기]` 두 버튼을 갖고, 메뉴 항목은 없앴다. macOS와 같은 자리다.
+
+버튼 둘 다 **custom**으로 만든다 — task dialog는 custom을 common보다 먼저 그리므로,
+common OK를 섞으면 순서가 뒤집힌다. `TDF_ALLOW_DIALOG_CANCELLATION`을 켜야 Esc와 닫기
+단추가 동작한다(둘 중 어느 것도 cancel 버튼이 아니기 때문이다).
+
+**`.strings`의 이스케이프는 여기서 푼다.** `Bundle`은 개행 이스케이프를 label에 넣기 전에 풀지만,
+파일을 그대로 읽는 쪽은 직접 해야 한다 — 안 하면 정보 상자에 역슬래시 n이 그대로 뜬다.
+Win32 컨트롤은 LF 하나로 줄을 바꾸지 않으므로 CRLF로 푼다.
+
+#### 펫 패키지 — `rust/roamling-pet/src/package.rs` (2026-09-04)
+
+`PetCatalog` · `PetManifest` · `PetLoader` 세 파일의 이식이다. 여기서는 한 파일인데,
+셋이 결국 한 가지 일(디렉터리 하나를 `PetAsset`으로)이고 Swift 쪽의 분리는 타입마다 파일을
+두는 습관이지 이음매가 아니기 때문이다.
+
+**패키지 계약은 우리 것이 아니다.** `pet.json`과 `spritesheet.webp`는 Petdex 것이고
+그대로 읽는다. Petdex에 이름이 없는 것(자기·안겨 있기·커서 보기)은 선택적 `roamling.json`과
+자기 시트에 살고, 프레임 인덱스를 패키지 격자 끝에서 이어서 주소를 매긴다. **그 파일이
+없는 패키지가 중요한 호환 경로이고, 계속 동작해야 한다.**
+
+탐색 순서는 macOS와 같다: `$ROAMLING_PET_PATH` → `%APPDATA%\Roamling\Pets` →
+`~/.codex/pets` → `~/.petdex/pets`. Swift의 `PetCatalog`에 이미 Windows 분기가 들어 있어서
+경로가 갈라질 여지가 없었다.
+
+**매니페스트는 사용자가 내려받은 파일이다.** 그래서 그 안의 경로가 패키지 밖을 가리키면
+정리하지 않고 거절한다. 절대 경로 · `~` · `..`에 더해 Windows에는 두 가지가 더 있다 —
+`C:\...` 같은 prefix와 앞선 구분자다. 심볼릭 링크로 빠져나가는 것까지 막으려고 검사는
+canonical 경로에서 한다.
+
+**애니메이션 항목 하나가 나쁘면 그 트랙만 잃는다.** 이름이 비었거나 · 프레임이 범위를
+넘거나 · fps가 0~60 밖이면 경고를 남기고 건너뛴다. 이름 하나 때문에 펫 전체를 잃게 하지
+않는다는 원본의 결정 그대로다.
+
+**실측**: 배포된 mochi-v3 시트로 임시 폴더에 v1 패키지를 하나 만들고
+`ROAMLING_PET_PATH`로 가리켜 debug 빌드를 띄웠다. 발견 1개, 로드 성공, `roamling.json`의
+`sitting`·`sleeping` 트랙이 실제로 재생됐다(`Idle -> Sit -> Sleep`). 테스트도 같은 일을
+한다 — 임시 폴더에 패키지를 쓰고 읽어서 확장 시트가 인덱스 72부터 이어지는지, 범위를 넘는
+트랙 하나만 떨어지는지를 본다.
+
+#### 맥에서 할 일 — 기본값 둘과 그 경계값 (✅ 2026-09-04 시행)
+
+사용자가 값 하나를 **기본값으로 승격**해 달라고 했다. 실사용에서 그 값이 좋았기 때문이다.
+
+```text
+wanderPause      12 -> 40      경계  2 ~ 40  ->  2 ~ 78
+```
+
+**경계값도 같이 넓혀야 한다.** 40이 지금 범위의 천장이라, 기본값만 바꾸면 슬라이더가
+오른쪽 끝에 박혀 왼쪽으로만 움직인다 — 기본값이 트랙 중앙이라는 규칙과 정면으로 부딪친다.
+2~78은 기본값 아래 여유(38)만큼 위에도 준 값이다.
+
+**`hitRegionScale`은 건드리지 않는다.** 한때 같이 올려 달라는 요청이었는데, 사용자가
+그것을 "마우스를 피하는 거리"로 오해한 것이었다. 클릭 영역은 기본값 1.12가 맞다.
+
+##### 피하기가 한 걸음 만에 끝난다 — 이력(hysteresis)이 없다
+
+사용자 보고: *"마우스 가져가면 1px만 움직이고 바로 다시 앉으니까 애니메이션이 끊겨."*
+
+`apply_evade`는 목적지로 달려가는 것이 아니라 **커서가 반경 안에 있는 동안 매 틱 속도를
+적용**한다. 그래서 반경을 1픽셀 벗어나는 순간 멈춘다. 기본값에서 한 틱에 움직이는 거리는
+
+```text
+fast = max(60, 160 * 1.4) = 224 pt/s  ->  60fps 에서 3.7 pt
+slow = 224 * 0.55 = 123 pt/s          ->  2.1 pt
+```
+
+커서가 천천히 다가오면 **두어 픽셀 밀렸다가 바로 경계 밖이 되어 다시 앉는다.** 걷기
+사이클이 한 번도 다 재생되지 못하니 끊겨 보인다. 코어 로직이라 macOS도 같다.
+
+**처방: 시작할 때와 멈출 때의 문턱을 다르게 한다.** 한 번 피하기 시작하면 커서가
+`slow_evade_distance`를 넉넉히(예: 1.35배) 벗어날 때까지 계속 피한다. 덧붙여 최소 지속
+시간(예: 0.4초)을 주면 걷기 사이클이 한 번은 돈다. 상태는 `PointerInteractionModel`이
+이미 `previous_*`로 들고 있으므로 둘 자리는 있다.
+
+문턱이 하나뿐인 것이 원인이므로, 위의 "인식 거리에 비례" 변경만으로는 안 고쳐진다 —
+반경이 넓어져도 여전히 그 경계에서 딱 멈춘다. 둘 다 필요하다.
+
+##### 피하는 거리를 인식 거리에 비례하게
+
+사용자가 실제로 원한 것이 이것이다 — **마우스를 더 멀리서부터 피하기.** 그런데 그 거리는
+슬라이더에 없다. `RuntimeTuning::pointer_configuration()`에 상수로 박혀 있다:
+
+```rust
+PointerInteractionConfiguration::new(
+    self.pointer_awareness_distance,   // 170, 조절 가능
+    100.0,                             // 천천히 비켜서기 시작 <- 상수
+    50.0,                              // 급하게 피하기 시작   <- 상수
+    ...
+```
+
+**"인식 거리" 슬라이더를 올려도 소용이 없다.** 그 값은 회피 반경을 `min(100, awareness)`로
+**상한**만 걸 뿐이라, 100보다 크게 올려도 회피 반경은 100에 머문다. 멀리서 쳐다보기만 하고
+가까이 와야 비켜서는, 앞뒤가 안 맞는 펫이 되는 이유다.
+
+**처방: 두 상수를 인식 거리의 비율로 바꾼다.**
+
+```rust
+let slow = self.pointer_awareness_distance * (100.0 / 170.0);
+let fast = self.pointer_awareness_distance * (50.0 / 170.0);
+```
+
+기본값 170에서 정확히 100과 50이 나오므로 **기본 동작은 한 톨도 바뀌지 않는다.** 바뀌는
+것은 슬라이더를 움직였을 때뿐이다:
+
+```text
+인식 140  ->  천천히  82   급하게  41
+인식 170  ->  천천히 100   급하게  50    (지금과 동일)
+인식 255  ->  천천히 150   급하게  75
+인식 360  ->  천천히 212   급하게 106
+```
+
+튜닝 키는 11개 그대로다. 사용자가 원하는 것은 **기존 "인식 거리" 슬라이더 하나로** 되고,
+그 슬라이더가 이름대로 동작하게 된다.
+
+이것도 fixture가 잡는다 — `"tuning"` 연산이 `pointer.slow_evade_distance`와
+`fast_evade_distance`를 매 케이스 기록한다. 위의 1~4단계를 똑같이 거친다.
+
+**Windows에서는 못 한다.** `RuntimeTuning::default()`와 `bounds`를 fixture가 잡고 있다 —
+`tuning.txt` 13,701줄 중 `"standard"` 연산이 기본값을 필드 단위로, `"limits"`가 11개 키의
+경계를 전부 고정한다. 그 fixture는 **macOS에서 Swift 원본을 돌려 만든 기록**이고,
+`CLAUDE.md`가 "통과시키려고 다시 만들지 않는다"고 못 박은 그 파일이다. 순서는:
+
+1. Swift `RuntimeTuning`의 `.standard`와 `bounds`를 고친다 (정본)
+2. Rust `roamling-core/src/tuning.rs`를 같은 값으로 고친다
+3. macOS에서 fixture를 다시 만든다 — 이건 값이 바뀌었으니 정당한 재생성이다
+4. `RuntimeTrace.txt`도 다시 만든다. 기본 튜닝이 40초 녹화의 입력이다
+
+그 전까지 Windows 패널은 **기본값과 다른 값에 원래 값을 나란히 보여준다**
+(`걷기 사이 멈춤  40초 (기본 12초)`). 사용자가 "왜 가운데가 아니냐"고 물은 것이 곧 화면이
+그 답을 못 하고 있었다는 뜻이라, 승격과 별개로 필요한 것이었다.
+
+#### 튜닝 패널 — SwiftUI가 없으니 Win32로 (2026-09-04)
+
+`RuntimeTuningWindowController`는 SwiftUI다. 여기서는 행마다 static 라벨 · 트랙바 ·
+값 표시를 얹은 평범한 Win32 창이고, 섹션 구성과 문구와 순서는 macOS와 같다.
+
+**경계값은 이 파일 것이 아니다.** `RuntimeTuning::bounds`가 유일한 주인이고, 그 함수의
+주석에 이유가 적혀 있다 — 표가 둘이면 어긋나고, 실제로 어긋난 적이 있다(패널은 catch arm을
+140까지 주는데 모델은 360을 받았다). 그래서 패널은 범위를 코어에서 읽고, **값이 바뀔
+때마다 다시 읽는다**: `CatchArmDistance`의 상한이 notice distance라서 한 슬라이더를 움직이면
+다른 슬라이더의 눈금 자체가 바뀐다.
+
+**변경은 `take_pending`으로 나가고 틱이 가져간다.** 패널에서 런타임을 직접 건드리면
+중첩 메시지 루프 안에서 런타임을 만지는 셈이고, `main.rs`의 `wndproc` 주석이 그게 왜
+안전하지 않은지 적어 둔 것 그대로다.
+
+**Win32 트랙바는 정수 위치다.** macOS 슬라이더가 `step:`으로 받던 값이 여기서는 눈금
+개수를 정한다. 테스트가 행마다 눈금이 8~1000 사이인지(둘뿐인 슬라이더는 슬라이더가
+아니다), 그리고 위치에서 값으로 한 눈금 안에서 왕복하는지를 고정한다.
+
+**저장은 키 열한 개로 흩어진다.** macOS는 `UserDefaults`가 data를 담을 수 있어서
+`roamling.runtimeTuning`에 JSON 한 덩어리를 넣는다. 이쪽 파일은 평평한 텍스트라
+`roamling.runtimeTuning.walkingSpeed` 식으로 하위 키를 쓴다 — 덤으로 파일이 사람이
+읽고 고칠 수 있는 상태로 남는다.
+
+**매니페스트를 넣었다.** comctl32 v6가 없으면 트랙바가 Windows Classic 스타일로 그려진다.
+`build.rs`가 링커에 `/MANIFEST:EMBED`와 `/MANIFESTINPUT`를 넘기므로 크레이트 하나도 늘지
+않았다. 함정 하나: **XML 주석 안에 하이픈 두 개를 쓸 수 없다.** 링커는 그걸 "매니페스트를
+읽고 구문 분석할 수 없습니다"로만 알려주고 어디가 문제인지는 말하지 않는다.
+
+**패널도 테스트가 있다.** Win32 객체 더미라서 값으로 검사할 수 없으니, 테스트가 실제로
+하나 만든다 — 창을 **숨긴 채로** 만들고 바로 부순다(테스트가 사용자 화면에 창을 번쩍이면
+안 된다). 슬라이더 11개가 다 생겼는지, 하나를 움직이면 `PENDING`에 도착하는지, Reset이
+기본값을 내놓는지를 본다.
+
+**진단 로그는 셸이 가진다.** `TickOutput.diagnostics`는 코어가 매 틱 비우고 아무것도
+보관하지 않으므로, 역사를 원하는 쪽이 가진다 — macOS도 같다. `DiagnosticsLog`의 이식이고,
+**변화만 남긴다**: 가만히 있는 펫을 매 틱 기록하면 똑같은 줄의 벽이 되고, 정작 답은 줄
+사이의 공백에 있었다는 것이 그 타입의 근거다.
+
+**Windows 11은 새 트레이 아이콘을 기본으로 `^` 오버플로에 넣는다.** 등록 성공과 화면에
+보이는 것은 다른 이야기다. 사용자가 직접 고정해야 하고 이를 강제하는 지원 API는 없으므로,
+W6의 설치 관리자도 대신 해줄 수 없다 — 첫 실행 안내에 적을 일이다.
+
+#### 끄면 실제로 꺼져야 한다 (2026-09-04)
+
+사용자 보고: *"윈도우에서 로믈링 끄면 모찌가 안 사라져."* 원인이 둘이었다.
+
+**하나, 인스턴스가 둘이었다.** 설치본(자동 시작)과 개발 빌드가 같이 떠 있어서 모찌가 두
+마리였고, 하나를 꺼도 다른 하나가 남는다. 중복 실행 방지가 없었다 — 트레이 아이콘도 둘이고,
+훅 포트는 하나만 잡히므로 나머지 하나는 agent 이벤트를 영영 못 받는다. 이제
+`Local\Roamling.SingleInstance` 뮤텍스를 잡고, 이미 있으면 조용히 물러난다.
+`Local\`이라 사용자가 둘 로그인해 있으면 각자 한 마리씩 갖는다.
+
+**둘, 프로세스가 안 죽었다.** 창을 부수지 않고 `PostQuitMessage`만 했고, 그 뒤 프로세스가
+끝나지 않으면 창이 그대로 남는다. 실제로 그런 프로세스 둘이 몇 분씩 살아 있었고, 그것들이
+`roamling.exe`를 잡고 있어서 다음 빌드가 실행조차 되지 않았다. 둘 다 **desktop duplication이
+살아 있는** 상태였고, duplication이 열리지 않은 실행은 정상 종료했다.
+
+고친 방식은 셋이다.
+
+1. 종료할 때 `DestroyWindow`를 부른다. **정리가 얼마나 걸리든 모찌는 즉시 사라진다** —
+   "닫혔다"와 "아직 있다"의 차이가 이것이다.
+2. 메시지 루프가 끝난 뒤 **순서를 정해서** 정리한다. GPU 객체를 먼저 명시적으로 놓는다.
+3. 그리고 `exit`로 끝낸다. 창을 닫은 Win32 프로그램은 끝난 것이고, **드라이버가 정리
+   중에 무슨 답을 하든 그것이 프로세스와 펫을 화면에 붙잡아 둘 수 있어서는 안 된다.**
+
+**무엇이 정확히 멈춰 세웠는지는 끝내 못 밝혔다.** 고친 뒤에는 duplication이 살아 있는
+상태(`gradient 0.0148`)에서도 창과 프로세스가 함께 사라진다. 3번은 2번을 건너뛰기 위한
+핑계가 아니라, 밝히지 못한 것이 사용자에게 닿지 않게 하는 장치다.
+
+#### 껐다 켜도 있던 자리에
+
+`%APPDATA%\Roamling\settings.txt`에 평평한 `key=value`로 남긴다. **키는 macOS의
+`UserDefaults` 이름 그대로다** — `roamling.roaming` · `roamling.position.x` 등. 두 플랫폼이
+같은 어휘를 쓰므로 "배회가 꺼져 있나"에 찾아볼 곳이 하나뿐이다. 기본값도 그쪽
+`register(defaults:)`와 같아서 셋 다 켜진 채로 시작한다.
+
+**기억한 자리는 아직 화면 위일 때만 복원한다.** 자고 있던 모니터를 뽑았다고 펫이 화면 밖에
+갇히면 안 된다. 파일은 임시 파일을 거쳐 rename하므로 쓰다 죽어도 "저장된 자리 없음"으로
+읽히는 잘린 파일이 남지 않는다.
+
+실제로 확인했다 — 재우고 종료한 뒤 다시 띄우니 `(128, 1432)`에서 시작해 곧장 다시 잠들었다.
+두 번째 실행은 `FindSleepSpot`을 건너뛰고 `Sit -> Sleep`으로 갔는데, 이는 MVP 4의 "좋은
+자리에서 idle이 이어지면 그 자리에서 그대로 잔다"가 Windows에서도 도는 것이다.
+
+#### 콘솔은 debug에만 있다
+
+```rust
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+```
+
+트레이에 사는 것에 콘솔이 따라다니면 안 된다. debug 빌드는 유지하는데, 거기 찍히는 상태
+로그가 루프를 지켜보는 방법이기 때문이다. 확인: release는 `subsystem (Windows GUI)`,
+debug는 `(Windows CUI)`.
+
+##### 배포 크기 실측 — 10절의 예측이 맞았다
+
+```text
+release 단일 exe   2.05 MB   (그중 약 1.2 MB가 컴파일에 박힌 아틀라스)
+```
+
+10절의 Swift 실측은 17파일 56.0 MB에 단일 파일 불가였다. **같은 앱이 파일 하나 2 MB가
+됐고, 그 절반 이상이 스프라이트 시트다.** 3절에서 D를 고른 이유 중 배포 항목이 실물로
+확인된 셈이다.
+
+##### 아직 없는 것
+
+agent 연동(`RoamlingSources`, MVP 0 밖) · `ShellMenu`의 나머지 · W5의 provider들.
+
+개발 중에는 `ROAMLING_ALLOW_CAPTURE=1`로 캡처 제외를 끌 수 있다. 켜져 있으면 펫이
+스크린샷에 안 찍혀서 무엇이 그려졌는지 눈으로 확인할 방법이 없다.
+
+##### 좌표 단위 — 되돌렸다 (2026-09-04). 아래는 그 전 결정의 기록이다
+
+**절 끝의 "다시 열 조건" 첫 줄이 발동했다.** 사용자 보고: *"이동속도, 마우스 탐지 거리나
+이런 게 좀 짧은 느낌"*. 150% 화면에서 정확히 예측대로였다.
+
+**처방은 세 번째 선택지였다 — 튜닝값도 평면도 아니고, 배율 하나로 평면 전체를 나눈다.**
+`platform::world_scale()`이 주 디스플레이의 배율을 세션 동안 고정으로 들고, 좌표가 Win32와
+코어 사이를 넘을 때 나누고 곱한다. 그러면 world가 macOS와 같은 논리 단위가 되고, **튜닝값이
+양 플랫폼에서 같은 뜻**이 된다.
+
+왜 튜닝값을 곱하는 쪽이 아니었나: `RuntimeTuning::pointer_configuration()` 안에 회피 반경
+100/50과 속도 바닥 60/120이 **상수로 박혀 있다.** 튜닝값만 곱하면 인식 거리는 늘어나는데
+실제로 비켜서기 시작하는 반경은 그대로라, 사용자가 말한 그 증상의 절반만 고쳐진다. 평면을
+나누면 코어 안의 그 상수들까지 한 번에 맞는다.
+
+왜 모니터마다가 아니라 **하나의 배율**인가: 데스크톱은 물리 픽셀로 배치돼 있어서 모니터마다
+자기 배율로 나누면 평면이 찢어진다(겹치거나 벌어진다). 스칼라 하나는 가상 화면 전체의 닮음
+변환이라 연결 관계가 그대로다. 주 디스플레이 배율을 쓰므로 **주 모니터는 macOS와 정확히
+일치**하고, 배율이 다른 보조 모니터는 그 비만큼 걷는 속도가 달라진다 — 구멍이 아니라 속도
+차이로만 나타난다.
+
+**세션 동안 고정이다.** 코어가 들고 있는 것이 전부 이 단위이고 설정에 적히는 자리도
+그렇다. 서 있는 중에 배율을 바꾸면 아무 일도 없었는데 펫이 이동한다. 세션 중 DPI 변경은
+드물고 재시작이면 정리된다.
+
+**대가 하나**: 이전 버전이 물리 픽셀로 저장한 자리는 이제 범위 밖으로 읽힌다. 복원 코드가
+"디스플레이 안에 있는가"를 먼저 보므로 조용히 화면 중앙으로 떨어진다 — 한 번뿐이다.
+
+바뀐 곳은 다섯이다: `platform.rs`의 `rect_to_world`와 `pointer`, `focus.rs`의 `to_world`
+(캐럿·창 프레임·위치 힌트가 모두 이 한 곳을 지난다), `draw()`의 창 배치, 그리고 코어에
+주는 펫 크기(이제 world 단위라 DPI가 들어가지 않는다). **capture는 손대지 않았다** —
+종횡비만 쓰기 때문에 균일하게 나눠도 답이 같다.
+
+테스트가 이 변환이 부르는 실수를 잡는다: 디스플레이는 나누고 포인터는 안 나누면(또는 그
+반대면) **커서가 어느 모니터에도 속하지 않게 되고**, 펫은 아무 데도 없는 것으로부터
+평생 도망친다. `the_pointer_lands_on_a_display`가 그것이다.
+
+---
+
+*아래는 되돌리기 전의 기록이다.*
+
+##### ~~좌표 단위 — 실사용으로 그대로 두기로 했다 (2026-09-03)~~
+
+**사용자 확인: "잘 된다, 느리긴 한데 봐줄 만하다."** 그래서 물리 픽셀을 world로 쓰는
+당시 형태를 유지했다. 아래는 그 결정의 배경이고, 다시 열 조건은 절 끝에 있다.
+
+macOS는 코어에 **논리 포인트**를 주고 backing factor를 따로 보고한다. per-monitor DPI를
+아는 Windows 프로세스는 **물리 픽셀**을 받는다. 모니터마다 나눠서 논리로 바꾸면 **평면이
+찢어진다** — 데스크톱이 물리 픽셀로 배치돼 있어서 배율이 다른 두 모니터가 겹치거나
+벌어진다. 그래서 지금은 물리 픽셀을 그대로 world로 쓴다.
+
+대가가 있다. 튜닝값 — walk 40/s · notice 170 · catch radius 74 — 이 여기서는 물리 픽셀로
+읽힌다. **150% 디스플레이에서 펫은 맥의 2/3 거리만 걷는다.** 스프라이트는 모니터 배율을
+곱해 그리므로 크기는 같지만, **속도와 반응 거리는 다르게 느껴진다.**
+
+고치는 방법이 둘이다 — 튜닝값을 배율로 스케일하거나, 평면 자체를 스케일하거나. 둘 다
+움직이는 부품을 하나 늘린다. 특히 튜닝 스케일은 펫이 배율이 다른 모니터를 건널 때마다
+값이 바뀌어야 하므로, **눈에 띄지도 않는 차이를 위해 배율이 하나 더 생기는 것**이다.
+
+**그래서 지금은 아무것도 하지 않는다.** 다시 열 조건은 둘이다:
+
+- 배율이 더 큰 화면(200% 이상)에서 느린 것이 **거슬리는** 수준이 될 때
+- 맥과 Windows를 나란히 놓고 쓰는 사람이 **다른 펫처럼 느낀다**고 할 때
+
+그때 고른다. 먼저 고칠 이유는 아직 없다.
+
+### W5 — 나머지 provider ✅ 완료 2026-09-04
+
+Window / Focus / Capture. 5절 참조.
+
+#### 실제로 어디까지 도달하는가 (2026-09-04)
+
+**구현한 것과 실제로 동작하는 것을 나눠 적는다.** 셋 중 하나만 온전히 산다.
+
+| provider | 구현 | 도달 가능 |
+|---|---|---|
+| **Capture** (빈 공간) | ✅ DXGI Duplication | ✅ 실측으로 확인 |
+| **Focus** (캐럿) | ✅ `focus.rs`, `GetGUIThreadInfo` | ✅ **W5b로 열렸다** — 아래 |
+| **Window** | ✅ `focus.rs` | ✅ **W5b로 열렸다** — 소비자가 생겼다 |
+
+*아래 진단은 W5b 이전 상태다. Focus 행은 W5b 절이 뒤집는다.*
+
+**둘의 공백이 같은 뿌리다: `RoamlingSources`(agent 연동)가 아직 이식되지 않았다.**
+
+`finish_tick`의 이 줄이 전부를 가른다:
+
+```rust
+let focus = if !is_watching {
+    None                  // <- Windows 에서는 항상 여기
+} else if ...
+```
+
+`is_watching`은 `activity.is_watching_window()`이고, 그것은 `handle_activity_event`로
+들어온 agent 이벤트에서만 시작된다. Windows에는 그 이벤트가 오지 않으므로 **캐럿은
+질의되지도, 배치에 쓰이지도 않는다.** `begin_tick`이 focus 질의를 요청하는 조건도 같다.
+
+창 provider도 마찬가지다. macOS에서 그것의 유일한 소비자는
+`windowProvider.currentActivityLocationHint()`이고, 그 값은 `CompanionEvent`에 붙는다 —
+이벤트가 없으면 붙일 곳이 없다.
+
+**그래서 트레이 메뉴에는 "커서 인식"이 없었다.** 코드는 `focus.rs`에 있고 설정 키도
+있었지만, 켜도 아무 일이 일어나지 않는 토글을 보여주는 것은 거짓 약속이다. 같은 날
+`RoamlingSources`가 왔고, 그래서 지금은 메뉴에 있다.
+
+`Capture`는 다르다 — `luminance_requests`는 배회와 배치 과정에서 나오므로 agent 없이도
+돈다. 로그에서 실제로 확인했다.
+
+#### W5b — agent 연동 (`rust/roamling-agent`, 2026-09-04)
+
+`RoamlingSources`의 이식이다. 위 진단이 "Focus와 Window가 같은 뿌리에서 막혀 있다"고
+적은 그 뿌리를 치운다. 세 조각이고 macOS와 같은 분할이다.
+
+| 모듈 | Swift 원본 | 하는 일 |
+|---|---|---|
+| `normalize.rs` | `ClaudeCodeEventNormalizer` · `CodexEventNormalizer` | 훅 payload -> `CompanionEvent` |
+| `receiver.rs` | `LoopbackHookReceiver` | 인증된 loopback 엔드포인트 |
+| `installer.rs` | `ClaudeCodeHookInstaller` · `CodexHookInstaller` | 사용자 설정에 훅을 쓰고 지우기 |
+
+**계약은 그대로 옮겼다.** 포트는 Claude Code 47831 · Codex 47832, 헤더는
+`X-Roamling-Token`, 토큰은 macOS와 같은 설정 키(`roamling.claudeCodeHookToken` /
+`roamling.codexHookToken`)에 저장된다. 토큰이 매번 새로 생기면 이미 설치된 훅 명령이
+전부 조용히 깨지므로, 24자 이상이면 있던 것을 재사용한다.
+
+**프라이버시 선은 코드에 있다.** 디코더는 `session_id` · `hook_event_name` ·
+`tool_name` · `notification_type` 넷만 읽는다. 프롬프트·트랜스크립트·도구 입출력은
+읽는 코드 자체가 없으므로 나중에 실수로 새어 나갈 자리가 없다.
+
+세 가지가 Windows에서만 다르다.
+
+- **소켓.** macOS는 Apple `Network` 프레임워크를 피하려고 BSD 소켓을 직접 썼다.
+  여기서는 `std::net::TcpListener`다. 스레드 하나가 accept하고 채널로 넘기며, 틱이
+  `try_iter`로 비운다 — 런타임은 여전히 메시지 루프 한 스레드에서만 돈다.
+- **훅 명령.** `curl.exe`는 Windows 10 1803부터 System32에 있다. 리다이렉션만
+  `>NUL 2>&1`이고 나머지는 같다. 실패는 삼킨다 — 꺼져 있는 동반자가 훅 오류를
+  띄우면 안 된다.
+- **설정 경로.** `%USERPROFILE%\.claude\settings.json`,
+  `%USERPROFILE%\.codex\hooks.json`.
+
+##### 실측 — 훅에서 애니메이션까지 (debug 빌드 로그)
+
+`curl.exe`로 한 세션을 흉내 내 다섯 이벤트를 보냈다. 잠들어 있던 펫이 깨서 축하까지
+간다.
+
+```text
+listening for Claude Code on 127.0.0.1:47831
+listening for Codex on 127.0.0.1:47832
+    2.5s  Sit -> Sleep
+   43.1s  agent ActivityStarted "claude-code:probe"   <- SessionStart
+   44.1s  agent ActivityStarted "claude-code:probe"   <- UserPromptSubmit
+   45.1s  agent HighIntensity   "claude-code:probe"   <- PreToolUse(Edit)
+   46.1s  agent Positive        "claude-code:probe"   <- PostToolUse
+   46.6s  agent Achievement     "claude-code:probe"   <- Stop
+   46.6s  Sleep -> Wake       Stretch
+   48.4s  Stretch -> Celebrate  Celebrate
+```
+
+인증도 같이 쟀다: 올바른 토큰 204 · 틀린 토큰 401 · 틀린 경로 404.
+
+**PowerShell로 프로브하지 말 것.** PS 5.1은 네이티브 exe 인자에서 큰따옴표를 벗겨
+JSON을 망가뜨린다. 엔드포인트는 payload를 못 읽어도 204를 돌려주므로(설계상 그렇다)
+성공한 것처럼 보인다. `curl.exe`는 bash에서 부른다.
+
+##### 메뉴
+
+에이전트마다 하위 메뉴 하나 — 상태 줄 · 설치/복구 · 제거. `ShellMenu.agentItems`와
+같은 모양이고 문자열도 같은 키를 읽는다(`status.hooks.*`, `action.install` 등).
+명령 id는 100부터 10칸씩 블록으로 나눠서, 고른 항목이 어느 에이전트인지 두 번째
+표를 찾지 않고 안다.
+
+**설치는 사용자가 메뉴에서 누를 때만 일어난다.** 사용자의 파일이므로 우리 표시가
+없는 것은 읽고 그대로 되쓰고, 첫 설치 때 `.roamling-backup`을 한 번 남기고, 제거는
+우리 표시가 붙은 핸들러만 뺀다.
+
+##### 이것이 연 것
+
+- **캐럿.** `is_watching`이 참이 될 수 있으므로 `focus.rs`가 실제로 불린다. 트레이의
+  "커서 인식" 토글이 되살아났다.
+- **작업 자리.** 이벤트에 붙는 위치 힌트의 소비자가 생겼고, 창 provider도 같이 붙였다.
+  `MacWindowProvider.currentActivityLocationHint`의 이식이라 confidence 0.55와 최소
+  크기(120x100)까지 같다 — 그보다 작은 창은 팔레트나 알림이고, 그 옆에 앉는 것은 작업
+  자리에 대해 아무것도 말하지 않는다. **창 제목은 읽지 않고 포그라운드 창 하나만 잰다.**
+  질의를 할지 말지는 `wants_window_hint`가 정한다 — 규칙과 호출을 같은 자리에 두는
+  `handleActivityEvent`의 배치 그대로다.
+
+  macOS는 focus와 window를 다른 파일로 나눈다. 한쪽만 권한을 요구하기 때문인데 Windows는
+  둘 다 요구하지 않으므로 `focus.rs` 하나가 답한다.
+
+#### 훅 설치는 물어보고 나서 한다
+
+macOS는 `ShellPrompt.confirmation(for:)`으로 먼저 묻고 `integrationResult`로 결과를
+알린다. Windows 쪽은 처음에 콘솔에 `println!`만 했는데, **release 빌드에는 콘솔이 없다** —
+사용자 입장에서는 눌러도 아무 일도 안 일어나는 항목이었다. 게다가 그 동작은 사용자의
+`~/.claude/settings.json`을 쓴다.
+
+이제 같은 문구로 묻고, 같은 문구로 결과를 알린다. `MessageBoxW`가 버튼 이름을 못 바꾸므로
+확인 버튼은 "설치"가 아니라 "확인"이다 — 본문이 무엇을 쓸지 정확히 말하므로 그걸로 족하다.
+
+**`error.codex.hooks`를 새로 넣었다.** Swift 쪽 `integrationResult`는 실패 제목으로 항상
+`error.claude.settings`를 쓴다 — Codex 설치가 실패해도 "Claude Code 설정을 바꾸지
+못했습니다"가 뜬다. Windows는 새 키를 쓰고, 두 `.strings`에 다 넣었다. **맥 할 일**: Swift
+쪽도 이 키를 쓰도록 고칠 것.
+
+### W6 — 패키징 ✅ 완료 2026-09-04
+
+**10절의 입력은 이제 유효하지 않다.** 그것은 Swift 기준(17파일 · 56.0 MB · 단일 파일 불가)이고,
+D로 가면서 사라졌다. 실측 (2026-09-04):
+
+```text
+Swift 계획   17파일 · 56.0 MB · zip 21.3 MB · 단일 파일 불가
+Rust 실제     1파일 ·  2.1 MB · OS 밖 DLL 0개
+```
+
+**진짜 단일 파일이다.** `rust/.cargo/config.toml`이 MSVC 타깃에 `+crt-static`을 걸어
+`VCRUNTIME140.dll`까지 없앴다 — 그것은 대개 있지만 깨끗한 기계에 보장되지는 않고, 받아서
+더블클릭하는 것에 "대개"는 최악의 의존이다. 남은 것은 Windows 자체가 싣는 DLL뿐이다
+(`kernel32` · `user32` · `gdi32` · `dxgi` · `d3d11` · `dwmapi` · `shell32`).
+
+**그래서 W6이 크게 줄었다.** DLL 재귀 수집도, 스테이징도 필요 없다:
+
+```text
+1. cargo build -p roamling-win --release
+2. iscc roamling.iss  ->  Roamling-Setup.exe
+```
+
+**그대로 됐다 (2026-09-04).** `installer/roamling.iss`가 Inno Setup 6.7.3에서 컴파일되고
+`build/Roamling-Setup.exe` 3.7 MB가 나온다(2.6 MB exe는 이미 LTO를 거쳐서 잘 안 줄고,
+나머지는 Inno 자기 부트스트랩이다). `[Files]`는 정말로 한 줄이다.
+
+두 가지를 스크립트가 더 한다. **설치·제거 전에 `taskkill /IM roamling.exe`** — 돌고 있는
+펫이 자기 exe를 잡고 있어서 덮어쓰기가 실패하는데, Inno의 기본 안내("닫아 주세요")는 창이
+없는 트레이 앱에 대고 할 말이 아니다. 그리고 **`[InstallDelete]`/`[UninstallDelete]`가
+`roamling.exe.old`와 `.new`를 지운다** — 업데이터가 만든 파일이라 설치 관리자는 모르는
+것들이다.
+
+**영어와 한국어 둘 다 넣었다 (2026-09-04).** 한때 "Inno Setup 6 공식 배포판에 한국어 `.isl`이
+없다"고 적어 뒀는데 **틀렸다** — 6.7.3에는 `Languages\Korean.isl`이 들어 있다. 컴파일 로그가
+그 파일을 읽는 것으로 확인된다.
+
+마법사 자체의 문안은 그 두 `.isl`에서 오고, **우리 문장 셋만** `[CustomMessages]`에 양쪽
+언어로 적혀 있다(자동 시작 체크박스 · 그 그룹 제목 · 설치 후 실행). 앱 자체의 문안은 여기
+없다 — 그건 런타임이 읽는 두 `Localizable.strings`가 정본이다.
+
+`ShowLanguageDialog=auto`라서 **한국어 Windows는 묻지 않고 한국어로, 나머지는 묻지 않고
+영어로** 뜬다. 자기 언어를 묻는 것은 답이 정해진 질문이다.
+
+콘솔은 `#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]`가 release에서만
+없애므로 링커 플래그도 필요 없다.
+
+**아이콘은 두 자리가 다르다 (2026-09-04).** 트레이는 여전히 그린다 — macOS 메뉴바가 🐾
+글리프를 쓰는 것과 같은 자리이고, `SM_CXSMICON`이 요청하는 크기에 맞춰 그때그때 그리는
+편이 비트맵보다 정확하다. **앱 아이콘은 파일이어야 한다**: exe의 리소스로 박혀야 탐색기·
+작업 표시줄·Alt-Tab·설치 파일이 그것을 쓴다. 그래서 `assets/Roamling.ico`를 커밋한다 —
+macOS가 `assets/Roamling.icns`를 커밋하는 것과 같은 이유다.
+
+**그 `.ico`는 `.icns`에서 나온다.** `scripts/build-ico.py`가 크기별 이미지를 **그대로 복사**
+한다(16·32·64·128·256). 닮은 것을 두 번 그리는 것이 아니라 같은 픽셀이다. 큰 것을 줄이는
+일은 하지 않는다 — 크기마다 따로 그린 이유가 그것이고, Windows가 48을 원하면 저장된 64를
+셸이 줄인다(같은 산술을 한 층 아래에서 하는 것뿐이다).
+
+`build.rs`가 `rc.exe`로 아이콘과 버전 블록을 넣는다. SDK에 이미 있는 도구라 크레이트가
+늘지 않는다. **버전은 `/d`로 넘기지 않고 `.rc` 사본에 치환한다** — `rc.exe`의 문자열
+define은 따옴표를 품어야 하고, 그것을 Windows 인자 분해를 통과시켜 온전히 넘기는 일은
+얻을 것 없는 싸움이다. `rc.exe`가 없으면 경고만 남기고 아이콘 없이 빌드한다.
+
+**per-user 설치가 핵심 선택이다.** `%LOCALAPPDATA%\Programs\Roamling`에 깔면 **UAC 프롬프트가
+아예 뜨지 않고**, 자동시작도 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`이라 권한이
+필요 없다. 데스크톱 펫을 설치하는데 관리자 승인을 묻는 것은 그 자체로 *Never annoying* 위반이다.
+
+포터블 zip도 같이 낸다(공짜로 나온다). winget 매니페스트는 GitHub 릴리스의 exe를 가리키기만
+하면 되므로 나중에 붙인다.
+
+**MSI/WiX는 쓰지 않는다** — 기업 배포 수요 없이 복잡도만 는다. **MSIX/Store도 아니다** —
+서명·심사·샌드박스 마찰이 이 단계에 맞지 않는다.
+
+#### ~~반드시 걸릴 함정 — `*.resources`~~ — D가 없앴다
+
+이 절은 Swift 기준이었다. `Bundle.module`이 없어졌으므로 복사할 리소스 디렉터리도 없다 —
+문자열은 `include_str!`, 아틀라스는 `include_bytes!`로 exe 안에 있다. **`[Files]`는 한
+줄이다.**
+
+#### 서명
+
+서명 없는 설치 파일은 SmartScreen 경고가 뜬다. 초기에는 서명 없이 내고 README에 설명하되,
+**Azure Trusted Signing**을 우선 검토한다 — 전통적 OV/EV 인증서보다 싸고 Microsoft가 CA라
+평판이 빨리 쌓인다. **가격과 자격 요건은 바뀌므로 착수 시점에 직접 확인할 것.**
+
+macOS의 `scripts/signing.env` 패턴을 그대로 가져온다 — identity를 git-ignore된 파일에 두고,
+없으면 서명 없이 빌드해서 기여자 빌드가 깨지지 않게 한다.
+
+### W7 — 자동 업데이트 (양 플랫폼 공통) ✅ 완료 2026-09-04
+
+**첫 배포부터 넣는다.** 나중에 붙이면 이미 설치된 사용자에게 도달할 방법이 없다.
+
+**Sparkle(macOS) + WinSparkle(Windows).** 둘은 **같은 appcast XML 피드 형식**을 쓴다. 피드
+하나와 릴리스 절차 하나에 얇은 플랫폼 어댑터 둘 — 이 저장소의 모듈 경계와 같은 모양이다.
+Sparkle은 Swift에서 그대로 쓰이고 WinSparkle은 C DLL이라 Windows 쪽에서 얇은 shim이 필요하다.
+
+**대안은 Velopack이다.** Windows·macOS를 한 도구로 덮고 델타 업데이트를 준다. Swift 바인딩
+유무는 착수 전에 확인해야 한다. Sparkle 계열의 강점은 macOS에서 사실상 표준이라는 것이고,
+Velopack의 강점은 릴리스 파이프라인이 하나라는 것이다. **둘 다 착수 시점에 현재 상태를
+확인하고 정한다** — WinSparkle의 유지보수 상태와 Sparkle 2.x와의 appcast 호환도 같이 본다.
+
+#### 이 게이트의 진짜 비용은 업데이터가 아니라 서명이다
+
+- **macOS**: Sparkle의 EdDSA 서명은 공짜지만, 앱 자체가 Developer ID 서명 + notarize가
+  안 되면 Gatekeeper가 막는다. `CLAUDE.md`가 이미 경고하듯 ad-hoc 서명은 빌드마다 다른 앱으로
+  보여 Accessibility 권한까지 잃는다. **Developer ID 인증서와 notary 서비스는 Apple Developer
+  Program 유료 가입(연 $99)이 있어야 나온다** — 현재 로컬 서명은 무료 개발용 identity다.
+  이 게이트는 지출 결정을 포함하므로 착수 전에 사용자에게 확인한다.
+- **Windows**: 서명이 없으면 **업데이트할 때마다** SmartScreen 경고를 보게 된다.
+
+~~**서명 없이 자동 업데이트를 먼저 붙이면 업데이트가 없느니만 못하다.** 사용자가 매번 경고를
+클릭하게 된다. 순서는 서명 → 업데이터다.~~
+
+**이 문단은 틀렸다 (2026-09-04 정정).** SmartScreen의 평판 검사를 부르는 것은 브라우저가
+붙이는 **Mark-of-the-Web**이다. 업데이터가 직접 받아서 exe를 덮어쓰면 MOTW가 붙지 않으므로
+**업데이트에는 경고가 뜨지 않는다.** 경고가 뜨는 것은 사람이 브라우저로 받는 **첫 설치**
+한 번뿐이다. 그래서 순서는 자유롭고, 실제로 W7을 먼저 했다.
+
+#### 제품 원칙과 충돌하지 않게
+
+업데이트 알림은 *Never annoying*이 금지하는 종류의 방해다. **백그라운드에서 조용히 받고 다음
+실행에 적용한다.** 모달을 띄우지 않고, 재시작을 요구하지 않는다.
+
+GPL-3.0이므로 배포하는 각 버전에 대응하는 소스를 계속 제공해야 한다 — 릴리스마다 태그를
+남기면 충족된다.
+
+#### 실제로 만든 것 (2026-09-04)
+
+**Sparkle + WinSparkle이 아니라 공유 Rust 업데이터로 갔다.** 근거는 이 저장소가 이미 지키는
+규칙이다 — *살아 있는 구현은 항상 1벌*. WinSparkle은 C DLL이라 W6이 방금 확인한 "파일 하나,
+OS 밖 DLL 0개"가 깨지고, 구현이 둘이 되고, 델타 업데이트는 2.5 MB짜리에 의미가 없다.
+
+```text
+rust/roamling-update/   버전 비교 · 매니페스트 파싱 · Ed25519 검증. 양 플랫폼 공유
+rust/roamling-win/update.rs   바이트 가져오기(WinHTTP) · 실행 중인 exe 교체
+```
+
+**HTTP에는 크레이트를 쓰지 않았다.** Windows는 `windows` 크레이트의 WinHTTP, macOS는
+URLSession이다. rustls/ureq를 넣으면 2.6 MB짜리 exe가 4 MB가 된다. 새로 늘어난 의존은
+`ed25519-dalek`뿐인데(**Windows CNG는 Ed25519를 노출하지 않는다**) 그건 어차피 양쪽이
+공유해야 하는 부분이다. Ed25519가 메시지를 스스로 해시하므로 SHA 크레이트도 필요 없다.
+
+##### 서명이 둘인 이유
+
+- **매니페스트 서명** (`appcast.json.sig`): 버전과 URL을 못 고치게 한다. 이게 없으면 피드를
+  쥔 쪽이 "9.9.9"라고 주장하면서 **진짜로 우리가 서명한 옛 아티팩트**를 가리킬 수 있고,
+  그 아티팩트 서명은 통과한다. 조용한 다운그레이드다.
+- **아티팩트 서명** (매니페스트 안에): 도착한 바이트가 우리가 낸 바이트인지.
+
+키를 못 읽는 빌드는 **업데이트를 거부한다.** 서명을 확인할 수 없는 업데이터가 그냥
+업데이트하는 것이 최악이다. `PUBLIC_KEY_HEX`가 전부 0이면 그 상태이고, 테스트가 그것도
+고정한다.
+
+##### 실행 중인 exe 교체
+
+Windows는 실행 중인 파일을 지우거나 덮어쓰지 못하지만 **이름은 바꿀 수 있다** — 잠금이
+이름이 아니라 내용에 걸리기 때문이다.
+
+```text
+roamling.exe -> roamling.exe.old      돌던 프로세스는 계속 돈다
+(새 바이트)   -> roamling.exe          다음 실행이 새 버전
+```
+
+헬퍼 프로세스도, 예약 작업도, 재시작 요구도 없다. 두 번째 rename이 실패하면 옛 파일을
+되돌린다 — 실행할 것이 하나도 남지 않는 것이 유일하게 치명적인 실패다. 테스트가 그
+되돌리기까지 고정한다. `scripts/run.ps1`이 존재하는 이유인 그 잠금의 정확한 해법이다.
+
+##### 피드는 GitHub 릴리스에 얹었다
+
+`/releases/latest/download/appcast.json`은 **항상 최신 릴리스의 자산으로 리다이렉트된다.**
+GitHub Pages도, 전용 브랜치도 필요 없고, 빌드를 올리는 그 CI 단계가 피드도 올린다. 매니페스트
+안의 아티팩트 URL은 **태그가 박힌 주소**다 — `latest`는 서명 아래에서 움직인다.
+
+##### 실측 (2026-09-04)
+
+- `roamling-appcast keygen` → `sign`(진짜 2.68 MB exe) → `verify`: 매니페스트·아티팩트 서명 통과.
+- 버전을 `0.2.0`에서 `9.9.9`로 고친 매니페스트 → 거부. 다른 키 → 거부. 다른 파일을 아티팩트로
+  → 크기에서 먼저 거부.
+- WinHTTP로 실제 HTTPS GET(호스트를 넘는 리다이렉트 포함) → 성공, 404 → 오류로 보고.
+  네트워크가 필요하므로 `#[ignore]`이고 `cargo test -p roamling-win -- --ignored`로 돈다.
+- 파일 교체와 되돌리기 → 임시 파일로 확인.
+- Inno Setup 6.7.3으로 `Roamling-Setup.exe` 3.7 MB 생성 성공.
+
+##### 남은 것 — 사람이 해야 하는 일
+
+1. `cargo run -p roamling-update --bin roamling-appcast -- keygen`을 **직접** 돌린다.
+   (에이전트가 돌리면 비밀키가 대화 기록에 남는다.)
+2. 공개키를 `roamling-update/src/lib.rs`의 `PUBLIC_KEY_HEX`에 붙인다.
+3. 비밀키를 GitHub 저장소 secret `ROAMLING_UPDATE_SECRET_KEY`에 넣는다.
+4. 버전을 올리고 같은 번호로 태그를 민다. **세 곳이 태그와 같아야 하고, 워크플로가
+   대조해서 다르면 실패시킨다** — `rust/Cargo.toml`(업데이터가 비교하는 값),
+   `CFBundleShortVersionString`(정보 창에 보이는 값), `CFBundleVersion`(macOS가 빌드로
+   취급하는 값). 첫째가 어긋나면 설치된 빌드가 영원히 자기를 업데이트한다. 셋째는 두
+   릴리스 동안 `1`에 머물러 있었고, LaunchServices가 그 값으로 캐시한다.
+
+**macOS는 2026-09-04에 붙었다.** 예상대로 `roamling-update`의 결정 로직을 uniffi로 가져다
+쓰고, 이 기계에 닿는 셋만 Swift가 한다 — URLSession으로 받고, `ditto`로 풀고, 번들을
+바꾼다. 피드는 `macos-arm64` 항목 하나가 늘었고 `.zip`을 가리킨다(dmg가 아니다 — 실행 중인
+앱을 디스크 이미지에서 바꾸려면 마운트와 언마운트가 필요하고 볼륨이 사용 중이면 실패한다).
+서명·배포·첫 실행 마찰은 `CLAUDE.md`의 "맥에서 해야 하는 일 → D"에 있다.
+
+**릴리스는 발행 전에 패키징된 앱을 실제로 켜 본다.** v0.3.0이 서명·봉인·검증을 전부
+통과하고도 실행 즉시 trap했다 — 검사가 전부 번들의 *모양*에 관한 것이었고 아무도 켜 보지
+않았다. 이유는 `CLAUDE.md`의 리소스 번들 절에 있다. 게이트는 `.build`를 치운 상태에서
+`ROAMLING_SMOKE_TEST=1`로 도는데, 그 조건이어야 결함이 보이기 때문이다.
+
+### W8 — 지정 앱 활동 source (Windows 셸 배선) ⏳ 미완
+
+**결정 로직은 macOS 쪽에 붙어 있고 Windows는 셸 배선만 하면 된다.** 규칙은 2026-09-11에
+정해졌고(같은 날 v2로 고침), **2026-09-12에 상태형 source로 옮겨졌다** — 이 절은 그 뒤의
+API를 기준으로 쓴 것이다. 옛 판(이벤트 일곱 개, 재발신, 펫의 사실 넷)을 설명한 문장은
+전부 지웠다. 설계는 `docs/state-sources.md`, 그 이전 구조의 기록은
+`docs/history/focus-activity-flow.md`.
+
+`rust/roamling-core/src/focus_activity.rs`가 상태 기계 전부를 들고 있다. Windows는 코어를
+rlib으로 직접 링크하니 FFI도 없다.
+
+```text
+지정 앱이 앞에 옴            Beside            옆으로 와서 그냥 앉음(idle), 점프·갸웃 없음
+그 세션의 첫 키 입력          Active + SittingStarted   점프, 이어서 running
+세션 안의 다음 키 입력        Active            running
+마지막 키 뒤 10초             Paused            갸웃
+갸웃 5초                      Away              자리를 비우고 돌아다님
+돌아다니는 중 다시 키 입력    Active            걸어와서 running, 점프 없음
+키 없이 보기만 함             Beside 유지       계속 앉아 있음 (0.5초마다 같은 선언을 다시 냄)
+3초 이상 떠남                 Away              세션 타이핑 3분 이상이면 SittingEnded 이정표를
+                                                같이 실어 보낸다 — 자리를 비운 뒤라도, 펫이
+                                                있는 자리에서 흔든다
+앞의 앱을 모름(None)          직전 선언 재발신   "모름"이지 "떠남"이 아니다. 이정표만 떼고 같은
+                                                선언을 다시 낸다 — 안 그러면 2초 만료가 세션을
+                                                끝낸다
+agent가 자리를 지킴           선언은 계속       director가 상태 전이를 보관한다. 인사는 자리가
+                                                나면 그때 쓰고, 작별은 버린다
+```
+
+셸이 0.5초마다 `observe`에 **입력 넷**을 넘긴다 — `app`, `watched`, `seconds_since_key`, `now`.
+돌아오는 것은 `Vec<StateDeclaration>`이고, 보통 하나다(지정 앱에서 다른 지정 앱으로 바로 옮기면
+옛 source의 `Away`와 새 source의 `Beside`가 한 샘플에 같이 온다). 셸은 거기에 **창 위치 하나만**
+얹어 `pet.declare_state(declaration, now)`를 부른다.
+
+**펫의 사실을 되먹이지 않는다.** 옛 판은 `dispatched_event` · `arrival_pending` · `pet_resting` ·
+`agent_on_duty` 넷을 셸이 날라야 했는데, 전부 director 안에 있는 사실이었다. 상태형에서는
+director가 직접 본다.
+
+**0.5초 샘플을 거르지 않는다.** 선언은 2초(`STATE_EXPIRY`) 동안 갱신이 없으면 `Away`로 만료한다.
+그게 "셸이 말을 멈췄다"를 감지하는 유일한 장치라서, 샘플이 멎으면 좌석도 멎는다.
+
+- `rust/roamling-win/src/focus.rs` (이미 있는 파일 — 창 위치·캐럿을 묻는 곳에 더한다) —
+  `pub fn foreground_application() -> Option<String>`:
+  `GetForegroundWindow` → `GetWindowThreadProcessId` →
+  `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)` → `QueryFullProcessImageNameW` → 파일명만
+  (`Hwp.exe`). 자기 PID면 `None`. **0.5초마다만 부른다.**
+- `rust/roamling-win/src/platform.rs` — 키보드만의 idle. `GetLastInputInfo`의 시각이
+  갱신됐는데 포인터 좌표가 직전 샘플과 같으면 키보드로 본다. `keyboard_idle_duration()`.
+  한계를 문서에 적어 둘 것: 휠·클릭이 키보드로 잡힐 수 있다. **`WH_KEYBOARD_LL` 훅은 쓰지
+  않는다** — 타임스탬프만 본다 해도 키로거로 보인다. macOS도 같은 이유로
+  `CGEventSource.secondsSinceLastEventType(_:eventType:)` 하나만 쓴다.
+- `rust/roamling-win/src/settings.rs` — `WORK_APPS = "roamling.workApps"`. **키와 형식이
+  macOS와 같다**(쉼표로 구분한 한 줄, 비면 키를 지운다). 기본값은
+  `"Hwp.exe,Hshow.exe,Hcell.exe"`를 검토하되 **그 기계에서 실제 exe 이름을 확인할 것**
+  (작업 관리자 → 세부 정보). 한컴오피스 2020/2022 기준의 추정치다.
+- `rust/roamling-win/src/main.rs`의 `tick` — agent_events를 배수하기 직전에 샘플을 넣는다.
+  agent 이벤트와 달리 `pending`에 합치지 않는다 — 상태 선언은 이벤트가 아니라서 attention을
+  거치지 않고 `declare_state`로 곧장 들어간다.
+
+  ```rust
+  let frontmost = focus::foreground_application();
+  let watched = frontmost.as_deref().is_some_and(|app| work_apps.contains(app));
+  let hint = if watched { focus::activity_location_hint() } else { None };
+  for mut declaration in app.focus_activity.observe(
+      frontmost.as_deref(), watched, keyboard_idle, now,
+  ) {
+      if declaration.focused { declaration.hint = hint.clone(); }
+      let requests = app.pet.declare_state(declaration, now);
+      // 창 위치를 물어본 만큼 luminance 갱신을 예약한다 — agent 경로와 같다.
+  }
+  ```
+
+  **창 위치는 `focused`인 선언에만 얹는다.** 떠나는 source의 `Away`에 지금 앞에 있는 창을
+  붙이면 펫이 남의 창으로 걸어간다.
+  **앞에 있는 앱을 못 알아내면 `None`을 넘긴다. 그건 "모름"이지 "사용자가 떠남"이 아니다** —
+  자기 창(트레이 메뉴·설정 창)이 앞에 온 것을 이탈로 읽으면 세션이 끝나 버린다. 코어가 그때
+  직전 선언을 이정표 없이 다시 내주므로 셸이 따로 할 일은 없다.
+  **출처 종류도 셸이 할 일이 없다.** 지정 앱 선언은 코어가 `System`으로 만들고, Windows의
+  agent 이벤트는 `CompanionEvent::new`의 기본값으로 `Agent`가 된다.
+- `rust/roamling-win/src/tray.rs` — `MenuState.work_apps: Vec<(String, bool)>`, 하위 메뉴,
+  명령 id 블록 하나(agent처럼 10단위), `main.rs` 메뉴 핸들러에 toggle. 문자열은
+  `menu.workApps` · `menu.workApps.none`. 목록에 띄울 "최근 앞에 있었던 앱"은
+  `focus_activity.recent_apps()`가 준다.
+
+**macOS 쪽 기본값은 빈 목록이다.** Windows에서 기본을 채울지는 그 기계에서 이름을 확인한
+뒤에 정한다 — 틀린 이름을 기본값으로 넣으면 아무 일도 안 일어나는 것을 사용자가
+"고장"으로 읽는다.
+
+## 5. 매핑 표에 더할 것
+
+`docs/architecture.md`의 표는 맞다. 다만 몇 군데는 더 싼 길이 있다.
+
+| provider | 표의 경로 | 실제로 먼저 시도할 것 |
+|---|---|---|
+| Capture | Windows Graphics Capture | ~~BitBlt~~ — **W5에서 실측으로 뒤집혔다.** 아래 참조 |
+| Focus | UI Automation | **`GetGUIThreadInfo`** |
+| Window | HWND/Win32 | `DWMWA_EXTENDED_FRAME_BOUNDS` |
+| SafeZone | work area candidates | `MONITORINFO.rcWork` |
+
+- **Capture** — **이 항목의 권고는 틀렸다. 2026-09-04에 실측으로 뒤집혔다.**
+
+  **축소는 2026-09-04에 다시 고쳤다 — 상한이 글씨를 놓치고 있었다.** 원래는 셀당 축당
+  16샘플이 상한이었고, "빽빽한지 비었는지 가리는 데 16이면 충분하다"가 근거였다. 아니었다.
+  2560 화면에서 셀이 40픽셀이라 상한이 **3칸씩 건너뛰어 9개 중 1개**만 봤고, 1픽셀짜리
+  안티에일리어싱 획은 3분의 2 확률로 통째로 지나간다. 옅은 글씨가 정확히 "얇은 획 + 낮은
+  대비"라 사용자가 그 위에 앉는 펫을 봤다. **macOS에는 이 문제가 없다** — ScreenCaptureKit에
+  64열 이미지를 요청하면 시스템 스케일러가 모든 픽셀을 읽는다.
+
+  이제 전부 읽는다. 상한의 근거였던 51 ms는 픽셀마다 부동소수점 연산과 캐스트를 하던
+  값이고, Rec. 709 가중치를 1024로 맞추면 바이트 곱셈-덧셈이 된다. 실측(최적화 빌드,
+  2560x1600):
+
+  ```text
+  read 3.8~6.3 ms  +  shrink 4.1~9.3 ms   -> 64x40      (전:  shrink 0.6 ms)
+  ```
+
+  **한 번에 10~13 ms.** macOS가 같은 답에 62 ms를 쓰는 것에 비하면 여전히 훨씬 싸다.
+  4K를 크게 넘는 화면에서만 행을 건너뛰는 상한이 남아 있다 — 행만 건너뛰므로 글자를
+  이루는 세로 획을 잡는 가로 해상도는 그대로다.
+
+  **그리고 진짜 원인은 따로 있었다 (2026-09-04, 같은 날 저녁).** 픽셀을 다 읽게 한 뒤에도
+  사용자가 *"완전 비어있는 곳이 있는데도 옅은 글씨 있는 곳으로 올 때가 있다"*고 했다.
+  채점기가 쓰는 통계를 캡처마다 찍어 보니:
+
+  ```text
+  1회차   gradient 0.0000   min 0.000  max 0.000  mean 0.000   <- 셀 2,560개가 전부 0
+  2회차   gradient 0.0178   min 0.402  max 1.000  mean 0.966   <- 진짜 화면
+  ```
+
+  **캡처 세션의 첫 프레임이 검은 화면이었다.** `AcquireNextFrame`은 포인터 움직임만 담은
+  프레임을 돌려줄 수 있고, `DuplicateOutput` 직후 첫 프레임은 아무것도 담지 않는다 —
+  표면에는 그 메모리에 있던 것, 즉 0이 들어 있다. API는 `LastPresentTime == 0`으로 그렇게
+  말하는데 그것을 보지 않고 읽었다.
+
+  전부 0인 필드는 **기울기도 분산도 0**이고, 그것은 채점기에게 **점수 1.0 — 완벽하게 빈
+  화면**이다. 그래서 펫은 어디든 앉아도 된다고 판단했다. 화면 인식을 켠 직후와
+  `ACCESS_LOST`(잠금화면·전체화면 전환) 뒤 재연결한 직후마다 그랬으니 간헐적으로 보였다.
+
+  이제 `LastPresentTime == 0`이면 읽지 않고 "변화 없음"으로 넘긴다 — 코어는 이전 필드를
+  유지하고, 픽셀 복사와 매핑도 건너뛴다. 고친 뒤 첫 캡처가 `min 0.651 max 1.000`이다.
+
+  **덤으로 하나 더**: duplication 오류 경로가 `set_luminance(None)`을 타고 있었다. GPU가
+  잠깐 말썽이면 펫이 화면에 대해 알던 것을 전부 잃었다. 이제 새 필드가 있을 때만 바꾼다.
+
+  **막다른 길 하나를 기록해 둔다 — 해상도는 원인이 아니었다.** 셀 하나가 40물리px이라
+  글줄이 뭉개진다고 보고 `COLUMNS`를 128로 올려 재봤는데, 두 측정이 서로 다른 화면이라
+  **비교가 성립하지 않았다.** 같은 프레임에서 재지 않은 실험은 답을 주지 않는다. 64로
+  되돌렸다.
+
+  회귀 테스트가 둘이다. 흰 종이에 3픽셀마다 1픽셀짜리 옅은 회색(190) 획을 그은 화면에서
+  **옛 방식은 0.99(빈 종이), 실제 값은 0.915** — 자리 판단이 뒤집히기 충분한 차이다.
+
+  원래 근거는 "64컬럼 다운샘플을 수 초 주기로 뜨는 데 BitBlt면 충분하다"였다. W5에서
+  실제로 만들어 재보니 아니었다:
+
+  ```text
+  read   (화면 -> 메모리, BitBlt)     256 ~ 1117 ms
+  shrink (메모리에서 HALFTONE 평균)      9 ~   21 ms
+  ```
+
+  **프레임버퍼 읽기 자체가 비싸고 최대 1.1초다.** macOS의 ScreenCaptureKit이 같은 답에
+  62 ms를 쓰는 것과 비교하면 10배 이상이고, 메시지 루프에서 동기로 돌면 펫이 몇 초마다
+  1초씩 언다.
+
+  **면적에 비례하지도 않아서 요청 영역만 읽는 것으로도 해결되지 않는다:**
+
+  ```text
+  2560x1600   579 ms       640x400   739 ms   <- 더 작은데 더 느리다
+  1280x800    247 ms       200x200   250 ms
+  ```
+
+  픽셀 복사 비용이 아니라 **합성 데스크톱에서 GPU->CPU 동기화를 강제하는 고정 비용**이다.
+  Windows Graphics Capture와 DXGI Desktop Duplication이 존재하는 이유가 정확히 이것이고,
+  "WinRT가 아프니 피하자"는 회피가 성립하지 않는다.
+
+  **DXGI Desktop Duplication으로 바꿨고, macOS보다 빨라졌다.**
+
+  ```text
+                  화면이 바뀌었을 때        안 바뀌었을 때
+  BitBlt          256 ~ 1117 ms            같음 (구분하지 못한다)
+  Duplication     약 29 ms                 0.6 ms
+  macOS SCK       62 ms                    -
+  ```
+
+  WinRT가 아니라 Win32/COM이라 `windows` 크레이트로 닿는다. 그리고 **BitBlt에 없던 것이
+  둘 딸려 온다.** `AcquireNextFrame`은 마지막 호출 이후 아무것도 그려지지 않았으면 타임아웃하는데,
+  안 바뀐 화면은 여전히 같은 휘도이므로 **대부분의 호출이 0.6 ms에 끝난다.** 그리고 잠금화면에서
+  검은 화면을 조용히 돌려주는 대신 duplication을 잃었다고 정직하게 알려 준다.
+
+  평균 내는 쪽도 줄였다. 셀 하나가 40픽셀 남짓이라 전부 더할 필요가 없어 **축당 16표본으로
+  제한**했다 — 전부 더하면 51 ms, 제한하면 15~25 ms이고, 4K에서도 같은 비용이다.
+
+  **대가가 하나 있다.** 이 경로는 D3D11 디바이스와 duplication을 캡처 사이에 **열어 둔다** —
+  그게 빠른 이유다. 하루 종일 도는 프로세스가 GPU 리소스를 붙잡고 있으면 GPU가 완전히 idle로
+  내려가지 못할 수 있다. **실제로 그런지는 재지 않았다.** 사용자가 캡처를 끄는 순간 놓도록만
+  해 두었고, 다시 여는 비용은 다음 캡처 한 번뿐이다.
+
+  살아남은 것도 있다. "펫이 자기 자리를 바빠 보이게 만들면 안 된다"는
+  `MacCaptureProvider`의 `excludingApplications` 로직이 Windows에서는
+  **`SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)` 한 줄**로 끝나고, 이는 W0에서 대조
+  실험으로 확인됐다.
+
+  **잠금화면도 여기서 걸린다.** 잠기면 입력 데스크톱이 Winlogon의 보안 데스크톱으로 바뀌는데,
+  화면 읽기는 **실패하지 않고 검은 화면을 돌려준다.** 그 모양이 위험하다 — 펫이 "화면 전체가
+  비었다"고 읽고 아무 근거 없는 자리를 골라 다음 캡처까지 그대로 있는다. 사용자가 잠금화면을
+  자주 쓰므로 예외가 아니라 평상시다. `OpenInputDesktop`이 실패하는 것으로 판정해 그때는
+  아예 읽지 않는다. UAC 프롬프트가 데스크톱을 잡고 있을 때도 같다.
+  다만 **BitBlt는 하드웨어 오버레이(MPO)로 그려지는 영상과 DRM 보호 창을 검게 읽는다.**
+  우리는 어두운 곳을 "비어 있다"로 점수화하므로 펫이 재생 중인 영상 위에 앉을 수 있다 —
+  MVP 4가 막으려던 바로 그 실패다. W5 착수 시 유튜브 전체화면과 넷플릭스로 먼저 확인하고,
+  검게 나오면 그 창은 캡처가 아니라 window rect로 판정한다.
+- **Focus**: UI Automation COM 전에 `GetGUIThreadInfo`를 시도한다. COM 없이 캐럿 rect가
+  나오는 앱이 많아 MVP 3 수준을 싸게 얻는다. COM interop이 이 포트에서 가장 아플 구간이므로
+  피할 수 있으면 피한다.
+- **Window**: `GetWindowRect`는 보이지 않는 테두리를 포함한다. geometry를 맞추려면 DWM의
+  extended frame bounds를 써야 한다.
+- **DPI**: per-monitor DPI awareness v2가 필수다. Core가 논리 포인트를 쓰고
+  `DisplaySnapshot.scale`이 이미 있으므로 `GetDpiForMonitor`로 채운다.
+
+`HWND`와 UIAutomation COM 타입은 adapter를 넘지 않는다 — 기존 규칙 그대로다.
+
+## 6. 권한 모델이 Windows에서 달라진다
+
+위 전부가 **Windows에서는 권한 프롬프트 없이 된다.** Screen Recording 승인도 Accessibility
+승인도 없다. `docs/history/mvp.md` MVP 4의 권한 모델(opt-in 게이팅, 거부 시 MVP 3 경로 복귀)이
+Windows에서는 성립하지 않는다 — 캡처가 항상 가능하다.
+
+프라이버시 원칙(디스크 미기록, 로그 미기록, 내용 미해석)은 그대로 지킨다. 그러나 **"OS 권한
+승인이 곧 사용자 동의"였던 자리를 Windows에서는 명시적 설정으로 대신 만들어야 한다.**
+기본값을 켜 두면 "Never annoying"이 아니라 몰래 보는 쪽이 된다. Windows의 capture는
+**opt-in 설정 뒤에 둔다.**
+
+## 7. 리스크
+
+W0가 둘을 없애고 하나를 새로 만들었다.
+
+1. ~~Swift on Windows로 GUI 상주앱을 만든 전례가 드물다~~ — **해소.** layered window의
+   7가지 요구가 Swift에서 전부 동작했고, Rust 대조군과 결과가 같았다(9절).
+2. ~~`.lproj` 로컬라이제이션이 corelibs-foundation에서 약할 수 있다~~ — **해소.** 무수정 동작.
+3. **W2가 렌더링 회귀를 부를 수 있다.** 바이트 비교 게이트로 막는다. *(남아 있음)*
+4. **COM interop** — UIA가 필요해지는 지점. 5절대로 `GetGUIThreadInfo`를 먼저 시도해
+   피할 수 있는지 본다. *(남아 있음)*
+5. ~~다중 디스플레이가 미검증이다~~ — **같은 날 해소.** 두 번째 모니터를 붙여 재실행했고
+   1.5배·3.0배 혼합 DPI에서 통과했다(9절). **음수 좌표 배치만 남았다** — 보조 화면을
+   primary 왼쪽/위로 옮기면 1분이면 확인된다. W4의 cross-display 경로 전에 볼 것.
+6. **툴체인 환경이 macOS보다 무겁다.** vcvars64 + `SDKROOT`이 없으면 `swift build`가
+   깨진 툴체인처럼 실패한다. CI와 기여자 문서에 그대로 비용이 된다. *(신규)*
+
+## 8. 순서와 머신 제약
+
+리팩터(W1·W2)는 `swift build`로 검증되지 않는 변경을 만들지 않기 위해 **macOS 머신에서
+한다.** 반대로 **W0 스파이크는 Windows 머신의 작업이었고 2026-09-01에 끝났다** —
+툴체인·번들·layered window는 Windows에서만 확인된다.
+
+MVP 4가 2026-09-02에 닫히면서 그 충돌이 없어졌다 — `RoamlingRuntime`과 capture를 동시에
+건드리는 게이트가 더는 없다. W1은 2026-09-02에 닫혔고 **W2가 현재 게이트다.**
+
+```text
+(Windows 머신) W0 스파이크  ✅ 2026-09-01 완료 -> 분기 A
+        |
+MVP 4 exit rule 충족  ✅ 2026-09-02
+        |
+        v
+   (macOS 머신) W1 ✅ 2026-09-02 -> W2 ✅ 2026-09-02 -> W2b
+        |
+        v
+   W3 ✅ -> W3b ✅ -> W4 <- 다음 -> W5 -> W6 -> W7
+        ^
+        +-- W2b(디코더)는 여기까지 미룬다. 언어 결정과 같은 결정이다.
+             ^                ^
+             |                +-- 자동 업데이트. 양 플랫폼 공통이고 macOS도 함께 받는다.
+             |                    서명이 선행 조건이다 (W6).
+             |
+             +-- 진입 전에 보조 화면을 primary 왼쪽/위로 옮겨 음수 좌표만 확인
+                 (다중 디스플레이 본체는 2026-09-01에 통과, 9절)
+```
+
+**W7만 Windows 전용이 아니다.** 자동 업데이트는 macOS에도 없는 기능이라 이 게이트에서 양쪽이
+같이 생긴다. 그래서 피드 형식과 릴리스 절차를 한 번만 정하는 것이 중요하다.
+
+모듈이 실제로 움직이면 `CLAUDE.md`의 모듈 경계 절과 `docs/architecture.md`의 Future
+migration 절을 같이 고친다.
+
+## 9. W0 실행 결과 (2026-09-01)
+
+### 환경
+
+Windows 11 build 26200, **단일** 2560×1600 디스플레이, DPI 144(1.5배).
+Swift 6.3.3 `x86_64-unknown-windows-msvc`, Rust 1.98.0, MSVC 14.44 + Windows SDK 10.0.26100.
+탐침은 `output/w0/`에 있다(git 미추적, 버리는 코드).
+
+### 결과
+
+| 항목 | 결과 |
+|---|---|
+| W0.0 실제 `Package.swift`로 `RoamlingCore` 빌드 | **PASS — 무수정** |
+| W0.1 Core 3,156줄 / 20파일 빌드 | **PASS** |
+| W0.2 `CoreLogicTests` 72개 실행 | **PASS — 72/72** |
+| W0.3 `Bundle.module` + `.lproj` 7개 체크 | **PASS — 7/7** |
+| W0.4a Swift layered window 7종 | **PASS** (컴파일 수정 3곳) |
+| W0.4b Rust layered window 7종 | **PASS** |
+| 캡처 제외 대조 실험 | **PASS** |
+
+### 예상과 달랐던 것 셋
+
+**1. 로컬라이제이션이 그냥 됐다.** 이 문서가 최대 미지수로 꼽았던 항목이다. corelibs-foundation이
+`.strings`를 파싱하고, `ko.lproj`가 해석되고(`menu.pet` → `펫`), 없는 키는 키를 돌려주고,
+`String(format:)` 인자도 살아남는다. **`LocalizedText.swift`는 한 줄도 안 고쳐도 된다.**
+JSON 로더 대안은 필요 없다.
+
+**2. 블로커는 매니페스트가 아니라 소스의 import 두 줄이다.** `.linkedFramework("AppKit")`
+같은 설정이 문제를 일으킬 거라고 4절에 적어뒀는데 **틀렸다** — SwiftPM은 그 타겟을 빌드하지
+않는 한 무시하고, `platforms: [.macOS(.v13)]`도 Windows에서 그냥 무시된다. 실제로 멈추는 곳은
+정확히 두 줄이다:
+
+```text
+Sources/RoamlingSources/Shared/LoopbackHookReceiver.swift:5   import Network        -> W3
+Sources/RoamlingPet/MascotPetFactory.swift:4                  import CoreGraphics   -> W2
+```
+
+`.when(platforms:)` 조건은 지금 당장은 필요 없다. W2·W3의 범위가 그만큼 좁아진다.
+
+**3. Swift Win32 코드가 Rust보다 짧았다.** 같은 7가지를 하는 데 주석 제외 Swift 166줄,
+Rust 261줄(대조 실험 함수를 빼면 약 226줄). 줄 수가 곧 ergonomics는 아니지만, "Swift로
+Win32는 지옥"이라는 가설과는 반대 방향의 증거다.
+
+### 캡처 경로가 실측으로 확인됐다
+
+5절이 근거 없이 주장하던 두 가지를 대조 실험으로 검증했다.
+
+```text
+WDA_NONE             -> BitBlt가 스프라이트 픽셀 17,129개를 읽음
+WDA_EXCLUDEFROMCAPTURE -> 0개
+```
+
+BitBlt는 화면을 실제로 읽고(Windows Graphics Capture 없이 충분), `SetWindowDisplayAffinity`는
+펫을 캡처에서 진짜로 제외한다. MVP 4의 "펫이 자기 자리를 바빠 보이게 만들면 안 된다"가
+Windows에서는 한 줄로 해결된다.
+
+### 툴체인 마찰 — 기록해 둘 것
+
+**Swift on Windows는 자체 링커가 없다. MSVC의 `link.exe`를 부른다.** 평범한 셸에서
+`swift build`를 하면 `toolchain is invalid: could not find CLI tool 'link'`로 죽고,
+`SDKROOT`이 없으면 `unable to load standard library for target 'x86_64-unknown-windows-msvc'`로
+죽는다. 둘 다 툴체인이 깨진 것처럼 보이지만 환경변수 문제다.
+
+macOS에서 `swift build`는 그냥 된다. 이 차이가 CI와 기여자 문서에 그대로 비용이 된다.
+`output/w0/vcvars.ps1`이 그 환경을 만든다.
+
+### Swift 마찰의 실제 크기
+
+탐침에 10곳을 `FRICTION`으로 표시했지만, Rust와 비교했을 때 **진짜 Swift 고유 비용은 셋**이다:
+
+- wide string 리터럴이 없다 — Rust는 `w!()`, Swift는 `[UInt16]` 버퍼를 수명까지 관리
+- 캐스팅 매크로를 importer가 버린다 — `DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2`를
+  `bitPattern: -4`로 손수 재구성
+- nullable import — `CreateCompatibleDC`가 Optional로 들어온다
+
+나머지(`@convention(c)` 캡처 불가, `BLENDFUNCTION` 좁히기 변환, 상수 캐스팅)는 **Rust도 똑같이
+낸 C interop 세금**이다. 세 항목 모두 작은 shim 하나로 흡수된다 — 한 번 쓰면 나머지 코드는
+평범하게 읽힌다. **A′로 대피할 근거가 나오지 않았다.**
+
+### 다중 디스플레이 — 같은 날 두 번째 모니터를 붙여 닫았다
+
+처음 실행한 머신은 모니터가 하나여서 6번이 미검증으로 남았는데, 사용자가 두 번째 모니터를
+연결해 다시 돌렸다. **그리고 우연히 더 좋은 시험이 됐다 — DPI가 섞여 있다.**
+
+```text
+[0] bounds=(0,0)..(2560,1600)     work=(0,0)..(2560,1528)     dpi=144  scale=1.50
+[1] bounds=(2560,0)..(6400,2160)  work=(2560,0)..(6400,2016)  dpi=288  scale=3.00
+```
+
+1.5배와 3.0배가 한 데스크톱에 있다. MVP 0을 닫았던 비대칭 3-display 환경과 같은 성격이라
+균일한 배치보다 훨씬 나은 조건이다. 탐침은 `stop 0 → (0,0)`, `stop 1 → (2560,0)`으로
+**두 모니터를 정확히 번갈아 착지했고**, per-monitor DPI v2 아래에서 두 화면 모두에서 논리
+좌표가 맞았다.
+
+**캡처 제외도 멀티모니터에서 확인됐다.** 로그가 `stop 7: (2560,0)`으로 펫이 두 번째
+모니터에 있다고 말하는 순간에 가상 화면 전체를 캡처했는데 그 영역에 아무것도 없었다.
+`WDA_EXCLUDEFROMCAPTURE`가 화면을 가리지 않고 창 단위로 동작한다.
+
+**아직 안 남은 하위 항목 하나** — 두 번째 모니터가 primary의 **오른쪽**에 있어서
+`negative-origin display present: false`다. 보조 화면을 primary의 왼쪽이나 위로 옮기면
+음수 좌표가 생기고, `WorldPoint`가 음수 x/y를 허용하는 이유가 그것이다. 디스플레이 설정에서
+배치만 바꾸면 1분이면 확인된다. **W4의 cross-display 경로를 만들기 전에 한 번 보는 것이 좋다.**
+
+### 사람이 본 결과 — 그리고 프로브가 잡아낸 결함 둘
+
+| 확인 항목 | 결과 |
+|---|---|
+| 알파 경계가 부드러운가 (사각 테두리 없음) | **PASS** |
+| 포커스를 안 뺏는가 (`WS_EX_NOACTIVATE`) | **PASS** — 타이핑이 안 끊긴다 |
+| 클릭 통과 토글 (`WS_EX_TRANSPARENT`) | **PASS** — 양쪽 상태 모두 동작 |
+| 항상 위 (`WS_EX_TOPMOST`) | **PASS** |
+| 작업표시줄 버튼 없음 (`WS_EX_TOOLWINDOW`) | **PASS** — 10절 링커 플래그로 재빌드 후 확인 |
+| 커서가 정상 화살표 (`hCursor` 수정 후) | **PASS** |
+| 두 모니터를 오간다 (혼합 DPI) | **PASS** — 아래 참조 |
+
+**로그로는 안 나오고 사람이 봐야 잡히는 결함이 둘 나왔다.** 프로브를 눈으로 확인한 값어치가
+여기 있다.
+
+1. **콘솔 창이 작업표시줄 버튼을 가져간다.** 프로브가 콘솔 앱이라 오버레이가
+   `WS_EX_TOOLWINDOW`로 버튼을 숨기는지 확인 자체가 불가능했다. 10절의
+   `/SUBSYSTEM:WINDOWS` + `/ENTRY:mainCRTStartup`이 이걸 없앤다. **실제 앱도 그렇게 빌드해야
+   한다.**
+2. **`WNDCLASSW.hCursor`가 nil이면 커서가 "처리중"으로 바뀐다.** click-through가 꺼진 동안
+   오버레이 위에서 대기 커서가 뜬다 — 펫이 멈춘 것처럼 보이는 결함이다. Windows 한계가
+   아니라 우리 실수이고, `LoadCursorW(nil, IDC_ARROW)`로 끝난다. 다만 `IDC_ARROW`가
+   `MAKEINTRESOURCE(32512)`라 Swift importer가 또 버려서 `bitPattern: 32512`로 재구성해야
+   했다 — FRICTION 3과 같은 부류가 즉시 재발한 사례다(11절 참조).
+
+### 판정
+
+**A — Swift 단일 코드베이스.** 3절 분기표의 "1·2번 통과 + 4번 통과" 경로다.
+W1·W2로 진행하며, 그 둘은 macOS 머신에서 한다.
+
+## 10. 배포 실측 (2026-09-01)
+
+W0에서 같이 쟀다. **Swift on Windows는 단일 파일이 될 수 없다.**
+
+`--static-swift-stdlib`을 클린 빌드로 시험했는데 **Windows에서는 조용히 무시된다** — Linux
+전용 플래그다. 플래그를 줘도 결과 exe가 `swiftCore.dll` · `Foundation.dll` · `swiftCRT.dll` ·
+`swiftWinSDK.dll`을 그대로 요구한다.
+
+실제 최소 배포 폴더를 만들어 **PATH에서 Swift를 완전히 제거한 뒤 실행시켜** 검증한 값이다.
+
+| | Swift | Rust |
+|---|---|---|
+| 파일 수 | **17개** | **1개** |
+| 폴더 크기 | **56.0 MB** | 0.15 MB |
+| zip | **21.3 MB** | — |
+| 실행 파일 자체 | 0.09 MB | 0.15 MB |
+
+무게의 정체는 하나다 — **`_FoundationICU.dll`이 35.6 MB로 전체의 64%다.** Foundation을 쓰는
+한 딸려오고, Roamling은 `Codable`·JSON·`FileManager`를 전면적으로 쓰므로 피할 수 없다.
+
+**사용자에게는 여전히 파일 하나를 준다.** 폴더를 Inno Setup이나 WiX로 감싸 설치 관리자
+`.exe` 하나로 만들면 시작 메뉴·자동시작·제거까지 붙는다. 그것이 W6의 내용이다. 최소로
+가면 21.3 MB zip이다. 상주 앱으로 이상한 크기는 아니다 — Electron 앱은 보통 100 MB를 넘는다.
+
+### GUI 앱으로 빌드하려면 링커 플래그가 둘 필요하다
+
+```sh
+swift build -c release -Xlinker /SUBSYSTEM:WINDOWS -Xlinker /ENTRY:mainCRTStartup
+```
+
+`/SUBSYSTEM:WINDOWS`만 주면 `undefined symbol: WinMain`으로 죽는다. Swift는 `main`을
+만들기 때문에 CRT 진입점을 명시해야 한다. 이것을 빼면 콘솔 창이 따라다니고, **콘솔이
+작업표시줄 버튼을 가져가서 오버레이가 `WS_EX_TOOLWINDOW`로 버튼을 숨기는지조차 확인할 수
+없다.**
+
+## 11. Rust 전면 재작성 재검토 브리프
+
+사용자가 장기적으로 C(Rust 전면 재작성)를 원한다. 이 절은 **그 논의를 위한 자립적 브리프**다.
+3절의 결정(A)은 아직 유효하고, 이 절은 그것을 뒤집자는 주장이 아니라 **판단에 필요한 실측치를
+한곳에 모은 것**이다.
+
+### W0가 바꾼 것 — 이제 추측이 아니다
+
+**Rust 쪽으로 기우는 실측 근거**
+
+- **배포**: 1파일 0.15 MB vs 17파일 56 MB(zip 21.3 MB). 10절 참조. Swift는 단일 파일이 불가능.
+- **툴체인**: Swift는 vcvars64와 `SDKROOT` 없이는 깨진 툴체인처럼 실패한다. Rust는 `cargo build`
+  하나로 끝났다. CI와 기여자 문서에 영구 비용.
+- **B3 소멸**: `image` 크레이트가 WebP를 디코드한다. libwebp를 번들할 이유가 없어진다.
+- **마찰의 패턴이 확인됐다**: Swift의 대표 비용은 **importer가 캐스팅 매크로를 버리는 것**이다.
+  `DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2`(FRICTION 3)에서 처음 나왔고, 커서 결함을
+  고치다 `IDC_ARROW`(FRICTION 11)에서 똑같이 재발했다. 앞으로 Win32 표면을 넓힐수록 계속 나온다.
+- **COM**: W5의 UI Automation이 COM이다. `windows-rs`는 COM을 제대로 덮고 Swift는 수동 vtable이다.
+  5절대로 `GetGUIThreadInfo`로 피해지면 이 항목은 사라지고, 안 피해지면 커진다. **아직 미측정.**
+
+**Swift 쪽에 남는 실측 근거**
+
+- **11,481줄이 이미 있고 이미 게이트를 통과했다.** 그리고 그중 Core 3,156줄 + 테스트 1,615줄이
+  **Windows에서 무수정으로 빌드·통과한다는 것이 9절에서 증명됐다.**
+- **Swift의 Win32 코드가 Rust보다 짧았다** — 같은 7가지에 주석 제외 166줄 vs 261줄. "Swift로
+  Win32는 지옥"은 실측으로 반증됐다. 마찰은 실재하지만 좁고 기계적이라 shim 하나로 흡수된다.
+- **Rust도 같은 C interop 세금을 냈다** — `@convention(c)` 캡처 불가, `BLENDFUNCTION` 좁히기,
+  상수 캐스팅은 양쪽 모두에서 나왔다.
+
+### Rust가 사주지 않는 것 — 직관을 교정할 것
+
+- **배터리는 거의 그대로다.** 비용은 active travel의 60Hz 재그리기와 capture 주기(1회 62ms,
+  3~6초 간격)가 지배하고 둘 다 언어와 무관하다. Swift도 ARC 붙은 네이티브 코드지 VM이 아니다.
+- **Win32가 쉬워지지 않는다.** `windows-rs`도 결국 raw Win32다. 위 줄 수가 그 증거다.
+- **오버레이 요구가 검증된 것은 언어 덕이 아니다.** 7가지가 되는 것은 Windows가 지원하기
+  때문이고, Swift·Rust 양쪽에서 같은 결과가 나왔다.
+
+### 아직 아무도 재보지 않은 것 — 이게 C의 진짜 위험이다
+
+**W0는 Windows만 쟀다. C의 위험은 macOS 쪽에 있다.**
+
+C는 잘 돌아가는 macOS 앱을 `objc2`로 다시 만드는 것을 포함한다. AppKit의 `NSPanel` 오버레이,
+Spaces/fullscreen 의미론, ScreenCaptureKit, Accessibility 권한 — **그중 무엇도 Rust에서
+측정되지 않았다.** Windows 쪽 자신감을 macOS 쪽으로 옮겨 적으면 안 된다.
+
+**C를 진지하게 고려한다면 대칭적인 스파이크가 먼저다** — W0.4와 같은 오버레이 프로브를
+macOS에서 `objc2`로 만들어 보는 것. 그게 없으면 C는 측정되지 않은 절반 위에 서 있다.
+
+### 맥 에이전트와 정할 것 넷 — 답 (2026-09-02)
+
+1. **21 MB → 0.15 MB가 11,481줄 재작성 값어치가 있는가.** → **아니오.** 사용자는 설치 관리자
+   하나를 받을 뿐이고 디스크 21 MB는 오늘날 체감되지 않는다. 이 항목 단독으로는 재작성 근거가
+   되지 않는다.
+2. **MVP 사다리가 언제 멈추는가.** → **사실상 지금 멈췄다.** MVP 4가 2026-09-02에 닫혔고,
+   MVP 5(저작 UI)는 이름만 있는 항목이며 MVP 6은 없다. 그런데도 **지금 C로 가지 않는다** —
+   멈춤이 재작성의 필요조건이었지 충분조건은 아니다. W1·W2를 먼저 해서 실제 경계를 드러낸
+   뒤에 결정하는 편이 싸고, 그 둘은 어느 쪽으로 가도 버려지지 않는다.
+3. **W5의 UIA가 COM을 요구하는가.** → **아직 미측정. W5 전에 재는 것으로 확정.**
+   `GetGUIThreadInfo` 탐침을 VS Code · Windows Terminal · Chrome에서 돌려 캐럿 rect가
+   나오는지 본다. **Electron 계열이 위험군**이다 — 네이티브 캐럿을 노출하지 않으면 거기서만
+   UIA가 필요해진다. 탐침은 W0.4와 같은 크기의 버리는 코드다.
+4. **macOS 쪽 `objc2` 스파이크를 먼저 돌릴 것인가.** → **돌렸다. 2026-09-02, 결과는
+   12절.** 처음에는 "W2 뒤로 미룬다"고 답했는데 사용자가 지금 재기로 정했다. C의 미측정
+   절반이 더는 미측정이 아니다 — 오버레이 10개 검사가 전부 통과했고, 같은 날 잰 제3길
+   (Rust core + 기존 Swift 셸)의 FFI 실측이 이 절의 선택지 표에 다섯 번째 줄을 만들었다.
+
+### 이 브리프의 권고
+
+**지금 C로 전환하지 않는다. 그러나 문을 닫지도 않는다.**
+
+W1·W2를 먼저 한다. 3절에 적었듯 그 둘은 A·A′·B·C **어느 쪽으로 가도 버려지지 않는다** —
+Runtime을 macOS 모듈에서 빼내고 `PetAsset`을 데이터 포맷으로 만드는 일은 어떤 언어로
+포팅하든 이식 명세가 된다. **C로 갈 경우에도 그 경계가 재작성의 설계도가 된다.**
+
+그러니 W1·W2는 결정을 기다릴 필요가 없고, 그 사이에 위 네 질문의 답이 모인다.
+
+## 12. macOS 스파이크 실행 결과 (2026-09-02)
+
+11절 4번이 "C의 미측정 절반"이라고 부른 자리를 실제로 쟀다. **버리는 코드이고
+`output/spikes/`(git 미추적)에 있다.** W0와 같은 규칙이다 — 코드가 아니라 판정을 남긴다.
+
+환경: macOS 26.5(Darwin 25.5), Apple Swift 6.3.3, **Rust 1.98.0**(W0가 Windows에서 쓴 것과
+같은 버전), `objc2` 0.6.4 / `objc2-app-kit` 0.3.2, `uniffi` 0.32. 실측 머신은 3-display
+(1920×1080@2x, 1728×1117@2x, 1920×1080@1x).
+
+### W0m.1 — objc2 오버레이 프로브 (C의 macOS 절반)
+
+`PetOverlayPanel.swift`가 하는 일곱 가지에 권한 게이트 둘을 더해 Rust/objc2로 다시 만들었다.
+W0.4가 Windows에서 세운 것과 같은 구조의 대조 실험이다.
+
+| 검사 | 결과 |
+|---|---|
+| W0m.1 borderless · non-activating `NSPanel`, floating, clear bg, never key | **PASS** |
+| W0m.2 per-pixel alpha `CGImage`, `NSImageInterpolation.none` | **PASS** |
+| W0m.3 click-through 토글 (`ignoresMouseEvents`) | **PASS** |
+| W0m.4 `canJoinAllSpaces｜fullScreenAuxiliary｜stationary｜ignoresCycle` | **PASS** |
+| W0m.5 `sharingType = .none` (캡처 제외) | **PASS** |
+| W0m.6 `NSScreen` frames + `backingScaleFactor` (3-display 혼합 DPI) | **PASS** |
+| W0m.7 `NSView` 서브클래스, 타원 hit region | **PASS** |
+| W0m.7b 합성 클릭 라우팅 (`CGEventPost`) | **PASS** |
+| W0m.8 `AXIsProcessTrusted` 호출 가능 | **PASS (약한 검사)** |
+| W0m.9 `CGPreflightScreenCaptureAccess` 호출 가능 | **PASS (약한 검사)** |
+
+**per-pixel alpha는 두 층에서 확인했다.** 뷰의 백킹 비트맵을 직접 읽어 불투명 3,625 ·
+반투명 1,400 · 투명 4,959 픽셀(테스트 이미지의 원+반투명 링 구조와 정확히 일치), 그리고
+화면 합성 후 스크린샷에서 반경 34pt 원이 예상 좌표에 그대로 나왔다.
+
+**캡처 제외 대조 실험** — W0가 Windows에서 한 `WDA_NONE` → `WDA_EXCLUDEFROMCAPTURE`
+실험의 macOS 판이다:
+
+```text
+sharingType = .readOnly  -> screencapture가 스프라이트 픽셀 14,500개를 읽음
+sharingType = .none      -> 0개
+```
+
+MVP 4의 "펫이 자기 자리를 바빠 보이게 만들면 안 된다"가 objc2에서도 한 줄이다.
+
+**마찰은 아홉 개, 전부 기계적이었다.** 첫 빌드에서 컴파일 에러 9개가 나왔고 네 번의
+수정으로 닫혔다. 성질별로:
+
+- `CGDataProvider::with_data`가 C 시그니처 그대로(info·ptr·len·release 콜백 4인자)라
+  `CFData`를 경유해야 했다. `CGImage::width(Some(&img))`도 메서드가 아니라 자유 함수 모양이다.
+- **`CGRect`에 점 포함 헬퍼가 없다.** `NSPointInRect`도 바인딩돼 있지 않아 직접 썼다.
+- `define_class!`로 내보내는 ObjC 메서드는 `bool`이 아니라 `runtime::Bool`을 돌려줘야 한다.
+  실제로는 `containsPet:`을 ObjC 셀렉터에서 빼고 평범한 Rust 메서드로 내리는 게 맞았다 —
+  AppKit이 부르지 않는 것을 셀렉터로 내보낼 이유가 없다.
+- `alloc()`에 `AnyThread`, `retain()`에 `Message` 트레이트를 각각 import해야 한다.
+- 이름이 Swift 프로퍼티가 아니라 ObjC 셀렉터를 따른다 (`canBecomeKeyWindow`).
+
+**objc2 탓이 아닌 마찰이 하나 있었고 이게 제일 오래 걸렸다.** `NSRunLoop::runUntilDate`만
+돌리면 창이 합성되지도, 클릭이 배달되지도 않는다. AppKit 이벤트는
+`nextEventMatchingMask` + `sendEvent:`가 돌아야 흐르고, 그건 `NSApplication::run`이 하는
+일이다. **Swift로 썼어도 똑같이 겪는다** — W0의 "Rust도 같은 C interop 세금을 냈다"와
+같은 종류의 발견이다.
+
+**줄 수는 사실상 동률이다.** 오버레이 구현부만 Rust 216줄, `PetOverlayPanel.swift` 202줄
+(주석·빈 줄 제외). 다만 정확히 같은 것을 세지는 않았다 — Rust 쪽엔 테스트 이미지 생성기가
+들어 있고 Swift 쪽엔 world 좌표를 다루는 `MacOverlayProvider`가 들어 있다. **"objc2가
+AppKit보다 몇 배 장황하다"는 직관은 이 워크로드에서 성립하지 않는다.** release 바이너리는
+541 KB.
+
+**이 프로브가 재지 않은 것 — 여기가 여전히 공백이다.**
+
+- W0m.8·W0m.9는 **심볼이 붙는다는 것만** 증명한다. 실제 캐럿 rect를 `AXUIElement`로 읽는
+  것도, ScreenCaptureKit로 한 프레임을 실제로 뜨는 것도 하지 않았다. MVP 3·4의 본체가
+  거기 있으므로 **C를 진지하게 저울에 올릴 때 이 둘은 따로 재야 한다.**
+- Spaces 전환·fullscreen 진입 시의 실제 거동, 서명된 번들에서의 TCC 프롬프트, 메뉴바
+  아이템, 튜닝 창 — 전부 미측정.
+- 프로브는 서명되지 않은 CLI라 TCC 신원을 부모 프로세스에서 물려받는다. 그래서 `AXIsProcessTrusted`가
+  `true`를 돌려줬고, 이는 앱의 권한 상태와 무관하다.
+
+### W0m.2 — 제3길 프로브: Rust core + 기존 Swift 셸 (uniffi)
+
+`BasicSafeZonePlanner`와 그것이 쓰는 geometry·world 타입을 Rust로 포팅하고 uniffi로
+Swift에 노출한 뒤, **진짜 `RoamlingCore`와 같은 입력을 넣어 결과를 대조했다.**
+
+```text
+402개 world (실측 3-display + 단일 + 무작위 400) x
+  safe zone 전체 비교 + 펫/포인터를 화면 전체로 쓸어가며 destination 35회
+= safe-zone 불일치 0, destination 불일치 0 (14,070 질의)
+```
+
+**Swift의 `max(by:)`가 동점에서 마지막 원소를 돌려준다**는 것까지 맞춰야 0이 나왔다.
+`min_by`/fold의 tie-breaking을 그대로 옮기지 않으면 조용히 다른 모서리에 앉는다 —
+포팅이 "기계적"이라는 말이 "안전하다"는 뜻은 아니라는 증거다.
+
+**성능 — 직관과 반대 방향이었다.** 100,000회 호출, 양쪽 다 release 빌드:
+
+| | µs/call | |
+|---|---:|---|
+| Swift `RoamlingCore` (release, native) | **1.913** | 지금 |
+| Rust native (FFI 없음) | **1.302** | 1.47배 빠름 |
+| Swift → Rust, world를 매 호출 전달 | 8.590 | 순진한 설계 |
+| Swift → Rust, world를 Rust가 보유 | **4.656** | 현실적 설계 |
+| uniffi 크로싱만 (페이로드 없음) | **0.027** | 사실상 공짜 |
+
+**크로싱 자체는 27 ns로 공짜다. 비싼 것은 직렬화다** — 3개 display와 문자열이 든 world를
+매 호출 넘기면 3.9 µs가 붙는다. world를 Rust 쪽 객체에 얹고 tick마다 점 세 개만 넘기면
+4.656 µs이고, 남은 3.4 µs는 `String` 두 개(`display_id`, `reason`)를 든 반환값의 마샬링이다.
+
+판정은 이렇다. **제3길은 성능 이득이 아니다** — 이 워크로드에서 Rust의 원시 이득은 1.47배뿐이고
+FFI를 거치면 Swift로 그냥 두는 것보다 2.4배 느리다. 그러나 **성능 문제도 아니다**: tick당
+한 번이면 4.656 µs는 60 Hz 프레임 예산 16,666 µs의 **0.028%**다. 그러므로 제3길의 근거는
+속도가 아니라 구조여야 한다 — 로직 1벌, Swift-on-Windows 의존 제거, 실사용으로 조율된
+macOS 셸 보존.
+
+**설계 지침 세 줄** (제3길로 갈 경우):
+
+- 상태는 Rust가 들고, tick마다 넘기는 것은 값 몇 개로 줄인다.
+- **tick마다 돌려주는 값에 `String`을 넣지 않는다.** `reason` 같은 진단 문자열은 열거형
+  인덱스로 넘기고 표시할 때 Swift에서 해석한다.
+- 경계는 A′ 절이 이미 설계한 "스냅샷 in → 표시할 프레임 out" 그대로다. **W1이 만든
+  `PlatformServices`가 정확히 그 자리다** — Swift가 tick을 몰고, 플랫폼 상태를 모아 넘기고,
+  무엇을 그릴지 돌려받는다. 콜백 방향이 없으므로 uniffi callback interface가 필요 없다.
+
+**비용.** Rust 포팅본 300줄(벤치 헬퍼 포함) — Swift 원본은 플래너 143줄 + 그것이 기대는
+geometry·world 282줄이다. uniffi가 만드는 Swift 바인딩 989줄은 **생성물이라 유지보수 대상이
+아니다.** 손으로 쓴 브리지는 10줄. cdylib 551 KB, 바인딩 dylib 253 KB, cold `cargo build
+--release` 99초.
+
+**타입 이름이 충돌한다.** uniffi가 만드는 `WorldPoint`·`WorldRect`·`DisplaySnapshot`이
+`RoamlingCore`의 같은 이름과 부딪혀 프로브에서는 모듈로 한정해야 했다. 진짜 제3길에서는
+Rust 쪽이 **유일한** 정의가 되므로 이 충돌은 사라진다 — 다만 그 말은 곧 **전환이 부분적일 수
+없다는 뜻**이다. 두 벌을 나란히 두면 매 참조를 한정해야 한다.
+
+### W0m.3 — 디코더 스파이크: Rust가 B3를 없애는가 (2026-09-02)
+
+W2가 디코딩을 `PetImageSourcing` 뒤로 밀어 둔 덕에 **런타임 1,700줄을 옮기지 않고** D의
+핵심 질문 셋을 잴 수 있었다. 바꾼 Swift는 `RustPetImageSource` 한 구조체뿐이고 나머지
+앱은 자기가 무엇으로 디코드되는지 모른다.
+
+**1. 바이트 동일한가 → 그렇다.** `image` 0.25.10으로 디코드한 결과가 ImageIO와
+**248프레임 전부 일치**한다(내장 mochi 96 · fat-mochi 56 · 패키지 mochi-v3 96;
+placeholder 88은 플랫폼 드로잉이라 제외). W2의 게이트를 그대로 돌린 것이다.
+
+한 가지는 맞춰야 했다 — **`image`는 straight alpha, ImageIO는 premultiplied**를 준다.
+Rust 쪽에서 `(c * a + 127) / 255`로 반올림 곱을 해야 일치한다. 이걸 Swift에서 하면 경계를
+건너는 것이 `PetImage`가 약속한 것과 달라지므로 Rust 안에서 한다.
+
+**그리고 C가 없다.** `image-webp` · `png` · `zlib-rs` 전부 순수 Rust다. 4절 W2b가 A 경로에
+적어둔 "libwebp + miniz 약 4만 줄 벤더링"이 **D에서는 `Cargo.toml` 한 줄**이 된다.
+
+**2. 11.5 MB를 건네는 비용 → 감당된다.** 아틀라스는 1.15 MB로 실려 11.5 MB로 풀린다.
+
+| | ms/decode |
+|---|---:|
+| ImageIO (지금) | **19.87** |
+| Rust native (FFI 없음) | 24.09 |
+| Rust via uniffi | **39.37** |
+
+FFI 세금은 **11.5 MB당 15.3 ms**(약 750 MB/s)다. 어제 잰 "크로싱은 27 ns로 공짜, 비싼 것은
+직렬화"와 같은 결론이고 이번엔 최악의 페이로드에서 확인했다. **디코드는 실행당 두 번
+(표준 시트 + 확장 시트) 일어나고 그 뒤로는 없다.** 시작이 40 ms 늘어난다는 뜻이라 무의미하다.
+Rust 자체가 ImageIO보다 21% 느린 것도 같은 이유로 무의미하다.
+
+**3. 두 언어 빌드와 서명 → 통과한다.** 이게 12절이 남긴 질문 (2)번이었고 제일 모르던
+부분이다. dylib을 `Contents/Frameworks/`에 넣고, identity로 서명하고,
+`codesign --verify --deep --strict`가 통과하고, **번들 안의 서명된 실행 파일이 rpath로
+Rust dylib을 찾아 실제로 돌았다.**
+
+함정은 하나였고 반드시 밟는다 — **Rust cdylib의 기본 `install_name`이 빌드 머신의 절대
+경로다**(`/Users/.../target/release/deps/lib....dylib`). 그대로 배포하면 다른 머신에서
+로드에 실패한다. `install_name_tool -id @rpath/...` 또는
+`-Clink-arg=-install_name,@rpath/...`로 고치고, 실행 파일에
+`-rpath @executable_path/../Frameworks`를 준다. 그 밖의 의존은 `libiconv`와 `libSystem`
+둘뿐이라 추가로 실을 것이 없다.
+
+비용: dylib 0.88 MB + uniffi Swift 바인딩 dylib 0.17 MB = **번들 +1.08 MB**(8.4 MB → 11 MB,
+디버그 심볼 포함). cold `cargo build --release` 99초.
+
+**판정: D의 디코더 논거는 실측으로 섰다.** WebP가 Windows에서 공짜가 아니라는 사실(B3)이
+A에서는 4만 줄 벤더링이고 D에서는 의존성 한 줄이다. 그리고 그것을 확인하는 데 제품 코드를
+한 줄도 옮기지 않았다 — W1의 `PlatformServices`와 W2의 `PetImageSourcing`이 만든 이음새
+덕이다.
+
+**아직 재지 않은 것**: `AXUIElement` 캐럿과 ScreenCaptureKit 한 프레임을 objc2로 실제로
+뜨는 것(12절 W0m.1의 공백 그대로), 그리고 `RoamlingEngine` 1,700줄을 옮길 때 W0m.2에서 본
+tie-breaking 함정을 테스트가 전부 잡아 주는지. **D는 macOS 셸을 그대로 두므로 첫 번째는
+D에 필요 없다** — C에만 남는 공백이다.
+
+### 선택지 표에 다섯 번째 줄
+
+| | 로직 | macOS 셸 | Windows 셸 | Swift on Windows 필요? | macOS 재검증 | Windows 배포 | WebP(B3) |
+|---|---|---|---|---|---|---|---|
+| **A** (현재) | Swift | Swift/AppKit 그대로 | Swift/`WinSDK` 신규 | 예 | 없음 | 17파일 56 MB | libwebp 벤더링 |
+| **A′** | Swift DLL | Swift/AppKit 그대로 | C# | 예 | 없음 | + .NET 런타임 | libwebp 벤더링 |
+| **B** | C# 2벌 | Swift/AppKit 그대로 | C# | 아니오 | 없음 | .NET | .NET 기본 제공 |
+| **C** | Rust 신규 | **Rust/objc2 신규** | Rust/`windows-rs` | 아니오 | **전부** | **1파일** | `image` 한 줄 |
+| **D. 제3길** | Rust 신규 | **Swift/AppKit 그대로** | Rust/`windows-rs` | **아니오** | **없음** | **1파일** | `image` 한 줄 |
+
+**단일 파일은 Windows에서만 의미가 있다.** macOS는 언어와 무관하게 `.app` 번들이어야 한다 —
+`LSUIElement`(Dock 없는 상주앱), TCC가 권한을 붙이는 `CFBundleIdentifier`,
+`NSScreenCaptureUsageDescription`, 서명·notarize가 전부 번들 전제다. **그리고 그 Windows
+이득은 C만의 것이 아니다** — D의 Windows 셸도 Rust라 Swift가 없다. 11절 1번이
+"21 MB → 0.15 MB가 11,481줄 재작성 값어치가 있나 → 아니오"라고 답했을 때, 그 이득을 얻으려고
+macOS 셸까지 버릴 필요는 없다는 점을 놓쳤다.
+
+D는 C에서 **측정되지 않은 절반을 뺀 것**이다. 로직은 결정적이고 테스트 126개가 덮고 있어
+포팅이 검증 가능하지만, 셸은 사용자가 3-display 앞에 앉아 닫은 값들이 사는 곳이라 재검증이
+비싸다. D는 비싼 쪽을 건드리지 않는다. **그리고 Swift on Windows 의존이 사라진다** — 툴체인이
+공식이긴 해도 가장 큰 기여자였던 The Browser Company가 Atlassian에 인수되고 Windows용 Arc가
+멈춘 지금, 이건 값이 있는 성질이다.
+
+D의 대가는 macOS 빌드에 두 언어·두 빌드 시스템이 들어오는 것, 그리고 위의 "전환이 부분적일
+수 없다"는 제약이다.
+
+### 바인딩 생태계 — 공식이 어디까지인가 (2026-09-02 조사)
+
+| | 성격 | stars | 최근 push |
+|---|---|---:|---|
+| `microsoft/windows-rs` | **Microsoft 공식**, winmd에서 생성 | 12,719 | 2026-09-02 |
+| `madsmtm/objc2` | 비공식. **Xcode SDK 헤더에서 생성**, 단일 메인테이너 | 1,023 | 2026-08-27 |
+| `thebrowsercompany/swift-winrt` | 비공식(Browser Company). 최신 릴리스 2026-03 | 851 | 2026-04-10 |
+| `servo/core-foundation-rs` (`cocoa`) | 손으로 쓴 바인딩. 생태계가 objc2로 이탈 중 | 1,281 | 2026-05-08 |
+| `ryanmcgrath/cacao` | 고수준 래퍼. 18개월 정체 | 2,077 | 2025-02-03 |
+| `mozilla/uniffi-rs` | Mozilla. 활발 | 4,925 | 2026-08-31 |
+| `chinedufn/swift-bridge` | 개인. uniffi 대안 | 1,129 | 2026-01-06 |
+
+**Apple 공식 Rust 바인딩은 없다. objc2가 사실상 유일한 실전 후보다.** 공식은 아니지만
+공식에 가장 가까운 이유는 셋이다 — Xcode SDK 헤더에서 생성하므로 커버리지가 사람 손에
+달려 있지 않고(`objc2-app-kit`·`objc2-screen-capture-kit`·`objc2-application-services`가
+전부 있다), winit이 이미 옮겼고 tauri 계열과 wgpu가 이전 중이며, 위 표의 나머지는 전부 더
+작거나 더 오래됐다. 약점은 **단일 메인테이너**라는 것 하나다.
+
+**Windows 쪽은 걱정할 축이 아니다.** swift-winrt가 비공식이고 같은 조직의 `swift-winui`·
+`swift-windowsappsdk`가 2025-10에 archive됐지만, **우리 경로에 WinRT가 없다** — W0는 툴체인
+내장 `WinSDK`(Win32)로 통과했고 5절이 캡처를 BitBlt, focus를 `GetGUIThreadInfo`로 잡아 둔
+것이 결과적으로 WinRT 의존을 피했다. 남는 신호는 Swift-on-Windows 툴체인 자체의 추진력이고,
+그건 막힌 것이 아니라 지켜볼 것이다. D는 그 신호에 걸린 베팅을 아예 없앤다.
+
+### 이 절이 바꾸는 것과 바꾸지 않는 것
+
+**바꾸지 않는 것: 지금 할 일은 여전히 W2다.** D로 가더라도 `PetAsset`을 `CGImage`에서
+떼어내는 일은 그대로 필요하고(오히려 Rust `image` 크레이트가 B3를 없앤다), W1이 만든
+`PlatformServices` 경계가 D의 경계와 같은 자리라는 것이 이 절의 발견이다.
+
+**바꾸는 것: C의 미측정 절반이 줄었고, D라는 선택지가 실측 위에 올라왔다.** 결정은 W2가
+끝난 뒤에 한다 — 그때 남는 질문은 셋이다. (1) `AXUIElement` 캐럿과 ScreenCaptureKit을
+objc2로 실제로 뜰 수 있는가 (2) 두 언어 빌드를 `scripts/build-app.sh`와 서명 흐름에 얹는
+비용 (3) `RoamlingEngine` 1,700줄을 옮길 때 W0m.2에서 본 tie-breaking 함정을 테스트가
+전부 잡아 주는가.

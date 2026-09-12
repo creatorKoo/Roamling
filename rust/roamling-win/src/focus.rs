@@ -4,7 +4,7 @@
 //! Where the user is actually working: the focused window, and the text caret
 //! inside it.
 //!
-//! `docs/windows.md` section 5 said to try `GetGUIThreadInfo` before reaching
+//! `docs/history/windows.md` section 5 said to try `GetGUIThreadInfo` before reaching
 //! for UI Automation, because COM interop is the most painful part of this port
 //! and a great many apps report their caret through the older path for free.
 //! This is that attempt. Where it comes back empty the pet simply keeps the

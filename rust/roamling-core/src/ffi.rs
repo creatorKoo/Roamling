@@ -6,7 +6,7 @@
 //! Only macOS crosses this boundary; the Windows shell links the crate and
 //! calls the same functions directly. Kept coarse on purpose -- one call with a
 //! whole world rather than a call per rectangle, which is the shape that
-//! measured 0.03% of a frame in `docs/windows.md` section 12.
+//! measured 0.03% of a frame in `docs/history/windows.md` section 12.
 
 use crate::emptiness::LuminanceField;
 use crate::geometry::{WorldPoint, WorldRect, WorldSize};

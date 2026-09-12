@@ -27,7 +27,7 @@ public enum RuntimeTuningKey: String, CaseIterable, Codable, Sendable {
 /// This lives in `RoamlingEngine` rather than `RoamlingCore` because its rules
 /// are in Rust now and Core cannot reach the seam. The type kept its shape:
 /// eleven stored values, `Codable`, and the same clamps -- only the arithmetic
-/// moved. `docs/windows.md` unit 6a.
+/// moved. `docs/history/windows.md` unit 6a.
 public struct RuntimeTuning: Codable, Equatable, Sendable {
     public var walkingSpeed: Double
     public var wanderPause: Double

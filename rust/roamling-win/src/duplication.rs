@@ -5,7 +5,7 @@
 //!
 //! `BitBlt` from a screen DC measured 256-1117 ms per readback and did not
 //! scale with area, because on a composited desktop it forces a GPU-to-CPU
-//! sync no matter how few pixels are asked for. `docs/windows.md` section 5
+//! sync no matter how few pixels are asked for. `docs/history/windows.md` section 5
 //! carries the numbers. Desktop Duplication is the path that does not: the
 //! compositor hands over the frame it already has.
 //!

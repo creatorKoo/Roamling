@@ -5,7 +5,7 @@
 # Builds the Rust core and generates its Swift bindings into
 # Sources/RoamlingCoreRs, which SwiftPM compiles and links statically.
 #
-# Static on purpose. A dylib works -- docs/windows.md W0m.3 measured it through
+# Static on purpose. A dylib works -- docs/history/windows.md W0m.3 measured it through
 # rpath and codesign -- but it means bundling, an install-name fixup, and a
 # second signature. A static archive is one file the linker eats.
 #

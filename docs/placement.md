@@ -1,6 +1,6 @@
 # Placement: where the pet decides to stand
 
-`docs/architecture.md`는 모듈 경계를, `docs/mvp.md`는 게이트를 설명한다. 이 문서는 그
+`docs/architecture.md`는 모듈 경계를, `docs/history/mvp.md`는 게이트를 설명한다. 이 문서는 그
 사이에 빠져 있던 것을 다룬다 — **펫이 "어디에 있을지"를 정하는 결정이 실제로 어떻게
 흐르는가**, 그리고 그 흐름이 왜 지금 형태로는 계속 버그를 만들어내는가.
 

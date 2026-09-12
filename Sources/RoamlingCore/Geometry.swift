@@ -24,7 +24,7 @@ public struct WorldPoint: Codable, Hashable, Sendable {
     /// exactly, MSVC's UCRT does not, and 17 of 600 measured distances differed
     /// by one unit in the last place. `*`, `+` and `squareRoot()` are all
     /// specified exactly by IEEE 754, so this is the same bits everywhere, and
-    /// measured 2.9x cheaper besides. `docs/windows.md`, W4.
+    /// measured 2.9x cheaper besides. `docs/history/windows.md`, W4.
     public func distance(to other: WorldPoint) -> Double {
         let dx = other.x - x
         let dy = other.y - y

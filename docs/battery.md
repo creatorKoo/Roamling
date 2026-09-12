@@ -18,7 +18,7 @@ tick 로직           3.9 µs · 최대 60 Hz          = 30 Hz 예산의 0.012%
 2560x1600 실측 2026-09-04). 그래도 여전히 이 앱에서 가장 비싼 동작이고, 아래의 "덜 찍는다"는
 양 플랫폼에 그대로 적용된다.
 
-capture 62 ms는 `docs/windows.md` 5절의 실측이고, tick 3.9 µs는
+capture 62 ms는 `docs/history/windows.md` 5절의 실측이고, tick 3.9 µs는
 `output/w-unit5/bench-director.swift`가 잰 값이다.
 
 ## 이미 되어 있는 것 — 다시 하지 말 것

@@ -8,7 +8,7 @@
 //! that are not decisions -- the timer, the defaults, the diagnostics file, the
 //! agent subscriptions and the sprite sheet.
 //!
-//! This is the unit a second shell needs. `docs/windows.md` unit 6c: a Rust
+//! This is the unit a second shell needs. `docs/history/windows.md` unit 6c: a Rust
 //! Windows shell has nothing to call until the orchestrator is here, because
 //! Rust cannot call Swift.
 //!

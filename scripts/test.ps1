@@ -3,7 +3,7 @@
 #
 # The Windows counterpart of scripts/test.sh, which is zsh and drives SwiftPM.
 # There is no Swift here: the Windows build is Rust all the way down, so this
-# is cargo and nothing else. See docs/windows.md, W4.
+# is cargo and nothing else. See docs/history/windows.md, W4.
 #
 # Exits non-zero on the first failure, same contract as test.sh.
 

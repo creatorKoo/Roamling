@@ -7,6 +7,10 @@ macOS desktop companion runtime. Swift 6 / AppKit / SwiftPM, GPL-3.0-only.
 이 파일은 `AGENTS.md`로도 심볼릭 링크돼 있어서 Claude Code와 Codex가 같은 규칙을 읽는다.
 규칙이 갈라지지 않도록 수정은 항상 `CLAUDE.md`에서 한다.
 
+**여기는 규칙과 함정이고, 근거는 `docs/`에 있다. 어떤 질문에 어떤 문서인지는
+[`docs/README.md`](docs/README.md)가 지도다.** 닫힌 게이트의 기록은 `docs/history/`로
+내려가 있으니, 결정을 뒤집으려는 것이 아니면 거기부터 읽지 않는다.
+
 ## 작업 방식 — 문서부터, 부분 고치기 금지 (사용자 결정 2026-09-11)
 
 동작이 여러 층(source 상태 기계 · director · attention · 펫 런타임)에 걸친 기능을 고치거나 늘릴 때는
@@ -16,6 +20,12 @@ macOS desktop companion runtime. Swift 6 / AppKit / SwiftPM, GPL-3.0-only.
 - 문서의 문장마다 코드 위치(파일:줄 또는 함수)를 단다. 기억이나 계획서의 문장을 사실로 옮기지 않는다.
 - 부분 수정이 다른 층의 규칙과 부딪치면 그 자리에서 우회 코드를 더하지 않는다. 멈추고, 충돌을 문서에
   적고, 사용자에게 올린다.
+- **사용자가 원한다고 말한 것은 코드보다 먼저 `docs/requests.md`에 적는다.** 계획서에 라벨로만
+  참조하지 않는다 — `output/`은 미추적이라 다음 세션이 못 본다. 아내분의 색 팔레트 요청이 그렇게
+  사라졌고, 사용자가 다시 묻기 전까지 아무도 몰랐다.
+- **기능을 다시 지으면 그 기능을 설명하는 문서를 같은 작업 안에서 고친다.** 코드만 초록이면 아무도
+  못 잡는다 — `scripts/test.sh`는 문서를 안 본다. 일하는 앱을 상태형으로 옮긴 날, 흐름의 정본인
+  `docs/behavior-flow.md` §5b가 통째로 거짓이 돼 있었고 우연히 읽다가 잡았다.
 - 계기: G 항목(일하는 앱)을 고치는 동안 source에 우회 코드가 다섯 개 붙었고, 계획이 코드와 어긋나
   구현이 네 번 멈췄고, 문서에 먼저 쓴 문장이 여러 번 틀렸다. 테스트는 초록이었지만 동작을 한 번에
   설명할 수 없는 상태가 됐다.
@@ -40,7 +50,7 @@ Windows에는 Swift가 없다 — 그쪽 빌드는 전부 Rust다.
 릴리스는 `v*` 태그를 밀면 `.github/workflows/release.yml`이 만든다. **태그와
 `rust/Cargo.toml`의 버전이 다르면 워크플로가 실패한다** — 다르면 설치된 빌드가 영원히
 자기를 업데이트하기 때문이다. 자동 업데이트의 서명 키·피드 구조·수동으로 해야 할 일은
-`docs/windows.md`의 W7 절에 있다. **`PUBLIC_KEY_HEX`가 전부 0이면 업데이트는 꺼진 상태이고,
+`docs/windows.md`의 "자동 업데이트" 절에 있다. **`PUBLIC_KEY_HEX`가 전부 0이면 업데이트는 꺼진 상태이고,
 그게 안전한 기본값이다** — 서명을 확인할 수 없는 빌드는 업데이트하지 않는다. 지금은 실제
 키가 들어 있고 양 플랫폼의 자동 업데이트가 켜져 있다.
 
@@ -153,7 +163,7 @@ import하지 않는다.** macOS SDK에 다 있어서 컴파일러는 이걸 못 
 
 의존 방향은 항상 바깥 → Core다. Core에 AppKit이나 agent-specific 타입을 넣지 않는다.
 자세한 근거는 `docs/architecture.md`, MVP 0~4의 acceptance criteria와 실제로 실린 것은
-`docs/mvp.md`에 있다. **배터리를 이유로 무언가를 바꾸기 전에 `docs/battery.md`를 읽는다** —
+`docs/history/mvp.md`에 있다. **배터리를 이유로 무언가를 바꾸기 전에 `docs/battery.md`를 읽는다** —
 무엇이 실제로 비싼지의 실측과, 이미 되어 있어서 다시 할 필요가 없는 것들이 적혀 있다.
 (요약: capture 1회 62 ms가 나머지 전부의 만 배다. 산술은 손댈 것이 없다.) **MVP 사다리는 4에서 멈췄고(2026-09-02 완료), W1 Runtime 추출도 같은 날
 닫혔다. W2(이미지 파이프라인 탈-CoreGraphics)도 2026-09-02에, **W2b(이식 가능한 디코더)는
@@ -164,7 +174,7 @@ import하지 않는다.** macOS SDK에 다 있어서 컴파일러는 이걸 못 
 `Tests/RoamlingLogicTests/PreW2FrameHashes.swift`다.
 
 **언어 결정은 2026-09-02에 D(Rust core + Swift macOS 셸)로 닫혔고, 포팅은 2026-09-03에
-단위 1~7이 끝났다.** 근거·순서·되돌아올 조건은 `docs/windows.md` 3절에 있다.
+단위 1~7이 끝났다.** 근거·순서·되돌아올 조건은 `docs/history/windows.md` 3절에 있다.
 
 **펫이 무엇을 할지 결정하는 코드는 이제 전부 `rust/roamling-core`에 있다.** geometry ·
 world · topology · emptiness · 배치 · attention · 반응 · 튜닝 · 활동 지휘 · tick 본체 ·
@@ -174,7 +184,7 @@ world · topology · emptiness · 배치 · attention · 반응 · 튜닝 · 활
 **Windows 게이트는 W7까지 전부 닫혔다 (2026-09-04).** W4 최소 루프 · W5 provider 셋 ·
 W5b agent 연동 · W6 패키징(Inno Setup, per-user) · W7 자동 업데이트(공유 Rust 업데이터 +
 Ed25519 서명)까지 실물로 돈다. 첫 릴리스 `v0.2.0`이 나가 있고 자동 업데이트가 켜져 있다.
-각 게이트의 실측과 결정은 `docs/windows.md`에 있다.
+각 게이트의 실측과 결정은 `docs/history/windows.md`에 있다.
 
 ## 맥에서 해야 하는 일
 
@@ -306,7 +316,7 @@ Apple Developer Program 연 $99는 **여전히 안 냈다.** 내면 첫 다운�
 **그 `cargo test --release`를 2026-09-03에 Windows에서 돌렸고, 10개 중 5개가 깨졌다.**
 포팅 결함이 아니라 `hypot`/`atan2`가 플랫폼 libm으로 새는 것이 원인이다 — macOS는 정확
 반올림을 하고 MSVC UCRT는 하지 않는다. 어긋남은 전부 1 ULP이고 결정은 바뀌지 않는다.
-**처방과 실측치는 `docs/windows.md` W4의 "실행 결과 · 처방" 절에 있다.**
+**처방과 실측치는 `docs/history/windows.md` W4의 "실행 결과"·"처방" 두 절에 있다.**
 
 **그 처방은 2026-09-03에 시행됐다.** `hypot`은 `(dx*dx + dy*dy).sqrt()`로 바뀌었고
 (Swift 2곳 · Rust 2곳 + fixture 재생성, 한 커밋), `atan2`는 `look_direction_degrees` 한
@@ -315,7 +325,7 @@ Apple Developer Program 연 $99는 **여전히 안 냈다.** 내면 첫 다운�
 Windows에서 `cargo test --release`가 이제 초록이어야 한다. **아니라면 그것은 새로운
 발견이므로 fixture를 다시 만들지 말고 원인을 찾는다.**
 
-**이 경계가 Windows port의 전제다.** `docs/windows.md`에 모듈별 실측 이식 비용, 언어
+**이 경계가 Windows port의 전제다.** `docs/history/windows.md`에 모듈별 실측 이식 비용, 언어
 선택 네 가지의 비교, 그리고 2026-09-01에 Windows에서 실행한 W0 스파이크 결과가 있다.
 `RoamlingCore`는 실제 `Package.swift`로 Windows에서 무수정 빌드되고 Core 테스트가 통과한다. **포팅·언어 선택·Rust 재작성 논의를 시작하기 전에 그 문서를 읽는다** — 특히
 11절이 Rust 전환 판단에 필요한 실측치를 모아 둔 브리프다.
@@ -469,9 +479,9 @@ failed 8 · waiting 6 · running 6 · review 6. 더 그리면 뒤는 아무도 �
 점프 프레임을 그대로 빌린다.
 
 층 구조와 결정 근거는 `docs/state-contract.md`, 어떤 상황에 어떤 그림이 뜨는지는
-`docs/behavior-flow.md`, **지금 시트에 무엇이 그려져 있는지는 `docs/art/mochi-v3-plan.md`의
-"완료 — 실제로 만들어진 것"** 절에 있다. 같은 문서의 나머지는 v3를 만들기 전의 진단과
-계획이라 현재 상태가 아니고, `docs/art/mochi-v2-animation-spec.md`는 v2 시트의 기록이다.
+`docs/behavior-flow.md`, **지금 시트에 무엇이 그려져 있는지는 `docs/art/mochi-sheet.md`**에 있다. 그것을 만들기
+전의 진단과 계획은 `docs/history/mochi-v3-plan.md`, v2 시트의 기록은
+`docs/history/mochi-v2-animation-spec.md`다.
 **행을 새로 그리기 전에 이 문서들을 읽는다.**
 
 ## Atlas 규격은 두 종류다 — 절대 섞지 말 것
@@ -538,7 +548,7 @@ Swift 런타임 작업. PNG는 직접 읽어 육안 QA할 수 있다.
   긋는 지면선 176과 한 칸 다르다). 면제는 행 단위가 아니라 프레임 단위로 준다 —
   `--allow-airborne 1`은 달리기 행의 착지 프레임 5장까지 검사에서 빼버린다. 꼬리가
   흔들리는 행은 실루엣 중심이 12.5px 밀리므로 `--center-measure 8=head`로 머리를 잰다.
-  Mochi v3의 정식 호출은 `docs/art/mochi-v3-plan.md`에 있다.
+  Mochi v3의 정식 호출은 `docs/history/mochi-v3-plan.md` 0.5절에 있다.
 
 ## Python
 

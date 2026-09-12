@@ -1,4 +1,9 @@
-# Roamling upstream research
+# Roamling upstream research (기록)
+
+> **닫힌 기록이다. 2026-08-26 이후 갱신하지 않았다.** 여기서 확인한 Petdex·Codex 규격은
+> `docs/state-contract.md`와 `docs/pets.md`로 흡수됐고, **그 둘이 정본이다.** 이 문서는
+> 그때 무엇을 어떻게 확인했는지(공개 소스·설치된 리소스·생성된 schema)의 근거로 남긴다.
+> upstream은 계속 변하므로 아래 commit과 날짜는 fixture를 갱신할 때의 기준점이다.
 
 조사 기준일: **2026-08-26**. README만으로 형식을 추정하지 않고 공개 소스,
 설치된 공식 리소스, 생성된 현재 버전 schema를 함께 확인했다. upstream은 계속

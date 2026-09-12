@@ -1,8 +1,7 @@
 # Behavior flow: 어떤 상황에 어떤 그림이 뜨는가
 
 `docs/architecture.md`는 모듈 경계를, `docs/pets.md`는 capability와 패키지 사이의 간격을,
-`docs/art/mochi-v3-plan.md`의 "완료 — 실제로 만들어진 것"은 지금 시트에 무엇이 그려져
-있는지를 다룬다. 이 문서는 그것들을 **시간 순서로 이어 붙인 것**이다 — 펫이 idle에서 시작해서 무엇 때문에
+`docs/art/mochi-sheet.md`는 지금 시트에 무엇이 그려져 있는지를 다룬다. 이 문서는 그것들을 **시간 순서로 이어 붙인 것**이다 — 펫이 idle에서 시작해서 무엇 때문에
 무엇으로 넘어가고, 그 순간 화면에 실제로 어떤 그림이 뜨는가.
 
 행을 새로 그리기 전에 이 문서를 읽는다. 그림의 좋고 나쁨은 그림만 봐서는 판단할 수 없고,
@@ -546,7 +545,7 @@ falls through to jumping and the pet throws a full celebration every time it is 
 - **지면선이 모든 행에서 175로 맞았다.** `jumping`의 시작·끝 프레임이 25px 가라앉아 턴이
   시작될 때마다 바닥에 잠기던 것이 이때 고쳐졌다. `pet_qa.py`의 면제도 행 단위(`--allow-airborne 4`)
   에서 프레임 단위(`--allow-airborne r4c1`)로 좁혀져서, 지금 면제되는 여덟 프레임은 전부
-  실제로 공중에 있다. 정식 게이트는 57프레임 0실패다 — 명령은 `docs/art/mochi-v3-plan.md` 0.5절.
+  실제로 공중에 있다. 정식 게이트는 57프레임 0실패다 — 명령은 `docs/history/mochi-v3-plan.md` 0.5절.
 
 
 ## 9. 확인 방법

@@ -10,7 +10,7 @@ import RoamlingPet
 ///
 /// Swift's own types stay on this side while the units come over one at a time,
 /// so each function converts, calls, and converts back. That conversion is the
-/// cost -- `docs/windows.md` section 12 measured the crossing itself at 27 ns
+/// cost -- `docs/history/windows.md` section 12 measured the crossing itself at 27 ns
 /// and the payload at everything else -- which is why these take a whole world
 /// rather than being called per rectangle.
 ///
@@ -1032,7 +1032,7 @@ public final class RustFocusActivity {
 ///
 /// The shell around it keeps only what is not a decision: the timer, the
 /// defaults, the diagnostics file, the agent subscriptions and the sprite
-/// sheet. `docs/windows.md` unit 6c.
+/// sheet. `docs/history/windows.md` unit 6c.
 public final class RustPetLoop {
     private let handle: PetLoop
 

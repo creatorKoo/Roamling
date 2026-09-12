@@ -1,4 +1,9 @@
-# Roamling MVP gates
+# Roamling MVP gates (기록)
+
+> **닫힌 기록이다. MVP 0~4는 2026-09-07 기준 전부 완료됐고 열려 있는 게이트가 없다.**
+> 지금 도는 구조는 `docs/architecture.md`, 지금 무엇을 할지는 `docs/requests.md`와
+> `docs/windows.md` W8을 본다. 이 문서는 **각 단계에서 무엇을 acceptance criteria로 삼았고
+> 실제로 무엇이 실렸는지**의 근거로 남긴다.
 
 Roamling은 한 단계의 체감 품질과 acceptance criteria를 닫고 실제 사용 피드백을 받은
 뒤 다음 단계로 이동한다. 다음 단계의 구조를 고려할 수는 있지만 기능을 미리 활성화하지

@@ -1,4 +1,7 @@
-# Mochi v2 애니메이션 기술서 — 지금 무엇이 그려져 있는가
+# Mochi v2 애니메이션 기술서 (기록)
+
+> **닫힌 기록이다. v2 시트는 v3로 대체됐다.** 지금 시트에 무엇이 그려져 있는지는
+> `docs/art/mochi-sheet.md`를 본다. 이 문서는 v2의 실측이고, v3 계획의 입력이었다.
 
 재제작(v3)의 입력 문서다. **행마다 지금 무엇이 그려져 있고, 그것이 두 계약 각각에서
 언제 재생되며, 어디가 어긋나는지**를 실측으로 적는다. 그림을 새로 만들기 전에 이 표를
@@ -6,7 +9,7 @@
 
 - 흐름과 상태 전이는 `docs/behavior-flow.md`
 - 어휘를 어떻게 쌓았는지는 `docs/state-contract.md`
-- **무엇을 어떻게 다시 만드는가는 `docs/art/mochi-v3-plan.md`** — 이 문서의 실측이 그 계획의 근거다
+- **무엇을 어떻게 다시 만드는가는 `docs/history/mochi-v3-plan.md`** — 이 문서의 실측이 그 계획의 근거다
 - capability 사슬과 대체 규칙은 `docs/pets.md`
 - 프레임 작화 불변식은 `docs/art/mochi-animation-handoff.md`
 
@@ -82,7 +85,7 @@ failed 8 · waiting 6 · running 6 · review 6
 ```
 
 **N보다 많이 그리면 뒤는 아무도 못 보고, 적게 그리면 빈 칸이 한 프레임 깜빡인다.** 같은
-표가 `docs/research.md:79`에 ChatGPT.app의 공식 계약에서 확인한 값으로 이미 있다. 공식
+표가 `docs/history/research.md:79`에 ChatGPT.app의 공식 계약에서 확인한 값으로 이미 있다. 공식
 최소 매니페스트에는 `animations` 필드가 없다.
 
 반대로 **각 행의 뒤쪽 빈 칸은 어느 소비자도 읽지 않는다.** Roamling 확장 행을 거기 넣는
@@ -120,7 +123,7 @@ Petdex 표준  6프레임 1100ms  steady  "Neutral breathing and blinking loop"
 
 **시트에서 정합성이 가장 나쁜 행이다.** baseline이 158~174로 흔들려 걷는 동안 펫이 위아래로
 떠오르고, chroma 키잉 잔여물인 1px 조각이 프레임마다 최대 11개 붙어 있다.
-`docs/research.md`의 "펫이 떠 보인다"가 이것이다.
+`docs/history/research.md`의 "펫이 떠 보인다"가 이것이다.
 
 **Roamling 사용처**: `wander` · `evadePointer` · `findSleepSpot` · `travelToInterest`.
 **판정**: 그림 내용은 문제없다. 정합성(baseline · detached) 때문에 재제작 대상.

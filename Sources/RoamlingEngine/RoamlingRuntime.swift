@@ -119,7 +119,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
 
     /// Everything the pet decides. What is left on this side is the timer, the
     /// defaults, the diagnostics file, the agent subscriptions and the sprite
-    /// sheet -- none of which is a decision. `docs/windows.md` unit 6c.
+    /// sheet -- none of which is a decision. `docs/history/windows.md` unit 6c.
     private let core: RustPetLoop
 
     private var tickTimer: Timer?

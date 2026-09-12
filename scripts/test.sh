@@ -46,7 +46,7 @@ PORTABLE_DIRS=(
 if grep -rnE --include='*.swift' \
   '^[[:space:]]*(@_exported[[:space:]]+)?import[[:space:]]+(AppKit|Cocoa|SwiftUI|ScreenCaptureKit|ApplicationServices|Quartz|CoreGraphics|ImageIO|CoreImage|Network)\b' \
   "${PORTABLE_DIRS[@]}"; then
-  print -u2 "Platform image or window import found in a portable module (see docs/windows.md, W1/W2)"
+  print -u2 "Platform image or window import found in a portable module (see docs/history/windows.md, W1/W2)"
   exit 1
 fi
 

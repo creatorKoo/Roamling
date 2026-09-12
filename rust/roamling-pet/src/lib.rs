@@ -5,7 +5,7 @@
 //!
 //! Ported from Swift's `RoamlingPet`. Only the shipped `mochi-v3` path is here
 //! -- the older authored sheets and the pose-derived emergency fallback stay in
-//! Swift until something needs them. `docs/windows.md`, W4.
+//! Swift until something needs them. `docs/history/windows.md`, W4.
 //!
 //! The decoder is the Rust `image` crate, which is what W2b was waiting on: it
 //! gives WebP and PNG together, on every platform, with no C vendored in.
@@ -249,7 +249,7 @@ pub fn built_in_mochi() -> Option<PetAsset> {
 mod tests {
     use super::*;
 
-    /// The sheets are a contract, not just data: `docs/windows.md` and
+    /// The sheets are a contract, not just data: `docs/history/windows.md` and
     /// `CLAUDE.md` both pin 8 columns by 9 and 3 rows at 192x208.
     #[test]
     fn the_shipped_sheets_are_the_shape_the_tracks_assume() {

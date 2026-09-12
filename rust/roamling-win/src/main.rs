@@ -15,7 +15,7 @@
 //!
 //! The window itself came out of the W0 spike (`output/w0/rust-overlay`), which
 //! established on real hardware that Windows can do the seven things the
-//! overlay needs. See `docs/windows.md`, section 9.
+//! overlay needs. See `docs/history/windows.md`, section 9.
 
 mod autostart;
 mod capture;
@@ -94,7 +94,7 @@ struct App {
     avoiding: bool,
     interactive: bool,
     /// Windows has no permission prompt for either of these, so consent is a
-    /// setting instead -- and both start off. `docs/windows.md` section 6.
+    /// setting instead -- and both start off. `docs/windows.md`, the permission model.
     visual: bool,
     /// Whether the caret may be read. Reachable now that agent events exist --
     /// the core only asks for a caret while watching a window, and that watch
@@ -103,7 +103,7 @@ struct App {
     capturer: capture::Capturer,
     /// The two loopback endpoints, and the channel their threads post to. This
     /// is what makes the pet notice anyone working -- without it the caret and
-    /// the work seat are both unreachable. `docs/windows.md` W5b.
+    /// the work seat are both unreachable. `docs/history/windows.md` W5b.
     ///
     /// Held, never read: dropping a `Receiver` stops its listener, so the field
     /// is what keeps the endpoints open for as long as the app runs.

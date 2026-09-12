@@ -59,7 +59,7 @@ fn parse(fields: std::str::SplitWhitespace<'_>) -> Vec<f64> {
 /// disagreements land in a different one.
 ///
 /// Distances used to need this too. They no longer do -- `hypot` was dropped
-/// for `(dx*dx + dy*dy).sqrt()`, which IEEE specifies exactly. `docs/windows.md`, W4.
+/// for `(dx*dx + dy*dy).sqrt()`, which IEEE specifies exactly. `docs/history/windows.md`, W4.
 fn within_one_ulp(lhs: f64, rhs: f64) -> bool {
     if lhs == rhs {
         return true;

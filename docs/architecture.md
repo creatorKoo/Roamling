@@ -90,7 +90,7 @@ module만 추출할 수 있다. 선행 Rust/C ABI는 만들지 않는다.
 - `BasicSafeZoneProvider`: visible-frame corner/Dock candidates (순수 산술)
 
 **window system을 import하지 않는다.** macOS SDK에 AppKit이 있어 컴파일러가 이 규칙을
-지켜주지 못하므로 `scripts/test.sh`가 grep으로 막는다. 근거와 게이트는 `docs/windows.md` W1.
+지켜주지 못하므로 `scripts/test.sh`가 grep으로 막는다. 근거와 게이트는 `docs/history/windows.md` W1.
 
 ### RoamlingMac
 
@@ -585,7 +585,7 @@ Petdex loader는 사용자 package와 fixtures로 계속 검증한다.
 
 ## Future migration
 
-실측·결정·게이트 순서는 `docs/windows.md`에 있다. 아래 표는 그 문서의 5절에서 몇 군데가
+실측·결정·게이트 순서는 `docs/history/windows.md`에 있다. 아래 표는 그 문서의 5절에서 몇 군데가
 더 싼 경로로 갱신됐다 — capture는 BitBlt, focus는 `GetGUIThreadInfo`를 먼저 시도한다.
 
 **W1(2026-09-02)이 그 채울 자리를 실제로 만들어 뒀다.** `RoamlingRuntime`은 이제

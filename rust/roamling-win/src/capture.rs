@@ -7,10 +7,10 @@
 //! It does not read the screen. Sixty-four columns across a whole monitor is
 //! roughly forty pixels per sample -- enough to see that a region is dense,
 //! nowhere near enough to see what it says. No OCR, no image ever written
-//! anywhere. `docs/mvp.md` MVP 4.
+//! anywhere. `docs/history/mvp.md` MVP 4.
 //!
 //! The frame comes from Desktop Duplication rather than `BitBlt`. See
-//! `duplication.rs` for why, and `docs/windows.md` section 5 for the numbers
+//! `duplication.rs` for why, and `docs/history/windows.md` section 5 for the numbers
 //! that made the original plan wrong.
 
 use crate::duplication::Duplication;

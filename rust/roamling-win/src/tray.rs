@@ -505,7 +505,7 @@ unsafe fn build(state: &MenuState) -> Option<HMENU> {
         // can only ask for. Windows grants both outright -- there is no prompt
         // to route the user to -- so consent is the checkmark itself, and a
         // submenu wrapping a single toggle would say less, not more.
-        // `docs/windows.md` section 6.
+        // `docs/windows.md`, the permission model.
         for (flag, id, key) in [
             (checked(state.cursor_aware), CMD_CURSOR_AWARE, "menu.accessibility"),
             (checked(state.visual), CMD_VISUAL, "menu.visualPlacement"),
