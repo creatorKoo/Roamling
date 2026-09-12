@@ -1,8 +1,16 @@
 // SPDX-FileCopyrightText: 2026 GooBeom Jeoung
 // SPDX-License-Identifier: GPL-3.0-only
 
-import Darwin
 import Foundation
+// `exit` only. Same shape as `LoopbackSocket.swift`, which is the module this
+// harness has to keep buildable wherever the code it tests builds.
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(WinSDK)
+import WinSDK
+#endif
 
 @main
 struct RoamlingLogicTestMain {

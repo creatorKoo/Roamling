@@ -97,11 +97,10 @@ let package = Package(
             path: "Tests/RoamlingLogicTests",
             // The recorded session is read by path, not from a bundle, so that
             // regenerating it is a plain file write.
-            exclude: ["RuntimeTrace.txt"],
-            linkerSettings: [
-                .linkedFramework("ImageIO"),
-                .linkedFramework("UniformTypeIdentifiers")
-            ]
+            exclude: ["RuntimeTrace.txt"]
+            // No linker settings. W2b moved decoding to the shared Rust
+            // decoder and these two frameworks stayed behind as dead
+            // settings; nothing in the target has referenced them since.
         )
     ]
 )
