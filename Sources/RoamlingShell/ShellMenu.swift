@@ -12,6 +12,7 @@ public enum MenuAction: Equatable, Sendable {
     case selectBuiltInPet(BuiltInPetKind)
     case selectInstalledPet(path: String)
     case setScale(Double)
+    case toggleHidden
     case toggleRoaming
     case togglePointerAvoidance
     case toggleInteractions
@@ -82,20 +83,27 @@ public enum ShellMenu {
         case staged(version: String)
     }
 
-    private static var updateItem: MenuItem {
+    private static var advancedUpdateItem: MenuItem? {
         switch updateStatus {
         case .idle:
             MenuItem(localized("menu.update.check"), .command(.checkForUpdates))
         case .checking:
             MenuItem(localized("status.update.checking"), .caption)
-        case let .staged(version):
-            MenuItem(localizedFormat("status.update.ready", version), .caption)
+        case .staged:
+            nil
         }
+    }
+
+    private static var stagedUpdateItem: MenuItem? {
+        guard case let .staged(version) = updateStatus else { return nil }
+        return MenuItem(localizedFormat("status.update.ready", version), .caption)
     }
 
     public static func items(for runtime: RoamlingRuntime) -> [MenuItem] {
         var items: [MenuItem] = [
             MenuItem(localizedFormat("menu.title", runtime.petDisplayName), .caption),
+            .separator,
+            MenuItem(localized("menu.hide"), .check(.toggleHidden, isOn: runtime.isHidden)),
             .separator,
             MenuItem(localized("menu.pet"), .submenu(petItems(for: runtime))),
             MenuItem(localized("menu.size"), .submenu(sizeItems(for: runtime))),
@@ -125,14 +133,28 @@ public enum ShellMenu {
             MenuItem(localized("menu.accessibility"), .submenu(accessibilityItems(for: runtime))),
             MenuItem(localized("menu.visualPlacement"), .submenu(visualPlacementItems(for: runtime))),
             .separator,
+            MenuItem(localized("menu.advanced"), .submenu(advancedItems())),
+        ]
+        // A staged update is an alert, not a setting. Keep it where the user
+        // can see it even though the update controls live under Advanced.
+        if let stagedUpdateItem { items.append(stagedUpdateItem) }
+        items += [
+            .separator,
+            MenuItem(localized("menu.about"), .command(.showAbout)),
+            MenuItem(localized("menu.quit"), .command(.quit), shortcut: "q")
+        ]
+        items.reserveCapacity(items.count)
+        return items
+    }
+
+    private static func advancedItems() -> [MenuItem] {
+        var items = [
             MenuItem(localized("menu.openPetFolder"), .command(.openPetFolder)),
             MenuItem(localized("menu.copyDiagnostics"), .command(.copyDiagnostics)),
             MenuItem(localized("menu.reloadPets"), .command(.reloadPets), shortcut: "r"),
-            .separator,
-            // A staged update replaces the offer to look for one: there is
-            // nothing more to do, and saying so is more useful than a button
-            // that would find the same answer again.
-            updateItem,
+        ]
+        if let advancedUpdateItem { items.append(advancedUpdateItem) }
+        items += [
             MenuItem(
                 localized("menu.launchAtLogin"),
                 .check(.toggleLaunchAtLogin, isOn: launchAtLogin)
@@ -141,10 +163,7 @@ public enum ShellMenu {
                 localized("menu.update.auto"),
                 .check(.toggleAutomaticUpdates, isOn: automaticUpdates)
             ),
-            MenuItem(localized("menu.about"), .command(.showAbout)),
-            MenuItem(localized("menu.quit"), .command(.quit), shortcut: "q")
         ]
-        items.reserveCapacity(items.count)
         return items
     }
 

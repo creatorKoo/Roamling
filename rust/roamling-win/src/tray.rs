@@ -43,6 +43,7 @@ pub const CMD_RELOAD_PETS: usize = 12;
 pub const CMD_UPDATE_CHECK: usize = 13;
 pub const CMD_UPDATE_AUTO: usize = 14;
 pub const CMD_LAUNCH_AT_LOGIN: usize = 15;
+pub const CMD_HIDE: usize = 16;
 /// The built-in mascot, then one id per discovered package.
 pub const CMD_PET_BUILT_IN: usize = 1_000;
 pub const CMD_PET_BASE: usize = 1_001;
@@ -304,6 +305,7 @@ pub struct MenuState {
     pub agents: [(Agent, installer::Status, bool); 2],
     /// Recently seen apps first, then selected apps that are not running.
     pub work_apps: Vec<(String, String, bool)>,
+    pub hidden: bool,
     pub roaming: bool,
     pub avoiding: bool,
     pub interactive: bool,
@@ -387,6 +389,14 @@ unsafe fn build(state: &MenuState) -> Option<HMENU> {
         let separator = |menu| AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
 
         caption(menu, &localized_format("menu.title", &[&state.pet_name]));
+        let _ = separator(menu);
+        let hide_label = wide(localized("menu.hide"));
+        let _ = AppendMenuW(
+            menu,
+            MF_STRING | checked(state.hidden),
+            CMD_HIDE,
+            PCWSTR(hide_label.as_ptr()),
+        );
         let _ = separator(menu);
 
         // Pet. Only the built-in for now -- installed packages arrive with the
@@ -552,38 +562,49 @@ unsafe fn build(state: &MenuState) -> Option<HMENU> {
         }
 
         let _ = separator(menu);
-        command(menu, CMD_OPEN_PET_FOLDER, localized("menu.openPetFolder"));
-        command(
-            menu,
-            CMD_COPY_DIAGNOSTICS,
-            localized("menu.copyDiagnostics"),
-        );
-        command(menu, CMD_RELOAD_PETS, localized("menu.reloadPets"));
-        let _ = separator(menu);
-        // Quiet by design: a staged update reports itself with one line here
-        // and nothing else. No modal, no badge, no restart nag.
+        if let Ok(advanced) = CreatePopupMenu() {
+            command(
+                advanced,
+                CMD_OPEN_PET_FOLDER,
+                localized("menu.openPetFolder"),
+            );
+            command(
+                advanced,
+                CMD_COPY_DIAGNOSTICS,
+                localized("menu.copyDiagnostics"),
+            );
+            command(advanced, CMD_RELOAD_PETS, localized("menu.reloadPets"));
+            if state.checking {
+                caption(advanced, localized("status.update.checking"));
+            } else if state.staged.is_none() {
+                command(
+                    advanced,
+                    CMD_UPDATE_CHECK,
+                    localized("menu.update.check"),
+                );
+            }
+            let login_label = wide(localized("menu.launchAtLogin"));
+            let _ = AppendMenuW(
+                advanced,
+                MF_STRING | checked(state.launch_at_login),
+                CMD_LAUNCH_AT_LOGIN,
+                PCWSTR(login_label.as_ptr()),
+            );
+            let update_label = wide(localized("menu.update.auto"));
+            let _ = AppendMenuW(
+                advanced,
+                MF_STRING | checked(state.auto_update),
+                CMD_UPDATE_AUTO,
+                PCWSTR(update_label.as_ptr()),
+            );
+            attach(menu, advanced, localized("menu.advanced"));
+        }
+
+        // A staged update is an alert, not a setting. Keep its quiet caption
+        // at the top level even though all update controls are under Advanced.
         if let Some(version) = &state.staged {
             caption(menu, &localized_format("status.update.ready", &[version]));
         }
-        if state.checking {
-            caption(menu, localized("status.update.checking"));
-        } else {
-            command(menu, CMD_UPDATE_CHECK, localized("menu.update.check"));
-        }
-        let login_label = wide(localized("menu.launchAtLogin"));
-        let _ = AppendMenuW(
-            menu,
-            MF_STRING | checked(state.launch_at_login),
-            CMD_LAUNCH_AT_LOGIN,
-            PCWSTR(login_label.as_ptr()),
-        );
-        let update_label = wide(localized("menu.update.auto"));
-        let _ = AppendMenuW(
-            menu,
-            MF_STRING | checked(state.auto_update),
-            CMD_UPDATE_AUTO,
-            PCWSTR(update_label.as_ptr()),
-        );
 
         let _ = separator(menu);
         // "View Source" is not here: it is a button inside About, which is
@@ -623,6 +644,7 @@ mod tests {
                 ("HWP 2024".into(), "Hwp.exe".into(), true),
                 ("Notepad".into(), "notepad.exe".into(), false),
             ],
+            hidden: false,
             roaming: true,
             avoiding: true,
             interactive: true,
@@ -655,7 +677,8 @@ mod tests {
     /// attach, which would silently drop everything under it.
     #[test]
     fn the_tree_builds_with_every_command_reachable() {
-        let state = state();
+        let mut state = state();
+        state.staged = None;
         let menu = unsafe { build(&state) }.expect("the menu did not build");
         let found = ids(menu);
         unsafe {
@@ -665,6 +688,7 @@ mod tests {
         let agent_one = CMD_AGENT_BASE;
         let agent_two = CMD_AGENT_BASE + CMD_AGENT_STRIDE;
         let expected = [
+            CMD_HIDE,
             CMD_ROAMING,
             CMD_AVOID_POINTER,
             CMD_INTERACTIONS,
@@ -711,6 +735,61 @@ mod tests {
             seen.len(),
             "two items share a command id: {found:?}"
         );
+    }
+
+    #[test]
+    fn advanced_keeps_six_controls_and_quit_is_the_last_row() {
+        let mut state = state();
+        state.staged = None;
+        let menu = unsafe { build(&state) }.expect("the menu did not build");
+        let count = unsafe { GetMenuItemCount(menu) };
+        assert_eq!(count, 21, "the ordinary top-level menu changed length");
+        assert_eq!(unsafe { GetMenuItemID(menu, 2) } as usize, CMD_HIDE);
+        assert_eq!(unsafe { GetMenuItemID(menu, count - 2) } as usize, CMD_ABOUT);
+        assert_eq!(unsafe { GetMenuItemID(menu, count - 1) } as usize, CMD_QUIT);
+
+        let advanced = (0..count)
+            .map(|index| unsafe { GetSubMenu(menu, index) })
+            .find(|submenu| {
+                !submenu.is_invalid() && ids(*submenu).contains(&CMD_OPEN_PET_FOLDER)
+            })
+            .expect("Advanced is missing");
+        assert_eq!(
+            ids(advanced),
+            vec![
+                CMD_OPEN_PET_FOLDER,
+                CMD_COPY_DIAGNOSTICS,
+                CMD_RELOAD_PETS,
+                CMD_UPDATE_CHECK,
+                CMD_LAUNCH_AT_LOGIN,
+                CMD_UPDATE_AUTO,
+            ]
+        );
+        unsafe {
+            let _ = DestroyMenu(menu);
+        }
+    }
+
+    #[test]
+    fn a_staged_update_adds_a_disabled_top_level_alert() {
+        let state = state();
+        let menu = unsafe { build(&state) }.expect("the menu did not build");
+        let count = unsafe { GetMenuItemCount(menu) };
+        assert_eq!(count, 22, "the staged alert did not add one top-level row");
+        let alert = unsafe { GetMenuState(menu, 18, MF_BYPOSITION) };
+        assert_ne!(alert, u32::MAX, "the staged alert is missing");
+        assert!(
+            alert & (MF_DISABLED.0 | MF_GRAYED.0) != 0,
+            "the staged alert is clickable"
+        );
+        assert!(
+            !ids(menu).contains(&CMD_UPDATE_CHECK),
+            "a staged update still offered another check"
+        );
+        assert_eq!(unsafe { GetMenuItemID(menu, count - 1) } as usize, CMD_QUIT);
+        unsafe {
+            let _ = DestroyMenu(menu);
+        }
     }
 
     /// A caption reports; it must not be pickable, or "Animations: 14 of 16"

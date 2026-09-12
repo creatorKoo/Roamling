@@ -1664,6 +1664,10 @@ impl PetLoop {
         self.inner.lock().unwrap().set_interactions_enabled(enabled)
     }
 
+    pub fn set_hidden(&self, hidden: bool) {
+        self.inner.lock().unwrap().set_hidden(hidden);
+    }
+
     pub fn set_animation_durations(&self, caught: f64, dragged: f64) {
         self.inner
             .lock()

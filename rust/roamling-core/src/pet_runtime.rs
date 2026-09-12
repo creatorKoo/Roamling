@@ -182,6 +182,7 @@ pub struct PetRuntime {
     is_roaming_enabled: bool,
     is_pointer_avoidance_enabled: bool,
     are_interactions_enabled: bool,
+    is_hidden: bool,
 
     last_tick_at: Option<f64>,
     next_wander_at: f64,
@@ -239,6 +240,7 @@ impl PetRuntime {
             is_roaming_enabled: true,
             is_pointer_avoidance_enabled: true,
             are_interactions_enabled: true,
+            is_hidden: false,
             last_tick_at: None,
             next_wander_at: 0.0,
             catch_armed_until: 0.0,
@@ -366,6 +368,17 @@ impl PetRuntime {
             self.catch_armed_until = 0.0;
         }
         !enabled
+    }
+
+    /// Hiding is only a presentation switch: ticks, movement and activity
+    /// sources stay alive. A hidden pet cannot keep or re-arm a catch, and it
+    /// has no visible seat worth paying for a luminance capture to choose.
+    pub fn set_hidden(&mut self, hidden: bool) {
+        self.is_hidden = hidden;
+        if hidden {
+            self.catch_armed_until = 0.0;
+            self.luminance_requests.clear();
+        }
     }
 
     /// Frame timings the sprite sheet decides. The caught transition is capped
@@ -510,12 +523,14 @@ impl PetRuntime {
         if !self.is_click_reaction_pending
             && decision.should_arm_catch()
             && self.are_interactions_enabled
+            && !self.is_hidden
         {
             self.catch_armed_until =
                 swift_max(self.catch_armed_until, now + self.tuning.catch_window);
         }
         let catch_is_armed = !self.is_click_reaction_pending
             && self.are_interactions_enabled
+            && !self.is_hidden
             && now <= self.catch_armed_until;
 
         if !self.behavior.state().is_held() {
@@ -654,7 +669,7 @@ impl PetRuntime {
                 None
             },
             locomotion_rate: self.locomotion_rate(),
-            interaction_enabled: owns_pointer || catch_is_live,
+            interaction_enabled: !self.is_hidden && (owns_pointer || catch_is_live),
             luminance_requests: std::mem::take(&mut self.luminance_requests),
             diagnostics: std::mem::take(&mut self.diagnostics),
             persist_position: self.persist_position,
@@ -664,7 +679,7 @@ impl PetRuntime {
     // ------------------------------------------------------------ the pointer
 
     pub fn pointer_down(&mut self, pointer: WorldPoint, now: f64) -> InteractionOutput {
-        if !self.are_interactions_enabled || now > self.catch_armed_until {
+        if self.is_hidden || !self.are_interactions_enabled || now > self.catch_armed_until {
             return self.interaction(now, Some(false), false);
         }
         self.drag_offset = self.movement.position().vector_from(pointer);
@@ -836,6 +851,9 @@ impl PetRuntime {
     }
 
     fn request_luminance(&mut self, region: WorldRect, requested: f64) {
+        if self.is_hidden {
+            return;
+        }
         let interval = if self.behavior.state().is_resting() {
             swift_max(requested, RESTING_LUMINANCE_REFRESH_INTERVAL)
         } else {
@@ -1564,4 +1582,51 @@ fn reaction_name(reaction: CompanionReaction) -> &'static str {
 #[allow(dead_code)]
 fn empty_hint() -> LocationHint {
     LocationHint::new(None, 0.0)
+}
+
+#[cfg(test)]
+mod hidden_tests {
+    use super::*;
+    use crate::activity::CompanionEventKind;
+
+    #[test]
+    fn hiding_releases_the_catch_and_suppresses_only_luminance() {
+        let mut pet = PetRuntime::new(WorldPoint::new(300.0, 300.0), RuntimeTuning::default(), 7);
+        let display = DisplaySnapshot {
+            id: "display".into(),
+            name: "Test".into(),
+            frame: WorldRect::new(0.0, 0.0, 1_000.0, 800.0),
+            visible_frame: WorldRect::new(0.0, 0.0, 1_000.0, 760.0),
+            scale: 1.0,
+        };
+        pet.set_displays(vec![display]);
+        let region = WorldRect::new(100.0, 100.0, 600.0, 400.0);
+
+        pet.catch_armed_until = 42.0;
+        pet.request_luminance(region, LUMINANCE_REFRESH_INTERVAL);
+        assert_eq!(pet.luminance_requests.len(), 1);
+
+        pet.set_hidden(true);
+        assert_eq!(pet.catch_armed_until, 0.0);
+        assert!(pet.luminance_requests.is_empty());
+
+        let requests = pet.handle_activity_event(
+            CompanionEvent::new(
+                "event",
+                "agent:hidden-turn",
+                10.0,
+                CompanionEventKind::ActivityStarted,
+                0.5,
+                Some(LocationHint::new(Some(region), 0.8)),
+            ),
+            10.0,
+        );
+        assert!(requests.is_empty(), "a hidden event requested luminance");
+        assert_eq!(pet.active_source_id(), Some("agent:hidden-turn"));
+
+        pet.set_hidden(false);
+        assert_eq!(pet.active_source_id(), Some("agent:hidden-turn"));
+        pet.request_luminance(region, LUMINANCE_REFRESH_INTERVAL);
+        assert_eq!(pet.luminance_requests.len(), 1);
+    }
 }

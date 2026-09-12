@@ -56,6 +56,15 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         }
     }
 
+    /// A presentation-only switch. It deliberately has no defaults key, so a
+    /// fresh launch always brings the pet back.
+    public var isHidden = false {
+        didSet {
+            core.setHidden(isHidden)
+            overlay.setVisible(!isHidden)
+        }
+    }
+
     /// The apps the user has called work. The pet greets, sits beside and
     /// waves goodbye to these and no others.
     public private(set) var workApps: [String]
@@ -240,7 +249,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         overlay.inputHandler = self
         overlay.setPosition(core.position)
         renderCurrentFrame()
-        overlay.setVisible(true)
+        overlay.setVisible(!isHidden)
 
         screenObserver = displayChanges.observeDisplayChanges { [weak self] in
             self?.handleDisplayChange()
@@ -476,7 +485,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     /// window to watch: nothing to sit beside, nowhere to stroll, and no seat
     /// for the decision table to call worth sleeping on. An agent it cannot
     /// locate is not a reason for the pet to stand still.
-    private var isWatchingWindow: Bool { core.isWatchingWindow }
+    public var isWatchingWindow: Bool { core.isWatchingWindow }
 
     /// Why the pet is doing what it is doing, kept in memory and copyable from
     /// the menu. Standing and sitting look identical from outside the app, so

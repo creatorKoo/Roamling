@@ -192,6 +192,66 @@ func runtimeLogicTests() -> [LogicTest] {
                     )
                 }
             }
+        },
+        LogicTest(name: "a hidden pet keeps agent activity but requests no luminance") {
+            try MainActor.assumeIsolated {
+                let clock = TestClock(startingAt: 1_000)
+                let platform = FakePlatform(
+                    display: DisplaySnapshot(
+                        id: "test-display",
+                        name: "Test",
+                        frame: WorldRect(x: 0, y: 0, width: 1440, height: 900),
+                        visibleFrame: WorldRect(x: 0, y: 25, width: 1440, height: 875),
+                        scale: 2
+                    ),
+                    worldTop: 900
+                )
+                platform.pointer.position = WorldPoint(x: 20, y: 60)
+                platform.capture.isAuthorized = true
+                let suite = try makeTestDefaults()
+                defer { suite.discard() }
+                let agent = FakeAgent()
+                let runtime = RoamlingRuntime(
+                    services: platform.services,
+                    agents: [agent],
+                    defaults: suite.defaults,
+                    catalog: PetCatalog(roots: []),
+                    clock: clock.read
+                )
+                runtime.start(drivingTicks: false)
+                defer { runtime.stop() }
+
+                try expect(platform.overlay.isVisible, "the fresh launch started hidden")
+                runtime.isHidden = true
+                try expect(!platform.overlay.isVisible, "the overlay stayed visible")
+
+                let region = WorldRect(x: 200, y: 200, width: 900, height: 500)
+                agent.emit(CompanionEvent(
+                    sourceID: "fake-agent:hidden-turn",
+                    sourceType: .agent,
+                    timestamp: clock.read(),
+                    kind: .activityStarted,
+                    locationHint: LocationHint(
+                        applicationIdentifier: "test",
+                        approximateRegion: region,
+                        confidence: 0.8
+                    )
+                ))
+                drainActivityEvents()
+                clock.advance(1.0 / 30)
+                runtime.tick()
+                drainActivityEvents()
+
+                try expect(runtime.isWatchingWindow, "the hidden agent event was lost")
+                try expect(
+                    platform.capture.requestCount == 0,
+                    "hidden activity requested \(platform.capture.requestCount) luminance captures"
+                )
+
+                runtime.isHidden = false
+                try expect(platform.overlay.isVisible, "the overlay did not come back")
+                try expect(runtime.isWatchingWindow, "the agent seat disappeared while hidden")
+            }
         }
     ]
 }
@@ -339,11 +399,15 @@ final class FakeUserIdleProvider: UserIdleProviding {
 final class FakeCaptureProvider: CaptureProviding {
     var isAuthorized = false
     var field: LuminanceField?
+    private(set) var requestCount = 0
 
     @discardableResult
     func requestAuthorization() -> Bool { isAuthorized }
 
-    func captureLuminanceField(for display: DisplaySnapshot) async -> LuminanceField? { field }
+    func captureLuminanceField(for display: DisplaySnapshot) async -> LuminanceField? {
+        requestCount += 1
+        return field
+    }
 }
 
 @MainActor

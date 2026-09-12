@@ -239,6 +239,9 @@ public enum ShellController {
         case let .setScale(value):
             runtime.setScale(value)
             return .rebuildMenu
+        case .toggleHidden:
+            runtime.isHidden.toggle()
+            return .rebuildMenu
         case .toggleRoaming:
             runtime.isRoamingEnabled.toggle()
             return .rebuildMenu

@@ -18,28 +18,39 @@ func shellLogicTests() -> [LogicTest] {
                 defer { harness.tearDown() }
                 defer { ShellMenu.updateStatus = .idle }
 
-                @MainActor func titles() -> [String] {
+                @MainActor func topLevelTitles() -> [String] {
                     ShellMenu.items(for: harness.runtime).map(\.title)
+                }
+
+                @MainActor func advancedTitles() throws -> [String] {
+                    try require(
+                        submenu(
+                            named: localized("menu.advanced"),
+                            in: ShellMenu.items(for: harness.runtime)
+                        )
+                    ).map(\.title)
                 }
 
                 ShellMenu.updateStatus = .idle
                 try expect(
-                    titles().contains(localized("menu.update.check")),
+                    advancedTitles().contains(localized("menu.update.check")),
                     "no way to check for updates"
                 )
+                try expect(!topLevelTitles().contains(localized("menu.update.check")))
 
                 // A check under way, and one already found, both replace the
                 // offer: there is nothing more for the user to do, and a button
                 // that would find the same answer again is worse than a
                 // sentence saying so.
                 ShellMenu.updateStatus = .checking
-                try expect(titles().contains(localized("status.update.checking")))
-                try expect(!titles().contains(localized("menu.update.check")))
+                try expect(advancedTitles().contains(localized("status.update.checking")))
+                try expect(!advancedTitles().contains(localized("menu.update.check")))
 
                 ShellMenu.updateStatus = .staged(version: "9.9.9")
                 try expect(
-                    titles().contains(localizedFormat("status.update.ready", "9.9.9"))
+                    topLevelTitles().contains(localizedFormat("status.update.ready", "9.9.9"))
                 )
+                try expect(!advancedTitles().contains(localized("menu.update.check")))
             }
         },
         LogicTest(name: "automatic updates can be turned off") {
@@ -52,9 +63,14 @@ func shellLogicTests() -> [LogicTest] {
 
                 for enabled in [true, false] {
                     ShellMenu.automaticUpdates = enabled
+                    let advanced = try require(
+                        submenu(
+                            named: localized("menu.advanced"),
+                            in: ShellMenu.items(for: harness.runtime)
+                        )
+                    )
                     let row = try require(
-                        ShellMenu.items(for: harness.runtime)
-                            .first { $0.title == localized("menu.update.auto") }
+                        advanced.first { $0.title == localized("menu.update.auto") }
                     )
                     guard case let .check(action, isOn) = row.content else {
                         throw LogicTestFailure(
@@ -90,9 +106,14 @@ func shellLogicTests() -> [LogicTest] {
 
                 for enabled in [true, false] {
                     ShellMenu.launchAtLogin = enabled
+                    let advanced = try require(
+                        submenu(
+                            named: localized("menu.advanced"),
+                            in: ShellMenu.items(for: harness.runtime)
+                        )
+                    )
                     let row = try require(
-                        ShellMenu.items(for: harness.runtime)
-                            .first { $0.title == localized("menu.launchAtLogin") }
+                        advanced.first { $0.title == localized("menu.launchAtLogin") }
                     )
                     guard case let .check(action, isOn) = row.content else {
                         throw LogicTestFailure(
@@ -232,13 +253,14 @@ func shellLogicTests() -> [LogicTest] {
                 }
             }
         },
-        LogicTest(name: "the three switches report the state they toggle") {
+        LogicTest(name: "the four switches report the state they toggle") {
             try MainActor.assumeIsolated {
                 let harness = try RuntimeHarness()
                 defer { harness.tearDown() }
                 let runtime = harness.runtime
 
                 let switches: [(MenuAction, String, () -> Bool)] = [
+                    (.toggleHidden, localized("menu.hide"), { runtime.isHidden }),
                     (.toggleRoaming, localized("menu.roaming"), { runtime.isRoamingEnabled }),
                     (.togglePointerAvoidance, localized("menu.avoidPointer"), { runtime.isPointerAvoidanceEnabled }),
                     (.toggleInteractions, localized("menu.catchDrag"), { runtime.areInteractionsEnabled })
@@ -277,7 +299,7 @@ func shellLogicTests() -> [LogicTest] {
                     try expect(!alert.title.isEmpty && !alert.body.isEmpty)
                 }
                 let doesNotAsk: [MenuAction] = [
-                    .toggleRoaming, .togglePointerAvoidance, .toggleInteractions,
+                    .toggleHidden, .toggleRoaming, .togglePointerAvoidance, .toggleInteractions,
                     .showTuning, .reloadPets, .copyDiagnostics, .openPetFolder,
                     .testAgentReaction(id: "claude-code"), .testAgentReaction(id: "codex"),
                     .showAbout, .quit,
@@ -289,6 +311,61 @@ func shellLogicTests() -> [LogicTest] {
                         "\(action) stops to ask about something reversible"
                     )
                 }
+            }
+        },
+        LogicTest(name: "advanced keeps all six occasional controls reachable") {
+            try MainActor.assumeIsolated {
+                let harness = try RuntimeHarness()
+                defer { harness.tearDown() }
+                defer { ShellMenu.updateStatus = .idle }
+                ShellMenu.updateStatus = .idle
+
+                let top = ShellMenu.items(for: harness.runtime)
+                let advanced = try require(submenu(named: localized("menu.advanced"), in: top))
+                let actions = advanced.compactMap { item -> MenuAction? in
+                    switch item.content {
+                    case let .command(action), let .check(action, _): action
+                    default: nil
+                    }
+                }
+                let expected: [MenuAction] = [
+                    .openPetFolder, .copyDiagnostics, .reloadPets, .checkForUpdates,
+                    .toggleLaunchAtLogin, .toggleAutomaticUpdates
+                ]
+                try expect(actions == expected, "Advanced contains \(actions)")
+
+                for title in [
+                    "menu.openPetFolder", "menu.copyDiagnostics", "menu.reloadPets",
+                    "menu.update.check", "menu.launchAtLogin", "menu.update.auto"
+                ].map(localized) {
+                    try expect(
+                        !top.contains { $0.title == title },
+                        "\(title) leaked back onto the top level"
+                    )
+                }
+            }
+        },
+        LogicTest(name: "quit is the thirteenth top-level choice and stays last") {
+            try MainActor.assumeIsolated {
+                let harness = try RuntimeHarness()
+                defer { harness.tearDown() }
+                defer { ShellMenu.updateStatus = .idle }
+                ShellMenu.updateStatus = .idle
+
+                let choices = ShellMenu.items(for: harness.runtime).filter { item in
+                    switch item.content {
+                    case .caption, .separator: false
+                    case .command, .check, .submenu: true
+                    }
+                }
+                try expect(choices.count == 13, "expected 13 top-level choices, got \(choices.count)")
+                guard case .command(.quit) = choices[12].content else {
+                    throw LogicTestFailure(
+                        message: "the thirteenth choice is not Quit: \(choices[12].content)",
+                        file: #filePath, line: #line
+                    )
+                }
+                try expect(choices[11].title == localized("menu.about"))
             }
         },
         LogicTest(name: "every menu command carries a title and a shortcut that is one key") {

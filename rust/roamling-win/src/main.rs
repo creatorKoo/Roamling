@@ -111,6 +111,9 @@ struct App {
     roaming: bool,
     avoiding: bool,
     interactive: bool,
+    /// Presentation only and deliberately not persisted: every launch shows
+    /// the pet again even if the previous one ended while hidden.
+    hidden: bool,
     /// Windows has no permission prompt for either of these, so consent is a
     /// setting instead -- and both start off. `docs/windows.md`, the permission model.
     visual: bool,
@@ -344,6 +347,7 @@ fn main() -> Result<()> {
             roaming,
             avoiding,
             interactive,
+            hidden: false,
             visual,
             cursor_aware,
             catalog,
@@ -1007,6 +1011,7 @@ fn menu_state(app: &App) -> tray::MenuState {
         roaming: app.roaming,
         avoiding: app.avoiding,
         interactive: app.interactive,
+        hidden: app.hidden,
         work_apps: work_app_items(app),
         visual: app.visual,
         cursor_aware: app.cursor_aware,
@@ -1029,6 +1034,18 @@ fn menu_state(app: &App) -> tray::MenuState {
 /// Carry out whatever was picked from the tray menu.
 unsafe fn perform(hwnd: HWND, chosen: usize, app: &mut App, now: f64) {
     match chosen {
+        tray::CMD_HIDE => {
+            app.hidden = !app.hidden;
+            app.pet.set_hidden(app.hidden);
+            let _ = ShowWindow(
+                hwnd,
+                if app.hidden {
+                    SW_HIDE
+                } else {
+                    SW_SHOWNOACTIVATE
+                },
+            );
+        }
         tray::CMD_ROAMING => {
             app.roaming = !app.roaming;
             app.pet.set_roaming_enabled(app.roaming, now);

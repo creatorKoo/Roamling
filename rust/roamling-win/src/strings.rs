@@ -196,6 +196,8 @@ mod tests {
         let en = parse(EN);
         for key in [
             "menu.title",
+            "menu.hide",
+            "menu.advanced",
             "menu.pet",
             "menu.pet.builtin",
             "menu.pet.coverage",

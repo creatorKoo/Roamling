@@ -1112,6 +1112,10 @@ public final class RustPetLoop {
         handle.setInteractionsEnabled(enabled: enabled)
     }
 
+    public func setHidden(_ hidden: Bool) {
+        handle.setHidden(hidden: hidden)
+    }
+
     public func setAnimationDurations(caught: TimeInterval, dragged: TimeInterval) {
         handle.setAnimationDurations(caught: caught, dragged: dragged)
     }

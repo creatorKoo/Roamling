@@ -1,6 +1,7 @@
 /* 한국어. 키 목록은 en.lproj/Localizable.strings와 같아야 한다. */
 
 "menu.title" = "Roamling — %@";
+"menu.hide" = "잠깐 숨기기";
 "menu.pet" = "펫";
 "menu.pet.builtin" = "%@ (기본 제공)";
 "menu.pet.coverage" = "애니메이션 %1$d/%2$d";
@@ -17,6 +18,7 @@
 "menu.openPetFolder" = "펫 폴더 열기…";
 "menu.copyDiagnostics" = "진단 기록 복사";
 "menu.reloadPets" = "펫 다시 읽기";
+"menu.advanced" = "고급";
 "menu.about" = "Roamling 정보";
 "menu.viewSource" = "소스 보기";
 "menu.quit" = "Roamling 종료";
