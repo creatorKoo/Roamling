@@ -15,13 +15,11 @@ use roamling_agent::{installer, Agent};
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    HDC,
-    CreateCompatibleDC, CreateFontW, DeleteDC, DrawTextW, GetDC, ReleaseDC, SelectObject,
-    SetBkMode, SetTextColor, CLEARTYPE_QUALITY,
-    CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH, DT_CENTER, DT_NOCLIP, DT_SINGLELINE,
-    DT_VCENTER, FF_DONTCARE, FW_NORMAL, OUT_DEFAULT_PRECIS, TRANSPARENT,
-    CreateBitmap, CreateDIBSection, DeleteObject, BITMAPINFO, BITMAPINFOHEADER, DIB_RGB_COLORS,
-    HBITMAP,
+    CreateBitmap, CreateCompatibleDC, CreateDIBSection, CreateFontW, DeleteDC, DeleteObject,
+    DrawTextW, GetDC, ReleaseDC, SelectObject, SetBkMode, SetTextColor, BITMAPINFO,
+    BITMAPINFOHEADER, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH,
+    DIB_RGB_COLORS, DT_CENTER, DT_NOCLIP, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FW_NORMAL,
+    HBITMAP, HDC, OUT_DEFAULT_PRECIS, TRANSPARENT,
 };
 use windows::Win32::UI::Shell::{
     Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW,
@@ -57,11 +55,12 @@ pub const CMD_AGENT_STRIDE: usize = 10;
 pub const CMD_AGENT_INSTALL: usize = 0;
 pub const CMD_AGENT_REMOVE: usize = 1;
 pub const CMD_AGENT_TEST: usize = 2;
+/// One id per app in `MenuState.work_apps`, in menu order.
+pub const CMD_WORK_APP_BASE: usize = 200;
 
 fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
 }
-
 
 /// The same mark the macOS menu bar shows.
 ///
@@ -264,9 +263,7 @@ pub fn add(hwnd: HWND) -> bool {
     }
     let tip = wide("Roamling");
     entry.szTip[..tip.len()].copy_from_slice(&tip);
-    unsafe {
-        Shell_NotifyIconW(NIM_ADD, &entry).as_bool()
-    }
+    unsafe { Shell_NotifyIconW(NIM_ADD, &entry).as_bool() }
 }
 
 pub fn remove(hwnd: HWND) {
@@ -305,6 +302,8 @@ pub struct MenuState {
     /// Each agent, whether its hook is installed, stale or absent, and whether
     /// its endpoint came up.
     pub agents: [(Agent, installer::Status, bool); 2],
+    /// Recently seen apps first, then selected apps that are not running.
+    pub work_apps: Vec<(String, String, bool)>,
     pub roaming: bool,
     pub avoiding: bool,
     pub interactive: bool,
@@ -313,8 +312,12 @@ pub struct MenuState {
 }
 
 /// The sizes the menu offers, matching `ShellMenu.scaleChoices`.
-pub const SCALE_CHOICES: [(&str, f64); 4] =
-    [("0.75x", 0.75), ("1.0x", 1.0), ("1.25x", 1.25), ("1.5x", 1.5)];
+pub const SCALE_CHOICES: [(&str, f64); 4] = [
+    ("0.75x", 0.75),
+    ("1.0x", 1.0),
+    ("1.25x", 1.25),
+    ("1.5x", 1.5),
+];
 
 /// A line that reports rather than commands. AppKit draws these disabled and so
 /// does Win32, which is the whole reason a caption cannot be clicked by mistake.
@@ -449,11 +452,35 @@ unsafe fn build(state: &MenuState) -> Option<HMENU> {
 
         for (flag, id, key) in [
             (checked(state.roaming), CMD_ROAMING, "menu.roaming"),
-            (checked(state.avoiding), CMD_AVOID_POINTER, "menu.avoidPointer"),
-            (checked(state.interactive), CMD_INTERACTIONS, "menu.catchDrag"),
+            (
+                checked(state.avoiding),
+                CMD_AVOID_POINTER,
+                "menu.avoidPointer",
+            ),
+            (
+                checked(state.interactive),
+                CMD_INTERACTIONS,
+                "menu.catchDrag",
+            ),
         ] {
             let label = wide(localized(key));
             let _ = AppendMenuW(menu, MF_STRING | flag, id, PCWSTR(label.as_ptr()));
+        }
+        if let Ok(work_apps) = CreatePopupMenu() {
+            if state.work_apps.is_empty() {
+                caption(work_apps, localized("menu.workApps.none"));
+            } else {
+                for (index, (label, _, selected)) in state.work_apps.iter().enumerate() {
+                    let label = wide(label);
+                    let _ = AppendMenuW(
+                        work_apps,
+                        MF_STRING | checked(*selected),
+                        CMD_WORK_APP_BASE + index,
+                        PCWSTR(label.as_ptr()),
+                    );
+                }
+            }
+            attach(menu, work_apps, localized("menu.workApps"));
         }
         command(menu, CMD_TUNING, localized("menu.tuning"));
 
@@ -461,7 +488,9 @@ unsafe fn build(state: &MenuState) -> Option<HMENU> {
         // two status lines that cannot be clicked, then install-or-repair,
         // remove once there is something to remove, and a test reaction.
         for (index, (agent, status, listening)) in state.agents.iter().enumerate() {
-            let Ok(submenu) = CreatePopupMenu() else { continue };
+            let Ok(submenu) = CreatePopupMenu() else {
+                continue;
+            };
             let base = CMD_AGENT_BASE + index * CMD_AGENT_STRIDE;
 
             caption(
@@ -497,7 +526,11 @@ unsafe fn build(state: &MenuState) -> Option<HMENU> {
             if *status != installer::Status::NotInstalled {
                 command(submenu, base + CMD_AGENT_REMOVE, localized("action.remove"));
             }
-            command(submenu, base + CMD_AGENT_TEST, localized("action.testReaction"));
+            command(
+                submenu,
+                base + CMD_AGENT_TEST,
+                localized("action.testReaction"),
+            );
             attach(menu, submenu, agent.display_name());
         }
 
@@ -507,7 +540,11 @@ unsafe fn build(state: &MenuState) -> Option<HMENU> {
         // submenu wrapping a single toggle would say less, not more.
         // `docs/windows.md`, the permission model.
         for (flag, id, key) in [
-            (checked(state.cursor_aware), CMD_CURSOR_AWARE, "menu.accessibility"),
+            (
+                checked(state.cursor_aware),
+                CMD_CURSOR_AWARE,
+                "menu.accessibility",
+            ),
             (checked(state.visual), CMD_VISUAL, "menu.visualPlacement"),
         ] {
             let label = wide(localized(key));
@@ -516,7 +553,11 @@ unsafe fn build(state: &MenuState) -> Option<HMENU> {
 
         let _ = separator(menu);
         command(menu, CMD_OPEN_PET_FOLDER, localized("menu.openPetFolder"));
-        command(menu, CMD_COPY_DIAGNOSTICS, localized("menu.copyDiagnostics"));
+        command(
+            menu,
+            CMD_COPY_DIAGNOSTICS,
+            localized("menu.copyDiagnostics"),
+        );
         command(menu, CMD_RELOAD_PETS, localized("menu.reloadPets"));
         let _ = separator(menu);
         // Quiet by design: a staged update reports itself with one line here
@@ -565,7 +606,10 @@ mod tests {
             substituted: vec!["sit".into()],
             placeholder: vec![],
             scale: 1.0,
-            pets: vec![("Installed One".into(), true), ("Installed Two".into(), false)],
+            pets: vec![
+                ("Installed One".into(), true),
+                ("Installed Two".into(), false),
+            ],
             built_in: false,
             auto_update: true,
             launch_at_login: false,
@@ -574,6 +618,10 @@ mod tests {
             agents: [
                 (Agent::ClaudeCode, installer::Status::Installed, true),
                 (Agent::Codex, installer::Status::NotInstalled, false),
+            ],
+            work_apps: vec![
+                ("HWP 2024".into(), "Hwp.exe".into(), true),
+                ("Notepad".into(), "notepad.exe".into(), false),
             ],
             roaming: true,
             avoiding: true,
@@ -643,6 +691,8 @@ mod tests {
             // Not installed, so there is nothing to remove.
             agent_two + CMD_AGENT_INSTALL,
             agent_two + CMD_AGENT_TEST,
+            CMD_WORK_APP_BASE,
+            CMD_WORK_APP_BASE + 1,
         ];
         for id in expected {
             assert!(found.contains(&id), "{id} is not in the menu: {found:?}");
@@ -656,7 +706,11 @@ mod tests {
         seen.sort_unstable();
         let before = seen.len();
         seen.dedup();
-        assert_eq!(before, seen.len(), "two items share a command id: {found:?}");
+        assert_eq!(
+            before,
+            seen.len(),
+            "two items share a command id: {found:?}"
+        );
     }
 
     /// A caption reports; it must not be pickable, or "Animations: 14 of 16"

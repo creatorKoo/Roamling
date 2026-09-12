@@ -20,11 +20,18 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         static let positionY = "roamling.position.y"
         static let hasPosition = "roamling.position.exists"
         /// The first list-shaped setting: comma-separated app identifiers, the
-        /// same key and the same format on Windows. Absent means empty, which
-        /// is the default -- the pet reacts to nothing until the user names an
-        /// app, because guessing wrong here is the annoying kind of wrong.
+        /// same key and the same format on Windows. An absent key gets the
+        /// platform defaults; a stored empty string is the user's choice to
+        /// watch nothing.
         static let workApps = "roamling.workApps"
+        static let workAppLabelPrefix = "roamling.workAppLabel."
     }
+
+    private static let defaultWorkApps = [
+        "com.microsoft.Word",
+        "com.microsoft.Powerpoint",
+        "com.microsoft.Excel",
+    ]
 
     public var isRoamingEnabled: Bool {
         didSet {
@@ -159,6 +166,8 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             DefaultsKey.builtInPet: BuiltInPetKind.fatMochi.rawValue
         ])
         let runtimeTuning = Self.loadRuntimeTuning(defaults: defaults)
+        let configuredWorkApps = Self.loadWorkApps(defaults: defaults)
+        Self.clearWorkAppLabels(defaults: defaults, except: configuredWorkApps)
 
         let descriptors = catalog.discover()
         let selectedPath = defaults.string(forKey: DefaultsKey.petPackagePath)
@@ -201,7 +210,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             tuning: runtimeTuning,
             seed: randomSeed
         )
-        workApps = Self.loadWorkApps(defaults: defaults)
+        workApps = configuredWorkApps
         isRoamingEnabled = defaults.bool(forKey: DefaultsKey.roaming)
         isPointerAvoidanceEnabled = defaults.bool(forKey: DefaultsKey.avoidPointer)
         areInteractionsEnabled = defaults.bool(forKey: DefaultsKey.interactions)
@@ -267,24 +276,31 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     /// menu can offer them. This app is never among them.
     public var recentApplications: [String] { focusActivity.recentApplications }
 
-    /// What to call an app identifier in the menu, or nil when the platform
-    /// cannot say -- an app that is named in the list but not running.
+    /// What to call an app identifier in the menu, including a name learned
+    /// before this launch when the app is not currently running.
     public func applicationDisplayName(for identifier: String) -> String? {
-        windowProvider.applicationDisplayName(for: identifier)
+        // Bundle identifiers keep their case; only Windows lowercases case-insensitive exe names.
+        let key = DefaultsKey.workAppLabelPrefix + identifier
+        if let label = windowProvider.applicationDisplayName(for: identifier),
+           !label.isEmpty, label != identifier {
+            if workApps.contains(identifier), defaults.string(forKey: key) != label {
+                defaults.set(label, forKey: key)
+            }
+            return label
+        }
+        guard let stored = defaults.string(forKey: key),
+              !stored.isEmpty, stored != identifier else { return nil }
+        return stored
     }
 
-    /// Adds or removes one app. Written as a comma-separated string, and the
-    /// key is removed once the list is empty rather than stored blank -- the
-    /// same rule the tuning panel follows, for the same reason.
+    /// Adds or removes one app. Written as a comma-separated string, including
+    /// an empty one so "watch nothing" stays distinct from an absent key and
+    /// its defaults.
     public func toggleWorkApp(_ identifier: String) {
         if let index = workApps.firstIndex(of: identifier) {
             workApps.remove(at: index)
         } else {
             workApps.append(identifier)
-        }
-        guard !workApps.isEmpty else {
-            defaults.removeObject(forKey: DefaultsKey.workApps)
-            return
         }
         defaults.set(workApps.joined(separator: ","), forKey: DefaultsKey.workApps)
     }
@@ -732,10 +748,23 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     }
 
     private static func loadWorkApps(defaults: UserDefaults) -> [String] {
-        (defaults.string(forKey: DefaultsKey.workApps) ?? "")
+        guard let stored = defaults.string(forKey: DefaultsKey.workApps) else {
+            return defaultWorkApps
+        }
+        return stored
             .split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
+    }
+
+    private static func clearWorkAppLabels(defaults: UserDefaults, except workApps: [String]) {
+        for key in defaults.dictionaryRepresentation().keys
+            where key.hasPrefix(DefaultsKey.workAppLabelPrefix) {
+            let identifier = String(key.dropFirst(DefaultsKey.workAppLabelPrefix.count))
+            if !workApps.contains(identifier) {
+                defaults.removeObject(forKey: key)
+            }
+        }
     }
 
     private static func initialPosition(

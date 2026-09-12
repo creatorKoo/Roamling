@@ -1,7 +1,6 @@
 // SPDX-FileCopyrightText: 2026 GooBeom Jeoung
 // SPDX-License-Identifier: GPL-3.0-only
 
-
 // A console follows a console-subsystem process around, which is wrong for
 // something that lives in the tray. Debug builds keep it, because the state
 // log printed there is how the loop is watched while it is being built.
@@ -31,25 +30,26 @@ mod tray;
 mod tuning;
 mod update;
 
-use roamling_core::{
-    look_frame_index, AnimationResolver, BehaviorState, DisplaySnapshot, InteractionOutput,
-    PetAnimationPlayer, PetRuntime, RuntimeTuning, RuntimeTuningKey, TickInput, WorldPoint,
-    WorldSize,
-};
 use roamling_agent::{installer, Agent, Receiver};
+use roamling_core::{
+    look_frame_index, AnimationResolver, BehaviorState, DisplaySnapshot, FocusActivity,
+    InteractionOutput, PetAnimationPlayer, PetRuntime, RuntimeTuning, RuntimeTuningKey, TickInput,
+    WorldPoint, WorldSize,
+};
 use roamling_pet::{package, PetAsset};
 use settings::Settings;
-use strings::localized;
 use sprite::Surface;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Instant;
+use strings::localized;
 use windows::core::{w, Result};
 use windows::Win32::Foundation::{
     CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HWND, LPARAM, LRESULT, POINT, WPARAM,
 };
-use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::UI::HiDpi::{
     SetProcessDpiAwarenessContext, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2,
 };
@@ -60,6 +60,24 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 /// The sheet's cells are twice this -- it is a 2x asset.
 const BASE_WIDTH: f64 = 96.0;
 const BASE_HEIGHT: f64 = 104.0;
+const FOCUS_SAMPLE_INTERVAL: f64 = 0.5;
+
+fn is_work_app(work_apps: &[String], application: &str) -> bool {
+    work_apps
+        .iter()
+        .any(|wanted| wanted.eq_ignore_ascii_case(application))
+}
+
+fn persist_work_app_label(settings: &mut Settings, work_apps: &[String], exe: &str, label: &str) {
+    if !is_work_app(work_apps, exe) || label.eq_ignore_ascii_case(exe) {
+        return;
+    }
+    let cache_key = focus::cache_key(exe);
+    settings.set(
+        &format!("{}{cache_key}", settings::WORK_APP_LABEL_PREFIX),
+        label,
+    );
+}
 
 struct App {
     pet: PetRuntime,
@@ -110,6 +128,12 @@ struct App {
     #[allow(dead_code)]
     receivers: Vec<Receiver>,
     agent_events: std::sync::mpsc::Receiver<roamling_core::CompanionEvent>,
+    focus_activity: FocusActivity,
+    work_apps: Vec<String>,
+    /// Executable name (ASCII-lowercased) to FileDescription, restored from
+    /// settings and extended when an executable first owns the foreground.
+    work_app_labels: HashMap<String, String>,
+    focus_sampled_at: f64,
     tokens: [(Agent, String); 2],
     /// Whether each agent's endpoint actually bound, for the menu's second
     /// status line. A port in use means another copy of Roamling has it.
@@ -177,7 +201,10 @@ fn main() -> Result<()> {
         );
     }
 
-    let stored = Settings::load();
+    let mut stored = Settings::load();
+    let work_apps = stored.work_apps();
+    stored.clear_work_app_labels_except(&work_apps);
+    let work_app_labels = stored.work_app_labels();
     let first = displays[0].visible_frame;
     let centre = WorldPoint::new(
         first.origin.x + first.size.width / 2.0,
@@ -237,7 +264,10 @@ fn main() -> Result<()> {
     let auto_update = stored.bool(settings::AUTO_UPDATE, true);
     // Clamped to the range the menu offers, so a hand-edited settings file
     // cannot produce a pet too small to catch or too big to walk around.
-    let scale = stored.number(settings::SCALE).unwrap_or(1.0).clamp(0.5, 2.0);
+    let scale = stored
+        .number(settings::SCALE)
+        .unwrap_or(1.0)
+        .clamp(0.5, 2.0);
 
     let mut pet = PetRuntime::new(start, stored_tuning(&stored), seed);
     pet.set_displays(displays.clone());
@@ -253,7 +283,6 @@ fn main() -> Result<()> {
     // runtime writes. It has to survive restarts: the hook command in the
     // user's own config carries a copy, so a fresh token every launch would
     // silently break every install.
-    let mut stored = stored;
     let mut tokens = Vec::new();
     for agent in [Agent::ClaudeCode, Agent::Codex] {
         let key = roamling_agent::token_key(agent);
@@ -322,6 +351,10 @@ fn main() -> Result<()> {
             capturer: capture::Capturer::default(),
             receivers,
             agent_events,
+            focus_activity: FocusActivity::new(),
+            work_apps,
+            work_app_labels,
+            focus_sampled_at: f64::NEG_INFINITY,
             tokens,
             listening,
             deferred: Vec::new(),
@@ -422,7 +455,8 @@ fn create_window() -> Result<HWND> {
     // TRANSPARENT starts on: the pet is scenery until the runtime says it can
     // be grabbed. TOOLWINDOW keeps it off the taskbar, NOACTIVATE keeps it from
     // stealing focus from whatever the user is typing into.
-    let ex = WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT;
+    let ex =
+        WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT;
     unsafe {
         CreateWindowExW(
             ex,
@@ -444,6 +478,40 @@ fn create_window() -> Result<HWND> {
 /// One turn of the loop: read the machine, step the core, show the answer.
 fn tick(hwnd: HWND, app: &mut App) {
     let now = app.started.elapsed().as_secs_f64();
+
+    // State sources are sampled before event-shaped agent input. Keyboard
+    // polling happens even when the foreground app is not watched, so low bits
+    // from earlier typing cannot surface as a false first key after arrival.
+    if now - app.focus_sampled_at >= FOCUS_SAMPLE_INTERVAL {
+        app.focus_sampled_at = now;
+        let frontmost = focus::foreground_application(&mut app.work_app_labels);
+        if let Some(exe) = frontmost.as_deref() {
+            let cache_key = focus::cache_key(exe);
+            if let Some(label) = app.work_app_labels.get(&cache_key) {
+                persist_work_app_label(&mut app.settings, &app.work_apps, exe, label);
+            }
+        }
+        let keyboard_idle = platform::keyboard_idle_duration();
+        let watched = frontmost
+            .as_deref()
+            .is_some_and(|foreground| is_work_app(&app.work_apps, foreground));
+        let hint = if watched {
+            focus::activity_location_hint()
+        } else {
+            None
+        };
+        let declarations =
+            app.focus_activity
+                .observe(frontmost.as_deref(), watched, keyboard_idle, now);
+        let mut luminance_requests = Vec::new();
+        for mut declaration in declarations {
+            if declaration.focused {
+                declaration.hint = hint.clone();
+            }
+            luminance_requests.extend(app.pet.declare_state(declaration, now));
+        }
+        refresh_luminance(app, &luminance_requests, now);
+    }
 
     // Whatever the endpoints took while the loop was elsewhere. Draining here
     // rather than on the listener thread keeps the runtime single-threaded.
@@ -477,7 +545,10 @@ fn tick(hwnd: HWND, app: &mut App) {
         app.checking = false;
         match report.outcome {
             update::Outcome::UpToDate => {
-                println!("update check: already on {}", roamling_update::Version::current());
+                println!(
+                    "update check: already on {}",
+                    roamling_update::Version::current()
+                );
                 if report.asked {
                     shell::report(
                         hwnd,
@@ -495,10 +566,7 @@ fn tick(hwnd: HWND, app: &mut App) {
                 if report.asked {
                     shell::report(
                         hwnd,
-                        &strings::localized_format(
-                            "result.update.ready",
-                            &[&version.to_string()],
-                        ),
+                        &strings::localized_format("result.update.ready", &[&version.to_string()]),
                         localized("result.update.ready.detail"),
                     );
                 }
@@ -576,7 +644,8 @@ fn tick(hwnd: HWND, app: &mut App) {
         .look_direction_degrees
         .and_then(|degrees| look_frame_index(degrees, app.asset.columns, app.asset.rows));
     app.player.set_look_frame(look);
-    app.player.update(output.delta_time * output.locomotion_rate);
+    app.player
+        .update(output.delta_time * output.locomotion_rate);
 
     refresh_luminance(app, &output.luminance_requests, now);
 
@@ -808,8 +877,10 @@ fn draw(hwnd: HWND, app: &mut App, position: WorldPoint, scale: f64) {
         // The footprint changed, so where the pet may stand changed with it.
         // In world units: `scale` here is physical pixels, which is right for
         // the surface and wrong for the core.
-        app.pet
-            .set_scale(WorldSize::new(BASE_WIDTH * app.scale, BASE_HEIGHT * app.scale));
+        app.pet.set_scale(WorldSize::new(
+            BASE_WIDTH * app.scale,
+            BASE_HEIGHT * app.scale,
+        ));
     }
 
     let frame = app.player.current_frame_index();
@@ -866,6 +937,37 @@ fn apply(hwnd: HWND, app: &mut App, output: InteractionOutput) {
         draw(hwnd, app, output.position, scale);
     }
 }
+fn make_work_app_items(
+    mut names: Vec<String>,
+    configured: &[String],
+    labels: &HashMap<String, String>,
+) -> Vec<(String, String, bool)> {
+    for selected_exe in configured {
+        if !names
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case(selected_exe))
+        {
+            names.push(selected_exe.clone());
+        }
+    }
+    names
+        .into_iter()
+        .map(|exe| {
+            let selected = is_work_app(configured, &exe);
+            let label = focus::application_label(labels, &exe).to_owned();
+            (label, exe, selected)
+        })
+        .collect()
+}
+
+fn work_app_items(app: &App) -> Vec<(String, String, bool)> {
+    make_work_app_items(
+        app.focus_activity.recent_apps(),
+        &app.work_apps,
+        &app.work_app_labels,
+    )
+}
+
 /// What the tray menu should show, read off the app.
 ///
 /// Split out from the message handler because showing the menu has to happen
@@ -905,6 +1007,7 @@ fn menu_state(app: &App) -> tray::MenuState {
         roaming: app.roaming,
         avoiding: app.avoiding,
         interactive: app.interactive,
+        work_apps: work_app_items(app),
         visual: app.visual,
         cursor_aware: app.cursor_aware,
         agents: [
@@ -953,7 +1056,8 @@ unsafe fn perform(hwnd: HWND, chosen: usize, app: &mut App, now: f64) {
         }
         tray::CMD_CURSOR_AWARE => {
             app.cursor_aware = !app.cursor_aware;
-            app.settings.set(settings::CURSOR_AWARENESS, app.cursor_aware);
+            app.settings
+                .set(settings::CURSOR_AWARENESS, app.cursor_aware);
         }
         tray::CMD_TUNING => tuning::show(app.pet.tuning()),
         tray::CMD_UPDATE_CHECK => {
@@ -999,10 +1103,29 @@ unsafe fn perform(hwnd: HWND, chosen: usize, app: &mut App, now: f64) {
                         }
                         adopt(app, loaded.asset, Some(path));
                     }
-                    Err(error) => {
-                        shell::warn(hwnd, localized("error.pet.load"), &error)
-                    }
+                    Err(error) => shell::warn(hwnd, localized("error.pet.load"), &error),
                 }
+            }
+        }
+        picked
+            if (tray::CMD_WORK_APP_BASE..tray::CMD_WORK_APP_BASE + work_app_items(app).len())
+                .contains(&picked) =>
+        {
+            let index = picked - tray::CMD_WORK_APP_BASE;
+            if let Some((_, chosen, _)) = work_app_items(app).get(index).cloned() {
+                if let Some(selected) = app
+                    .work_apps
+                    .iter()
+                    .position(|configured| configured.eq_ignore_ascii_case(&chosen))
+                {
+                    app.work_apps.remove(selected);
+                } else {
+                    app.work_apps.push(chosen);
+                }
+                // An empty value is meaningful: the user explicitly turned
+                // every default off. Only an absent key restores defaults.
+                app.settings
+                    .set(settings::WORK_APPS, app.work_apps.join(","));
             }
         }
         tray::CMD_OPEN_PET_FOLDER => shell::open_pet_folder(),
@@ -1013,10 +1136,12 @@ unsafe fn perform(hwnd: HWND, chosen: usize, app: &mut App, now: f64) {
             }
         }
         tray::CMD_ABOUT => shell::about(hwnd),
-        // Agent ids live in blocks of ten from 100, below the
-        // pet list -- so this arm has to be bounded at both ends.
+        // Exactly two agent blocks live from 100 through 119. The work-app
+        // ids start at 200, so claiming the whole gap would route every app
+        // checkmark to the hook installer.
         picked
-            if (tray::CMD_AGENT_BASE..tray::CMD_PET_BUILT_IN).contains(&picked) =>
+            if (tray::CMD_AGENT_BASE..tray::CMD_AGENT_BASE + 2 * tray::CMD_AGENT_STRIDE)
+                .contains(&picked) =>
         {
             let index = (picked - tray::CMD_AGENT_BASE) / tray::CMD_AGENT_STRIDE;
             let action = (picked - tray::CMD_AGENT_BASE) % tray::CMD_AGENT_STRIDE;
@@ -1055,17 +1180,16 @@ unsafe fn perform(hwnd: HWND, chosen: usize, app: &mut App, now: f64) {
                                     copy.installed_detail
                                 }),
                             ),
-                            Err(error) => {
-                                shell::warn(hwnd, localized(copy.failure), &error)
-                            }
+                            Err(error) => shell::warn(hwnd, localized(copy.failure), &error),
                         }
                     }
                 }
             }
         }
         // The Size list, in the order `SCALE_CHOICES` declares.
-        picked if picked >= tray::CMD_SCALE_BASE
-            && picked < tray::CMD_SCALE_BASE + tray::SCALE_CHOICES.len() =>
+        picked
+            if picked >= tray::CMD_SCALE_BASE
+                && picked < tray::CMD_SCALE_BASE + tray::SCALE_CHOICES.len() =>
         {
             app.scale = tray::SCALE_CHOICES[picked - tray::CMD_SCALE_BASE].1;
             app.settings.set(settings::SCALE, app.scale);
@@ -1083,7 +1207,6 @@ unsafe fn perform(hwnd: HWND, chosen: usize, app: &mut App, now: f64) {
         _ => {}
     }
 }
-
 
 /// Windows re-enters this procedure from inside its own calls.
 ///
@@ -1112,9 +1235,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
     // out of its cell, as it is for the whole of `dispatch`, each one would find
     // nothing and fall through. The pet stood still for as long as the menu was
     // open. So the state is read, put back, and only then is the menu shown.
-    if msg == tray::WM_TRAY
-        && matches!(lp.0 as u32, WM_RBUTTONUP | WM_LBUTTONUP | WM_CONTEXTMENU)
-    {
+    if msg == tray::WM_TRAY && matches!(lp.0 as u32, WM_RBUTTONUP | WM_LBUTTONUP | WM_CONTEXTMENU) {
         let state = APP.with(|slot| slot.borrow().as_ref().map(menu_state));
         let Some(state) = state else {
             return LRESULT(0);
@@ -1195,5 +1316,73 @@ unsafe fn dispatch(hwnd: HWND, msg: u32, app: &mut App) -> bool {
             }
             _ => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{is_work_app, make_work_app_items, persist_work_app_label};
+    use crate::settings::{Settings, WORK_APP_LABEL_PREFIX};
+    use std::collections::HashMap;
+
+    #[test]
+    fn work_app_names_ignore_ascii_case() {
+        let configured = vec!["HShow.exe".to_string(), "WINWORD.EXE".to_string()];
+        assert!(is_work_app(&configured, "hshow.EXE"));
+        assert!(is_work_app(&configured, "winword.exe"));
+        assert!(!is_work_app(&configured, "Hwp.exe"));
+    }
+
+    #[test]
+    fn work_app_labels_do_not_replace_executable_identifiers() {
+        let configured = vec!["WINWORD.EXE".to_string()];
+        let labels = HashMap::from([("winword.exe".into(), "Microsoft Word".into())]);
+        let items = make_work_app_items(vec!["WINWORD.EXE".into()], &configured, &labels);
+        assert_eq!(
+            items,
+            vec![("Microsoft Word".into(), "WINWORD.EXE".into(), true)]
+        );
+    }
+
+    #[test]
+    fn only_resolved_labels_for_configured_work_apps_are_persisted() {
+        let directory = std::env::temp_dir().join(format!(
+            "roamling-label-policy-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("the test clock is before Unix time")
+                .as_nanos()
+        ));
+        let path = directory.join("settings.txt");
+        let configured = vec!["Hwp.exe".into(), "WINWORD.EXE".into()];
+        let mut settings = Settings::load_from(Some(path.clone()));
+
+        persist_work_app_label(
+            &mut settings,
+            &configured,
+            "windowsterminal.exe",
+            "Windows Terminal Host",
+        );
+        persist_work_app_label(&mut settings, &configured, "winword.exe", "WINWORD.EXE");
+        persist_work_app_label(&mut settings, &configured, "HWP.EXE", "HWP 2024");
+        drop(settings);
+
+        let restarted = Settings::load_from(Some(path.clone()));
+        assert_eq!(
+            restarted.text(&format!("{WORK_APP_LABEL_PREFIX}hwp.exe")),
+            Some("HWP 2024".into())
+        );
+        assert_eq!(
+            restarted.text(&format!("{WORK_APP_LABEL_PREFIX}windowsterminal.exe")),
+            None
+        );
+        assert_eq!(
+            restarted.text(&format!("{WORK_APP_LABEL_PREFIX}winword.exe")),
+            None
+        );
+
+        std::fs::remove_file(path).expect("the throwaway settings file was not removed");
+        std::fs::remove_dir(directory).expect("the throwaway settings directory was not removed");
     }
 }

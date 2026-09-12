@@ -19,7 +19,7 @@
 | 지금 시트에 무엇이 그려져 있나 | [`art/mochi-sheet.md`](art/mochi-sheet.md) | ~70 |
 | 프레임을 새로 그릴 때의 불변식 | [`art/mochi-animation-handoff.md`](art/mochi-animation-handoff.md) | ~140 |
 | 도구 없이 손으로 프레임을 만들 때의 프롬프트 | [`art/mochi-animation-prompts-ko.md`](art/mochi-animation-prompts-ko.md) | ~150 |
-| Windows에서 지금 유효한 것, 남은 게이트(W8) | [`windows.md`](windows.md) | ~200 |
+| Windows에서 지금 유효한 것, 남은 게이트(W8) | [`windows.md`](windows.md) | ~300 |
 | 서명·dmg·배포를 어떻게 하나 | [`release.md`](release.md) | ~90 |
 | 무엇이 실제로 배터리를 먹나 | [`battery.md`](battery.md) | ~90 |
 

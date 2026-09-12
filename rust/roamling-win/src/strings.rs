@@ -177,10 +177,16 @@ mod tests {
         let ko = parse(KO);
         let mut missing: Vec<&String> = en.keys().filter(|k| !ko.contains_key(*k)).collect();
         missing.sort_unstable();
-        assert!(missing.is_empty(), "keys missing from ko.lproj: {missing:?}");
+        assert!(
+            missing.is_empty(),
+            "keys missing from ko.lproj: {missing:?}"
+        );
         let mut extra: Vec<&String> = ko.keys().filter(|k| !en.contains_key(*k)).collect();
         extra.sort_unstable();
-        assert!(extra.is_empty(), "keys in ko.lproj with no English base: {extra:?}");
+        assert!(
+            extra.is_empty(),
+            "keys in ko.lproj with no English base: {extra:?}"
+        );
     }
 
     /// The menu this shell actually shows, so a rename on the Swift side is
@@ -197,6 +203,8 @@ mod tests {
             "menu.roaming",
             "menu.avoidPointer",
             "menu.catchDrag",
+            "menu.workApps",
+            "menu.workApps.none",
             "menu.accessibility",
             "menu.visualPlacement",
             "menu.openPetFolder",
@@ -248,7 +256,10 @@ mod tests {
     #[test]
     fn both_placeholder_forms_are_filled() {
         assert_eq!(fill("%@ (Built-in)", &["Mochi"]), "Mochi (Built-in)");
-        assert_eq!(fill("Animations: %1$d of %2$d", &["14", "16"]), "Animations: 14 of 16");
+        assert_eq!(
+            fill("Animations: %1$d of %2$d", &["14", "16"]),
+            "Animations: 14 of 16"
+        );
         assert_eq!(fill("%2$@ then %1$@", &["a", "b"]), "b then a");
         // A literal percent, and a conversion nobody passed an argument for.
         assert_eq!(fill("100%% sure about %@", &[]), "100% sure about ");

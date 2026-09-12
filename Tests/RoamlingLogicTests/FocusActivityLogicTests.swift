@@ -99,7 +99,7 @@ func focusActivityLogicTests() -> [LogicTest] {
                     scene.runtime.behaviorState == .waitingForUser,
                     "the pet stopped asking early; it is \(scene.runtime.behaviorState)"
                 )
-                scene.run(seconds: 3) { runtime, _ in runtime.behaviorState != .waitingForUser }
+                scene.run(seconds: 8) { runtime, _ in runtime.behaviorState != .waitingForUser }
                 try expect(
                     scene.runtime.behaviorState != .waitingForUser,
                     "the pet kept asking past the release"
@@ -329,7 +329,7 @@ func focusActivityLogicTests() -> [LogicTest] {
                     scene.runtime.behaviorState == .waitingForUser,
                     "the keys stopped and nothing asked; the pet is \(scene.runtime.behaviorState)"
                 )
-                scene.run(seconds: 7) { runtime, _ in runtime.behaviorState != .waitingForUser }
+                scene.run(seconds: 12) { runtime, _ in runtime.behaviorState != .waitingForUser }
                 scene.run(seconds: 10) { runtime, _ in runtime.behaviorState == .wander }
                 try expect(
                     scene.runtime.behaviorState == .wander,
@@ -453,15 +453,21 @@ func focusActivityLogicTests() -> [LogicTest] {
                     return children
                 }
 
-                // Nothing seen yet: a sentence, not an empty menu that reads
-                // as a broken one.
-                let empty = try rows()
-                try expect(empty.count == 1)
-                try expect(empty[0].title == localized("menu.workApps.none"))
-                guard case .caption = empty[0].content else {
-                    throw LogicTestFailure(
-                        message: "the empty list is clickable", file: #filePath, line: #line
-                    )
+                let defaultApps = [
+                    "com.microsoft.Word",
+                    "com.microsoft.Powerpoint",
+                    "com.microsoft.Excel",
+                ]
+                let initial = try rows()
+                try expect(initial.map(\.title) == defaultApps)
+                for item in initial {
+                    guard case let .check(_, isOn) = item.content else {
+                        throw LogicTestFailure(
+                            message: "a default app is not a checkbox",
+                            file: #filePath, line: #line
+                        )
+                    }
+                    try expect(isOn, "a default app is not selected")
                 }
 
                 harness.platform.window.frontmost = "com.example.editor"
@@ -479,7 +485,7 @@ func focusActivityLogicTests() -> [LogicTest] {
                 try expect(action == .toggleWorkApp(id: "com.example.editor"))
 
                 _ = ShellController.perform(action, runtime: harness.runtime, version: "1.2.3")
-                try expect(harness.runtime.workApps == ["com.example.editor"])
+                try expect(harness.runtime.workApps == defaultApps + ["com.example.editor"])
                 guard case let .check(_, checkedNow) = try require(try rows().first).content else {
                     throw LogicTestFailure(
                         message: "the app row stopped being a checkbox",
@@ -489,7 +495,7 @@ func focusActivityLogicTests() -> [LogicTest] {
                 try expect(checkedNow, "the checkmark did not follow the choice")
 
                 _ = ShellController.perform(action, runtime: harness.runtime, version: "1.2.3")
-                try expect(harness.runtime.workApps.isEmpty, "toggling twice did not undo it")
+                try expect(harness.runtime.workApps == defaultApps, "toggling twice did not undo it")
             }
         },
 
@@ -514,20 +520,124 @@ func focusActivityLogicTests() -> [LogicTest] {
                     )
                 }
 
+                let defaultApps = [
+                    "com.microsoft.Word",
+                    "com.microsoft.Powerpoint",
+                    "com.microsoft.Excel",
+                ]
                 let first = launch()
-                try expect(first.workApps.isEmpty, "a fresh install watches something")
+                try expect(first.workApps == defaultApps)
+                for identifier in defaultApps {
+                    first.toggleWorkApp(identifier)
+                }
+                try expect(first.workApps.isEmpty)
+                try expect(suite.defaults.string(forKey: "roamling.workApps") == "")
+                try expect(launch().workApps.isEmpty)
+
                 first.toggleWorkApp("com.example.editor")
                 first.toggleWorkApp("com.example.slides")
 
                 try expect(launch().workApps == ["com.example.editor", "com.example.slides"])
 
-                // Emptying the list takes the key with it, the way "Reset
-                // Defaults" does for tuning: a stored empty would be a choice
-                // this app has to keep honouring forever.
                 first.toggleWorkApp("com.example.editor")
                 first.toggleWorkApp("com.example.slides")
-                try expect(suite.defaults.string(forKey: "roamling.workApps") == nil)
+                try expect(suite.defaults.string(forKey: "roamling.workApps") == "")
                 try expect(launch().workApps.isEmpty)
+            }
+        },
+
+        LogicTest(name: "work app display names survive a restart") {
+            try MainActor.assumeIsolated {
+                let suite = try makeTestDefaults()
+                defer { suite.discard() }
+                let display = DisplaySnapshot(
+                    id: "1",
+                    name: "test",
+                    frame: WorldRect(x: 0, y: 0, width: 1440, height: 900),
+                    visibleFrame: WorldRect(x: 0, y: 25, width: 1440, height: 850),
+                    scale: 2
+                )
+                let identifier = "com.Example.Editor"
+                let key = "roamling.workAppLabel.\(identifier)"
+                suite.defaults.set(identifier, forKey: "roamling.workApps")
+
+                let firstPlatform = FakePlatform(display: display, worldTop: 900)
+                firstPlatform.window.displayNames[identifier] = "Editor, Professional"
+                let first = RoamlingRuntime(
+                    services: firstPlatform.services,
+                    defaults: suite.defaults,
+                    catalog: PetCatalog(roots: []),
+                    clock: { 0 }
+                )
+                try expect(first.applicationDisplayName(for: identifier) == "Editor, Professional")
+                try expect(suite.defaults.string(forKey: key) == "Editor, Professional")
+
+                let restarted = RoamlingRuntime(
+                    services: FakePlatform(display: display, worldTop: 900).services,
+                    defaults: suite.defaults,
+                    catalog: PetCatalog(roots: []),
+                    clock: { 0 }
+                )
+                try expect(
+                    restarted.applicationDisplayName(for: identifier) == "Editor, Professional",
+                    "the saved name did not return with its case-sensitive identifier"
+                )
+
+                let unresolved = "com.example.unknown"
+                first.toggleWorkApp(unresolved)
+                firstPlatform.window.displayNames[unresolved] = unresolved
+                try expect(first.applicationDisplayName(for: unresolved) == nil)
+                try expect(
+                    suite.defaults.object(
+                        forKey: "roamling.workAppLabel.\(unresolved)"
+                    ) == nil,
+                    "an identifier was stored as though it were a display name"
+                )
+
+                let recent = "com.example.browser"
+                firstPlatform.window.displayNames[recent] = "Example Browser"
+                try expect(first.applicationDisplayName(for: recent) == "Example Browser")
+                try expect(
+                    suite.defaults.object(
+                        forKey: "roamling.workAppLabel.\(recent)"
+                    ) == nil,
+                    "a recent app that was not selected as work was stored"
+                )
+            }
+        },
+
+        LogicTest(name: "unconfigured work app display names are cleared at launch") {
+            try MainActor.assumeIsolated {
+                let suite = try makeTestDefaults()
+                defer { suite.discard() }
+                let selected = "com.example.editor"
+                let stale = "com.example.browser"
+                let selectedKey = "roamling.workAppLabel.\(selected)"
+                let staleKey = "roamling.workAppLabel.\(stale)"
+                suite.defaults.set(selected, forKey: "roamling.workApps")
+                suite.defaults.set("Example Editor", forKey: selectedKey)
+                suite.defaults.set("Example Browser", forKey: staleKey)
+                let display = DisplaySnapshot(
+                    id: "1",
+                    name: "test",
+                    frame: WorldRect(x: 0, y: 0, width: 1440, height: 900),
+                    visibleFrame: WorldRect(x: 0, y: 25, width: 1440, height: 850),
+                    scale: 2
+                )
+
+                let runtime = RoamlingRuntime(
+                    services: FakePlatform(display: display, worldTop: 900).services,
+                    defaults: suite.defaults,
+                    catalog: PetCatalog(roots: []),
+                    clock: { 0 }
+                )
+
+                try expect(runtime.applicationDisplayName(for: selected) == "Example Editor")
+                try expect(suite.defaults.string(forKey: selectedKey) == "Example Editor")
+                try expect(
+                    suite.defaults.object(forKey: staleKey) == nil,
+                    "an unconfigured saved display name survived launch"
+                )
             }
         }
     ]

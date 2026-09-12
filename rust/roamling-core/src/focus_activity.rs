@@ -15,7 +15,7 @@ use crate::source_state::{Milestone, SourceLevel, StateDeclaration};
 /// A key remains evidence of typing for this long.
 pub const TYPING_WINDOW: f64 = 10.0;
 /// How long the paused question is shown before the seat is released.
-pub const WAITING_BEFORE_RELEASE: f64 = 5.0;
+pub const WAITING_BEFORE_RELEASE: f64 = 10.0;
 /// A brief focus switch does not end the sitting.
 pub const FOCUS_GRACE: f64 = 3.0;
 /// Returning sooner than this continues the same sitting.
@@ -341,7 +341,7 @@ mod tests {
         assert_eq!(active.milestone, None);
         let paused = one(&mut source, Some(HWP), true, QUIET, 110.3);
         assert_eq!(paused.level, SourceLevel::Paused);
-        let released = one(&mut source, Some(HWP), true, QUIET, 115.3);
+        let released = one(&mut source, Some(HWP), true, QUIET, 120.3);
         assert_eq!(released.level, SourceLevel::Away);
         assert_eq!(source.seated_app(), Some(HWP));
     }
@@ -353,9 +353,9 @@ mod tests {
         one(&mut source, Some(HWP), true, 0.1, 0.5);
         one(&mut source, Some(HWP), true, QUIET, 10.4);
         one(&mut source, Some(HWP), true, QUIET, 10.5);
-        one(&mut source, Some(HWP), true, QUIET, 15.5);
+        one(&mut source, Some(HWP), true, QUIET, 20.5);
 
-        let active = one(&mut source, Some(HWP), true, 0.1, 16.0);
+        let active = one(&mut source, Some(HWP), true, 0.1, 21.0);
         assert_eq!(active.level, SourceLevel::Active);
         assert_eq!(active.milestone, None);
     }
@@ -424,9 +424,9 @@ mod tests {
         let paused = one(&mut source, Some(HWP), true, QUIET, 111.5);
         assert_eq!(paused.level, SourceLevel::Paused);
 
-        let unknown = one(&mut source, None, false, QUIET, 117.0);
+        let unknown = one(&mut source, None, false, QUIET, 122.0);
         assert_eq!(unknown.level, SourceLevel::Paused);
-        let released = one(&mut source, Some(HWP), true, QUIET, 117.5);
+        let released = one(&mut source, Some(HWP), true, QUIET, 122.5);
         assert_eq!(released.level, SourceLevel::Away);
     }
 

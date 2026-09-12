@@ -7,6 +7,8 @@
 //! this file: `HMONITOR`, `POINT` and `HWND` do not cross into the runtime.
 
 use roamling_core::{DisplaySnapshot, WorldPoint, WorldRect};
+use std::sync::{Mutex, OnceLock};
+use std::time::Instant;
 use windows::Win32::Foundation::{LPARAM, POINT, RECT};
 use windows::Win32::Graphics::Gdi::{
     EnumDisplayMonitors, GetMonitorInfoW, MonitorFromPoint, HDC, HMONITOR, MONITORINFOEXW,
@@ -145,6 +147,47 @@ pub fn affection_held() -> bool {
     unsafe { (GetAsyncKeyState(VK_LCONTROL.0 as i32) as u16 & 0x8000) != 0 }
 }
 
+/// Seconds since a text or editing key was last pressed, machine-wide.
+///
+/// The low bit means "pressed since the previous call", so a key tapped and
+/// released between two half-second samples is still seen. Every tracked key is
+/// read on every sample: stopping at the first hit would leave the other low
+/// bits set and report stale typing on the next sample.
+pub fn keyboard_idle_duration() -> f64 {
+    static STATE: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
+
+    let mut pressed = false;
+    for key in 0x08..=0xE2 {
+        if is_typing_key(key) {
+            pressed |= unsafe { (GetAsyncKeyState(key) as u16 & 0x0001) != 0 };
+        }
+    }
+
+    let now = Instant::now();
+    let mut last_key_at = STATE
+        .get_or_init(|| Mutex::new(None))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if pressed {
+        *last_key_at = Some(now);
+    }
+    last_key_at
+        .map(|at| now.duration_since(at).as_secs_f64())
+        .unwrap_or(f64::INFINITY)
+}
+
+fn is_typing_key(key: i32) -> bool {
+    matches!(
+        key,
+        // Backspace, Tab, Return, Space and navigation/editing keys.
+        0x08 | 0x09 | 0x0D | 0x20..=0x28 | 0x2D..=0x2E
+            // Number row, letters and the numeric keypad.
+            | 0x30..=0x39 | 0x41..=0x5A | 0x60..=0x6F
+            // Punctuation keys on the main keyboard, including OEM 102.
+            | 0xBA..=0xC0 | 0xDB..=0xDF | 0xE2
+    )
+}
+
 /// Seconds since the last keyboard or mouse input, machine-wide.
 ///
 /// `GetLastInputInfo` needs no permission at all, unlike the macOS side which
@@ -192,7 +235,9 @@ mod tests {
         }
         let pointer = pointer();
         assert!(
-            displays.iter().any(|display| display.frame.contains(pointer)),
+            displays
+                .iter()
+                .any(|display| display.frame.contains(pointer)),
             "pointer {pointer:?} is on none of {:?}",
             displays.iter().map(|d| d.frame).collect::<Vec<_>>()
         );
@@ -213,6 +258,16 @@ mod tests {
                     && visible.size.height <= frame.size.height + 0.5,
                 "{visible:?} is not inside {frame:?}"
             );
+        }
+    }
+
+    #[test]
+    fn typing_keys_exclude_mouse_buttons_and_modifiers() {
+        for key in [0x01, 0x02, 0x10, 0x11, 0x12, 0x5B, 0x70] {
+            assert!(!is_typing_key(key), "{key:#x} is not text or editing");
+        }
+        for key in [0x08, 0x0D, 0x20, 0x25, 0x2E, 0x30, 0x41, 0x60, 0xBA, 0xE2] {
+            assert!(is_typing_key(key), "{key:#x} should count as typing");
         }
     }
 }
