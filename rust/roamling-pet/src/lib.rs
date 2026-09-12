@@ -12,8 +12,12 @@
 
 pub mod package;
 
-use roamling_core::{standard_tracks, PetAnimationFrame, PetAnimationTrack};
+use roamling_core::{
+    standard_tracks, PaletteAnchors, PaletteMap, PaletteTargets, PetAnimationFrame,
+    PetAnimationTrack, PetImageSource,
+};
 use std::collections::BTreeMap;
+use std::sync::OnceLock;
 
 /// A decoded sheet, as bytes rather than a platform image.
 ///
@@ -109,6 +113,8 @@ const CELL_HEIGHT: usize = 208;
 const COLUMNS: usize = 8;
 const STANDARD_ROWS: usize = 9;
 const EXTENSION_ROWS: usize = 3;
+const BUILT_IN_PALETTE: PaletteTargets =
+    PaletteTargets::new([115, 52, 27], [235, 118, 27], [254, 242, 220]);
 
 // The shipped `mochi-v3` package, byte for byte the same files as
 // `~/.codex/pets/mochi-v3`. Compiled in rather than read from disk: the
@@ -117,6 +123,74 @@ pub(crate) const STANDARD: &[u8] =
     include_bytes!("../../../Sources/RoamlingPet/Resources/BuiltInPets/mochi-standard-atlas.webp");
 pub(crate) const EXTENSION: &[u8] =
     include_bytes!("../../../Sources/RoamlingPet/Resources/BuiltInPets/mochi-extension-atlas.webp");
+
+struct BuiltInSource {
+    standard: PetImageSource,
+    extension: PetImageSource,
+    anchors: PaletteAnchors,
+    standard_map: PaletteMap,
+    extension_map: PaletteMap,
+}
+
+impl BuiltInSource {
+    fn decode() -> Option<Self> {
+        let standard = PetImageSource::decode(STANDARD)?;
+        let extension = PetImageSource::decode(EXTENSION)?;
+        if standard.width() != CELL_WIDTH * COLUMNS
+            || standard.height() != CELL_HEIGHT * STANDARD_ROWS
+            || extension.width() != CELL_WIDTH * COLUMNS
+            || extension.height() != CELL_HEIGHT * EXTENSION_ROWS
+        {
+            return None;
+        }
+        // Measured from these two sheets together and pinned above. Re-measuring
+        // belongs in the test: shipped bytes do not need a runtime census.
+        let anchors = PaletteAnchors {
+            dark: Some(BUILT_IN_PALETTE.dark),
+            orange: Some(BUILT_IN_PALETTE.orange),
+            cream: Some(BUILT_IN_PALETTE.cream),
+        };
+        let standard_map = standard.palette_map(anchors);
+        let extension_map = extension.palette_map(anchors);
+        Some(Self {
+            standard,
+            extension,
+            anchors,
+            standard_map,
+            extension_map,
+        })
+    }
+
+    fn images(&self, targets: PaletteTargets) -> Option<(PetImage, PetImage)> {
+        std::thread::scope(|scope| {
+            let extension = scope.spawn(|| {
+                self.extension
+                    .recolored(&self.extension_map, self.anchors, targets)
+            });
+            let standard = self
+                .standard
+                .recolored(&self.standard_map, self.anchors, targets)?;
+            Some((standard, extension.join().ok()??))
+        })
+    }
+}
+
+fn built_in_source() -> Option<&'static BuiltInSource> {
+    static SOURCE: OnceLock<Option<BuiltInSource>> = OnceLock::new();
+    SOURCE.get_or_init(BuiltInSource::decode).as_ref()
+}
+
+/// Decode the straight-alpha sheets and cache their nearest-family maps before
+/// a live palette session begins.
+pub fn prepare_built_in_mochi_recolor() -> bool {
+    built_in_source().is_some()
+}
+
+/// The shared standard-and-extension anchors. These are the identity positions
+/// for the debug palette controls.
+pub const fn built_in_mochi_palette() -> PaletteTargets {
+    BUILT_IN_PALETTE
+}
 
 fn track(name: &str, frames: &[(usize, f64)], loops: bool) -> PetAnimationTrack {
     let mut built = PetAnimationTrack::new(
@@ -134,10 +208,26 @@ fn track(name: &str, frames: &[(usize, f64)], loops: bool) -> PetAnimationTrack 
 /// Ported from `MascotPetFactory.makeStandardMochi`.
 pub fn built_in_mochi() -> Option<PetAsset> {
     let atlas = PetImage::decode(STANDARD)?;
-    if atlas.width != CELL_WIDTH * COLUMNS || atlas.height != CELL_HEIGHT * STANDARD_ROWS {
+    let extension = PetImage::decode(EXTENSION)?;
+    if atlas.width != CELL_WIDTH * COLUMNS
+        || atlas.height != CELL_HEIGHT * STANDARD_ROWS
+        || extension.width != CELL_WIDTH * COLUMNS
+        || extension.height != CELL_HEIGHT * EXTENSION_ROWS
+    {
         return None;
     }
+    Some(built_in_mochi_from_images(atlas, extension))
+}
 
+/// Build Mochi at caller-selected family targets. The cached inputs are still
+/// straight alpha here; premultiplication only happens inside `recolored`.
+pub fn built_in_mochi_recolored(targets: PaletteTargets) -> Option<PetAsset> {
+    let source = built_in_source()?;
+    let (atlas, extension_sheet) = source.images(targets)?;
+    Some(built_in_mochi_from_images(atlas, extension_sheet))
+}
+
+fn built_in_mochi_from_images(atlas: PetImage, extension_sheet: PetImage) -> PetAsset {
     let mut tracks = standard_tracks(COLUMNS);
     let jump_row = 4 * COLUMNS;
 
@@ -180,7 +270,7 @@ pub fn built_in_mochi() -> Option<PetAsset> {
     let mut extension_rows = 0;
     let mut behavior_mappings = BTreeMap::new();
 
-    if let Some(sheet) = PetImage::decode(EXTENSION).filter(|sheet| {
+    if let Some(sheet) = Some(extension_sheet).filter(|sheet| {
         sheet.width == CELL_WIDTH * COLUMNS && sheet.height == CELL_HEIGHT * EXTENSION_ROWS
     }) {
         extension_atlas = Some(sheet);
@@ -230,7 +320,7 @@ pub fn built_in_mochi() -> Option<PetAsset> {
         }
     }
 
-    Some(PetAsset {
+    PetAsset {
         display_name: "Mochi".to_string(),
         atlas,
         extension_atlas,
@@ -242,7 +332,7 @@ pub fn built_in_mochi() -> Option<PetAsset> {
         extension_rows,
         tracks,
         behavior_mappings,
-    })
+    }
 }
 
 #[cfg(test)]
@@ -262,6 +352,57 @@ mod tests {
             .expect("the extension sheet ships too");
         assert_eq!(extension.width, 8 * 192);
         assert_eq!(extension.height, 3 * 208);
+    }
+
+    #[test]
+    fn the_pinned_palette_matches_both_shipped_sheets_together() {
+        let standard = PetImageSource::decode(STANDARD).expect("standard");
+        let extension = PetImageSource::decode(EXTENSION).expect("extension");
+        let measured = PetImageSource::palette_anchors(&[&standard, &extension]);
+        assert_eq!(measured.targets(), Some(built_in_mochi_palette()));
+    }
+
+    /// The controls open at the measured anchors. Going through the palette
+    /// path there must be byte-for-byte the same as the ordinary decoder.
+    #[test]
+    fn the_default_palette_is_a_byte_identity() {
+        let asset = built_in_mochi().expect("the built-in mascot has to decode");
+        assert_eq!(asset.atlas, PetImage::decode(STANDARD).expect("standard"));
+        assert_eq!(
+            asset.extension_atlas.expect("extension"),
+            PetImage::decode(EXTENSION).expect("extension")
+        );
+    }
+
+    #[test]
+    fn recoloring_the_shipped_sheets_preserves_every_alpha_byte() {
+        let original = built_in_mochi().expect("original");
+        assert!(prepare_built_in_mochi_recolor());
+        let recolored = built_in_mochi_recolored(PaletteTargets::new(
+            [180, 40, 160],
+            [20, 210, 100],
+            [170, 210, 255],
+        ))
+        .expect("recolored");
+        for (before, after) in [
+            (&original.atlas, &recolored.atlas),
+            (
+                original
+                    .extension_atlas
+                    .as_ref()
+                    .expect("original extension"),
+                recolored.extension_atlas.as_ref().expect("new extension"),
+            ),
+        ] {
+            assert_eq!(before.pixels.len(), after.pixels.len());
+            for (before, after) in before
+                .pixels
+                .chunks_exact(4)
+                .zip(after.pixels.chunks_exact(4))
+            {
+                assert_eq!(before[3], after[3]);
+            }
+        }
     }
 
     /// Every frame every track names has to land on a cell that exists. A typo

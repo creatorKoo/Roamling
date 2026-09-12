@@ -21,6 +21,8 @@ mod capture;
 mod diagnostics;
 mod duplication;
 mod focus;
+#[cfg(debug_assertions)]
+mod palette_debug;
 mod platform;
 mod settings;
 mod shell;
@@ -82,6 +84,9 @@ fn persist_work_app_label(settings: &mut Settings, work_apps: &[String], exe: &s
 struct App {
     pet: PetRuntime,
     asset: PetAsset,
+    /// Session-only targets for the disposable debug palette laboratory.
+    #[cfg(debug_assertions)]
+    palette: roamling_core::PaletteTargets,
     /// Packages found on disk, and which one is showing. `None` is the
     /// built-in mascot, which is always available and never fails to load.
     catalog: Vec<package::PetDescriptor>,
@@ -186,6 +191,8 @@ fn main() -> Result<()> {
         eprintln!("the built-in mascot did not decode");
         return Ok(());
     };
+    #[cfg(debug_assertions)]
+    let palette = roamling_pet::built_in_mochi_palette();
     let displays = platform::displays();
     if displays.is_empty() {
         eprintln!("no displays; nothing to roam");
@@ -333,6 +340,8 @@ fn main() -> Result<()> {
         *slot.borrow_mut() = Some(App {
             pet,
             asset,
+            #[cfg(debug_assertions)]
+            palette,
             resolver,
             player,
             displays,
@@ -385,6 +394,12 @@ fn main() -> Result<()> {
             let _ = SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
         }
         SetTimer(hwnd, 1, 16, None);
+    }
+    #[cfg(debug_assertions)]
+    if std::env::var_os("ROAMLING_OPEN_PALETTE_DEBUG").is_some() {
+        if roamling_pet::prepare_built_in_mochi_recolor() {
+            palette_debug::show(hwnd, palette, palette);
+        }
     }
     println!("\ntray icon registered: {tray_ok}   (Windows 11 files new ones behind the chevron)");
     println!("roaming. right-click the tray icon for the menu.");
@@ -594,6 +609,18 @@ fn tick(hwnd: HWND, app: &mut App) {
     if let Some(tuning) = tuning::take_pending() {
         app.pet.apply_tuning(tuning, now);
         remember_tuning(app, tuning);
+    }
+    #[cfg(debug_assertions)]
+    if let Some(palette) = palette_debug::take_pending() {
+        app.palette = palette;
+        // Stage 0 is deliberately scoped to the built-in Mochi. Installed pet
+        // packages remain the artist's colours.
+        if app.current_package.is_none() {
+            if let Some(asset) = roamling_pet::built_in_mochi_recolored(palette) {
+                app.asset = asset;
+                app.drawn = None;
+            }
+        }
     }
 
     let wants_focus = app.pet.begin_tick(now) && app.cursor_aware;
@@ -1077,6 +1104,21 @@ unsafe fn perform(hwnd: HWND, chosen: usize, app: &mut App, now: f64) {
                 .set(settings::CURSOR_AWARENESS, app.cursor_aware);
         }
         tray::CMD_TUNING => tuning::show(app.pet.tuning()),
+        #[cfg(debug_assertions)]
+        tray::CMD_PALETTE_DEBUG => {
+            // Opening this Mochi-only experiment while another package is
+            // selected makes the scope explicit by putting Mochi on screen.
+            if !roamling_pet::prepare_built_in_mochi_recolor() {
+                eprintln!("could not prepare the built-in palette");
+                return;
+            }
+            if app.current_package.is_some() {
+                if let Some(asset) = roamling_pet::built_in_mochi_recolored(app.palette) {
+                    adopt(app, asset, None);
+                }
+            }
+            palette_debug::show(hwnd, app.palette, roamling_pet::built_in_mochi_palette());
+        }
         tray::CMD_UPDATE_CHECK => {
             if !app.checking {
                 app.checking = true;
@@ -1104,7 +1146,11 @@ unsafe fn perform(hwnd: HWND, chosen: usize, app: &mut App, now: f64) {
             println!("{} pet package(s) found", app.catalog.len());
         }
         tray::CMD_PET_BUILT_IN => {
-            if let Some(asset) = roamling_pet::built_in_mochi() {
+            #[cfg(debug_assertions)]
+            let asset = roamling_pet::built_in_mochi_recolored(app.palette);
+            #[cfg(not(debug_assertions))]
+            let asset = roamling_pet::built_in_mochi();
+            if let Some(asset) = asset {
                 adopt(app, asset, None);
             }
         }
@@ -1286,6 +1332,11 @@ unsafe fn dispatch(hwnd: HWND, msg: u32, app: &mut App) -> bool {
         let now = app.started.elapsed().as_secs_f64();
         match msg {
             WM_TIMER => {
+                tick(hwnd, app);
+                true
+            }
+            #[cfg(debug_assertions)]
+            palette_debug::WM_PALETTE_CHANGED => {
                 tick(hwnd, app);
                 true
             }

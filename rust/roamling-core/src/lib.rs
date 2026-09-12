@@ -74,4 +74,6 @@ pub use tuning::{RuntimeTuning, RuntimeTuningKey, TUNING_KEYS};
 pub use topology::{DisplayPortal, DisplayRoute, DisplayTopology};
 pub use world::{DesktopWorldSnapshot, DisplaySnapshot, FocusSnapshot, LocationHint, SafeZone};
 
-pub use pet_image::PetImage;
+pub use pet_image::{
+    PaletteAnchors, PaletteColour, PaletteMap, PaletteTargets, PetImage, PetImageSource,
+};

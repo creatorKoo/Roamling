@@ -44,6 +44,8 @@ pub const CMD_UPDATE_CHECK: usize = 13;
 pub const CMD_UPDATE_AUTO: usize = 14;
 pub const CMD_LAUNCH_AT_LOGIN: usize = 15;
 pub const CMD_HIDE: usize = 16;
+#[cfg(debug_assertions)]
+pub const CMD_PALETTE_DEBUG: usize = 17;
 /// The built-in mascot, then one id per discovered package.
 pub const CMD_PET_BUILT_IN: usize = 1_000;
 pub const CMD_PET_BASE: usize = 1_001;
@@ -410,6 +412,8 @@ unsafe fn build(state: &MenuState) -> Option<HMENU> {
                 CMD_PET_BUILT_IN,
                 PCWSTR(name.as_ptr()),
             );
+            #[cfg(debug_assertions)]
+            command(pets, CMD_PALETTE_DEBUG, "Mochi Palette Lab (Debug)...");
             if !state.pets.is_empty() {
                 let _ = separator(pets);
             }
@@ -689,7 +693,7 @@ mod tests {
 
         let agent_one = CMD_AGENT_BASE;
         let agent_two = CMD_AGENT_BASE + CMD_AGENT_STRIDE;
-        let expected = [
+        let mut expected = vec![
             CMD_HIDE,
             CMD_ROAMING,
             CMD_AVOID_POINTER,
@@ -720,6 +724,8 @@ mod tests {
             CMD_WORK_APP_BASE,
             CMD_WORK_APP_BASE + 1,
         ];
+        #[cfg(debug_assertions)]
+        expected.push(CMD_PALETTE_DEBUG);
         for id in expected {
             assert!(found.contains(&id), "{id} is not in the menu: {found:?}");
         }
