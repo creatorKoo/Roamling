@@ -21,7 +21,7 @@ Win32 타입은 `platform.rs`를 넘지 않는다. Windows에 Swift는 없다: �
 | W5 | 나머지 provider | ✅ 2026-09-04 |
 | W6 | 패키징 (Inno Setup, per-user) | ✅ 2026-09-04 |
 | W7 | 자동 업데이트 (양 플랫폼 공통) | ✅ 2026-09-04 |
-| **W8** | **지정 앱 활동 source (셸 배선)** | ⏳ **배선 완료 · 실사용 확인 대기** |
+| W8 | 지정 앱 활동 source (셸 배선) | ✅ 2026-09-12 |
 
 ## 릴리스 없이 시험하기
 
@@ -120,7 +120,7 @@ macOS도 같은 이유로 `CGEventSource.secondsSinceLastEventType(_:eventType:)
 비밀키는 GitHub secret `ROAMLING_UPDATE_SECRET_KEY`에 있다. **키를 다시 만들 일이 생기면
 사용자가 직접 돌린다** — 에이전트가 `keygen`을 돌리면 비밀키가 대화 기록에 남는다.
 
-## W8 — 지정 앱 활동 source (Windows 셸 배선) ⏳ 실사용 확인 대기
+## W8 — 지정 앱 활동 source (Windows 셸 배선) ✅ 2026-09-12
 
 **결정 로직은 공용 코어에 있고 Windows 셸도 2026-09-12에 배선됐다.** 규칙은 2026-09-11에
 정해졌고(같은 날 v2로 고침), 다음 날 상태형 source로 옮겨졌다. 설계는
@@ -346,9 +346,15 @@ fixture, Windows 셸 44개가 통과했고 네트워크 의존 테스트 1개만
 수정한 Debug 앱을 이 기계의 실제 사용자 컨텍스트에서 다시 켜고 `%APPDATA%\Roamling\settings.txt`를
 직접 확인했다. 실행 전의 `roamling.workAppLabel.windowsterminal.exe=Windows Terminal Host`는
 시작 직후 사라졌고, Windows Terminal이 포그라운드인 채 9초가 지난 뒤에도 `workAppLabel` 키는
-다시 생기지 않았다. 이 기계에서는 Swift를 컴파일할 수 없으므로 macOS 앱 이름 저장·시작 정리
-하네스를 포함한 Swift 변경은 소스까지만 고쳤고 컴파일은 미검증이다. W8은 실제 한컴·Office에서
-흐름을 확인할 때까지 실사용 확인 대기로 둔다.
+다시 생기지 않았다.
+
+**Swift 쪽은 CI가 메웠다.** 이 기계에서는 컴파일이 안 되므로 그 사이 Swift 변경은 전부
+`gh workflow run check-macos.yml`로 확인했고, 마지막 실행이 tip에서 `Test`(= `./scripts/test.sh`)
+부터 dmg 왕복과 `smoke-launch`까지 전부 통과했다. Windows도 같은 커밋에서 통과했다.
+**두 번은 빨간불이었고 둘 다 이 기계에서 보이지 않는 종류였다** — 함수 참조에서 사라지는 기본
+인자, non-throwing autoclosure 안의 `try`. 한 층을 걷어내야 다음 층이 보였다.
+
+**W8은 사용자 확인으로 닫혔다 (2026-09-12).** 실물 한컴·Office 흐름을 직접 써 보고 확인했다.
 
 ## 남은 리스크
 
