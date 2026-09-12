@@ -1,0 +1,40 @@
+# SPDX-FileCopyrightText: 2026 GooBeom Jeoung
+# SPDX-License-Identifier: GPL-3.0-only
+
+name: Start it the way a user would
+description: >
+  Runs a packaged Roamling.app with the build directory hidden, and fails
+  unless it reaches the point where it has drawn its menu bar item.
+
+# v0.3.0 was signed, sealed, verified and packaged, and trapped the moment a
+# user opened it. Every check was about the *shape* of the bundle and nobody
+# started it. The fault only appears on a machine that did not compile the
+# binary, because `Bundle.module`'s second candidate is the absolute `.build`
+# path of the machine that did -- so the build directory is moved aside here to
+# reproduce that, and put back whatever happens.
+#
+# Both workflows need this and they need it on different bundles: the release
+# starts the `.zip` the updater ships, and the rehearsal starts the copy
+# dragged out of the `.dmg` a person downloads. Same check, two inputs -- which
+# is why it lives here rather than being pasted into each. Pasted, a fix to one
+# copy silently leaves the other still passing.
+inputs:
+  app:
+    description: Path to the .app bundle to start.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        set -euo pipefail
+        mv .build .build-hidden
+        trap 'mv .build-hidden .build' EXIT
+        ROAMLING_SMOKE_TEST=1 "${{ inputs.app }}/Contents/MacOS/Roamling" \
+          2>&1 | tee "$RUNNER_TEMP/smoke.log"
+        # A pipeline exits with `tee`'s status, so a crash on the left would
+        # pass unnoticed. The line the smoke path prints once the app is fully
+        # up is the thing worth checking, so check that.
+        grep -q '^smoke.localization=' "$RUNNER_TEMP/smoke.log"
+        echo "it launched, drew its menu bar item, and shut down cleanly"
