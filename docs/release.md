@@ -32,7 +32,8 @@ SHA-1 MAC도 거부된다). 그 legacy가 곧 키체인이 쓰는 형식이다. 
 `security`만 못 읽은 것이다.
 
 `.github/workflows/check-macos.yml`이 **릴리스 없이** 이것을 시험한다
-(`gh workflow run check-macos.yml`). 인증서만이 아니라 **macOS 잡 전부**다 — 툴체인 · 인증서 ·
+(`gh workflow run check-macos.yml`). **서명·dmg·패키징 파일을 건드린 푸시에서는 자동으로도
+돈다** — 사람이 잊는 순간이 거기라서다. 평소 푸시에는 안 돈다. 인증서만이 아니라 **macOS 잡 전부**다 — 툴체인 · 인증서 ·
 테스트 · 빌드 · 패키징 · dmg 왕복 · 실제 실행까지, 발행 직전에서 멈춘다. 릴리스가 쓰는 것과
 같은 composite action(`.github/actions/signing-identity` · `swift-toolchain`)을 쓰므로 둘이
 다르게 판정할 수 없다.

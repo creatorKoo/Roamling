@@ -1,0 +1,94 @@
+# SPDX-FileCopyrightText: 2026 GooBeom Jeoung
+# SPDX-License-Identifier: GPL-3.0-only
+#
+# Everything the release's Windows job does, except publish.
+#
+# The macOS twin exists because a release died eleven minutes in and cutting a
+# release was the only way to find out. This side has the same shape of hole:
+# `roamling-win` is not in the workspace's default members, so `cargo test` on
+# the development machine never builds it, and the only place it is built at
+# all is a tag push. A change to the shared core that breaks the Windows shell
+# is invisible until then.
+#
+# Manual, and automatic when the Windows shell or its installer changes.
+#
+# Not triggered on the shared core, deliberately. That would fire on most
+# commits, and there is a cheaper answer for it: `cargo check -p roamling-win
+# --target x86_64-pc-windows-msvc` type-checks the shell from macOS in about
+# forty seconds without a linker, because `cargo check` never links.
+
+name: Check Windows
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - rust/roamling-win/**
+      - rust/Cargo.toml
+      - rust/Cargo.lock
+      - rust/.cargo/**
+      - installer/**
+      - .github/workflows/check-windows.yml
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # The same two commands the release runs. The first is the workspace
+      # default set -- the core's differential fixtures included, which is
+      # where the platform libm difference showed up in the first place.
+      - name: Test
+        shell: bash
+        working-directory: rust
+        run: |
+          cargo test --release
+          cargo test -p roamling-win
+
+      - name: Build
+        working-directory: rust
+        run: cargo build -p roamling-win --release
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { $iscc = "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" }
+          if (-not (Test-Path $iscc)) {
+            winget install --id JRSoftware.InnoSetup --silent `
+              --accept-package-agreements --accept-source-agreements --disable-interactivity
+            $iscc = "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
+          }
+          $version = (Select-String -Path rust\Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          & $iscc "/DAppVersion=$version" installer\roamling.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Look at what came out
+        shell: pwsh
+        run: |
+          $exe = "rust\target\release\roamling.exe"
+          $setup = "build\Roamling-Setup.exe"
+          foreach ($path in @($exe, $setup)) {
+            if (-not (Test-Path $path)) { Write-Host "missing $path"; exit 1 }
+            "{0,-34} {1,8:N0} KB" -f $path, ((Get-Item $path).Length / 1KB)
+          }
+          Write-Host "the exe and the installer were both produced"
+
+      # Two things this deliberately does not check, so that nobody reads a
+      # green run as more than it is.
+      #
+      # It does not start the app. The macOS twin does, because v0.3.0 passed
+      # every shape check and trapped on launch -- but that fault was SwiftPM
+      # compiling an absolute build path into its resource lookup, and this
+      # shell has no bundle lookup to get wrong. When `roamling-win` grows a
+      # `ROAMLING_SMOKE_TEST` path of its own, that step belongs here.
+      #
+      # It does not verify the single-file claim (`+crt-static`, no DLLs of
+      # ours beside the exe). Scanning `target/release` for DLLs looks like it
+      # would, and does not: `roamling-core` declares `cdylib` for the macOS
+      # binding, so `roamling_core.dll` is built there on purpose and a scan
+      # reports it every time. The honest check is `dumpbin /dependents` on the
+      # exe, which means locating the Visual Studio tools first -- worth doing,
+      # not worth guessing at from a machine that cannot run it.

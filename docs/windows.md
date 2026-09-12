@@ -23,6 +23,19 @@ Win32 타입은 `platform.rs`를 넘지 않는다. Windows에 Swift는 없다: �
 | W7 | 자동 업데이트 (양 플랫폼 공통) | ✅ 2026-09-04 |
 | **W8** | **지정 앱 활동 source (셸 배선)** | ⏳ **미완 — 아래** |
 
+## 릴리스 없이 시험하기
+
+`.github/workflows/check-windows.yml`이 릴리스의 Windows 잡에서 **발행만 뺀 것**을 돈다
+(`gh workflow run check-windows.yml`). 셸이나 인스톨러를 건드린 푸시에서는 자동으로도 돈다.
+
+**이게 필요한 이유가 macOS 쪽과 다르다.** `roamling-win`은 workspace default members에 없어서
+개발 기계의 `cargo test`가 **한 번도 빌드하지 않고**, 실제로 빌드되는 유일한 자리가 태그 푸시였다.
+공유 코어의 변경이 Windows 셸을 깨도 릴리스 전까지 안 보인다.
+
+더 싼 답도 있다: **맥에서 `cargo check -p roamling-win --target x86_64-pc-windows-msvc`가 돈다.**
+`cargo check`는 링크를 안 하니 MSVC 툴체인이 필요 없고, 진짜 `windows` 크레이트 바인딩에 대고
+타입 검사가 된다(실측 38초). `rustup target add x86_64-pc-windows-msvc`가 선행 조건이다.
+
 ## 빌드·테스트·실행
 
 ```powershell

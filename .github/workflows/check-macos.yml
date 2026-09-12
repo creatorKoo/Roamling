@@ -16,7 +16,23 @@
 
 name: Check macOS
 
-on: workflow_dispatch
+# Manual, and automatic when the packaging half changes -- which is the moment
+# a person forgets. The signing and dmg files sat untouched for eight days
+# before this trigger was added, so it costs nothing on an ordinary push; it
+# fires on the pushes where the release could have been broken quietly.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - Package.swift
+      - Support/Info.plist
+      - scripts/build-app.sh
+      - scripts/build-dmg.sh
+      - assets/dmg/**
+      - assets/dmg-background.png
+      - .github/actions/**
+      - .github/workflows/check-macos.yml
 
 jobs:
   macos:
