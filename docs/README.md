@@ -20,6 +20,7 @@
 | 프레임을 새로 그릴 때의 불변식 | [`art/mochi-animation-handoff.md`](art/mochi-animation-handoff.md) | ~140 |
 | 도구 없이 손으로 프레임을 만들 때의 프롬프트 | [`art/mochi-animation-prompts-ko.md`](art/mochi-animation-prompts-ko.md) | ~150 |
 | Windows에서 지금 유효한 것, 남은 게이트(W8) | [`windows.md`](windows.md) | ~200 |
+| 서명·dmg·배포를 어떻게 하나 | [`release.md`](release.md) | ~90 |
 | 무엇이 실제로 배터리를 먹나 | [`battery.md`](battery.md) | ~90 |
 
 ## 닫힌 기록 — [`history/`](history/)
@@ -34,6 +35,7 @@
 | 일하는 앱이 사건형이던 때의 구조와 우회 코드 | [`history/focus-activity-flow.md`](history/focus-activity-flow.md) | ~670 |
 | Mochi v3를 만들기 전의 진단과 계획 | [`history/mochi-v3-plan.md`](history/mochi-v3-plan.md) | ~500 |
 | upstream 조사 (Petdex · Codex · macOS API) | [`history/research.md`](history/research.md) | ~470 |
+| 맥 수정 A~F — 전부 닫힘 | [`history/mac-fixes.md`](history/mac-fixes.md) | ~80 |
 | v2 시트의 기록 | [`history/mochi-v2-animation-spec.md`](history/mochi-v2-animation-spec.md) | ~280 |
 
 ## 이 지도의 규칙
@@ -45,3 +47,5 @@
   문서를 안 본다.
 - 닫힌 게이트는 `history/`로 내리되 **그 안에 있던 살아 있는 사실은 위로 끌어올린다.**
   `windows.md`가 그랬다 — 설치 경로·설정 파일·업데이트 운영이 닫힌 게이트 본문에 묻혀 있었다.
+- **`CLAUDE.md`에는 규칙과 함정만 둔다.** 절차는 필요할 때 와서 보면 되고, 매 세션 자동으로
+  읽히는 파일에 미리 실어 둘 값이 없다. dmg 내부 구조가 그래서 `release.md`로 내려갔다.

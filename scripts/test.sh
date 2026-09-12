@@ -50,6 +50,28 @@ if grep -rnE --include='*.swift' \
   exit 1
 fi
 
+# Every document path cited by a document or a code comment has to exist.
+# Moving a
+# closed gate into the history folder broke five citations at once and they
+# were only found by hand; this is the cheap half of keeping the docs honest.
+# The expensive half -- whether the sentence is still true -- nothing here can do.
+broken=$(
+  grep -rhoE 'docs/[A-Za-z0-9_/.-]*\.md' \
+    --include='*.md' --include='*.swift' --include='*.rs' --include='*.sh' \
+    --include='*.ps1' --include='*.toml' \
+    "$REPOSITORY_DIR/CLAUDE.md" "$REPOSITORY_DIR/docs" "$REPOSITORY_DIR/Sources" \
+    "$REPOSITORY_DIR/rust" "$REPOSITORY_DIR/scripts" "$REPOSITORY_DIR/Tests" 2>/dev/null |
+  sort -u |
+  while IFS= read -r path; do
+    [[ -f "$REPOSITORY_DIR/$path" ]] || print -- "$path"
+  done
+)
+if [[ -n "$broken" ]]; then
+  print -u2 "Cited documents that do not exist:"
+  print -u2 -- "$broken"
+  exit 1
+fi
+
 swift run "${SWIFT_ARGS[@]}" RoamlingLogicTests
 
 # The Rust core is being ported one unit at a time, and each unit is gated by a
