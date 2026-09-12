@@ -262,19 +262,30 @@ func shellLogicTests() -> [LogicTest] {
                 defer { harness.tearDown() }
                 let runtime = harness.runtime
 
-                let switches: [(MenuAction, String, () -> Bool)] = [
-                    (.toggleHidden, localized("menu.hide"), { runtime.isHidden }),
-                    (.toggleRoaming, localized("menu.roaming"), { runtime.isRoamingEnabled }),
-                    (.togglePointerAvoidance, localized("menu.avoidPointer"), { runtime.isPointerAvoidanceEnabled }),
-                    (.toggleInteractions, localized("menu.catchDrag"), { runtime.areInteractionsEnabled })
+                let movement = localized("menu.movement")
+                let switches: [(MenuAction, String, String?, () -> Bool)] = [
+                    (.toggleHidden, localized("menu.hide"), nil, { runtime.isHidden }),
+                    (.toggleRoaming, localized("menu.roaming"), movement, { runtime.isRoamingEnabled }),
+                    (.togglePointerAvoidance, localized("menu.avoidPointer"), movement, { runtime.isPointerAvoidanceEnabled }),
+                    (.toggleInteractions, localized("menu.catchDrag"), movement, { runtime.areInteractionsEnabled })
                 ]
-                for (action, title, read) in switches {
+                for (action, title, parent, read) in switches {
                     for _ in 0..<2 {
                         let before = read()
                         _ = ShellController.perform(action, runtime: runtime, version: "1.2.3")
                         try expect(read() != before, "\(title) did not change")
+                        let top = ShellMenu.items(for: runtime)
+                        let scope: [MenuItem]
+                        if let parent {
+                            scope = try require(
+                                submenu(named: parent, in: top),
+                                "\(parent) is missing from the menu"
+                            )
+                        } else {
+                            scope = top
+                        }
                         let item = try require(
-                            ShellMenu.items(for: runtime).first { $0.title == title },
+                            scope.first { $0.title == title },
                             "\(title) is missing from the menu"
                         )
                         var isOn = false
@@ -316,16 +327,58 @@ func shellLogicTests() -> [LogicTest] {
                 }
             }
         },
-        LogicTest(name: "advanced keeps all six occasional controls reachable") {
+        LogicTest(name: "a one-agent tree keeps all fourteen folded rows reachable") {
             try MainActor.assumeIsolated {
-                let harness = try RuntimeHarness()
+                let agent = FailingAgent(id: "test-agent")
+                let harness = try RuntimeHarness(agents: [agent])
                 defer { harness.tearDown() }
                 defer { ShellMenu.updateStatus = .idle }
                 ShellMenu.updateStatus = .idle
 
                 let top = ShellMenu.items(for: harness.runtime)
+                let movement = try require(submenu(named: localized("menu.movement"), in: top))
+                let awareness = try require(submenu(named: localized("menu.awareness"), in: top))
                 let advanced = try require(submenu(named: localized("menu.advanced"), in: top))
-                let actions = advanced.compactMap { item -> MenuAction? in
+
+                let movementActions = movement.compactMap { item -> MenuAction? in
+                    switch item.content {
+                    case let .command(action), let .check(action, _): action
+                    default: nil
+                    }
+                }
+                let expectedMovement: [MenuAction] = [
+                    .toggleRoaming, .togglePointerAvoidance, .toggleInteractions, .showTuning
+                ]
+                try expect(
+                    movementActions == expectedMovement,
+                    "Movement contains \(movementActions)"
+                )
+
+                let expectedAwarenessTitles = [
+                    "menu.accessibility", "menu.visualPlacement", "menu.workApps"
+                ].map { localized($0) } + [agent.displayName]
+                try expect(
+                    awareness.map(\.title) == expectedAwarenessTitles,
+                    "Awareness contains \(awareness.map(\.title))"
+                )
+                let agentRows = try require(
+                    submenu(named: agent.displayName, in: awareness),
+                    "the agent submenu is not reachable through Awareness"
+                )
+                let agentActions = agentRows.compactMap { item -> MenuAction? in
+                    switch item.content {
+                    case let .command(action), let .check(action, _): action
+                    default: nil
+                    }
+                }
+                try expect(
+                    agentActions == [
+                        .installAgent(id: agent.id), .testAgentReaction(id: agent.id)
+                    ],
+                    "the agent submenu contains \(agentActions)"
+                )
+
+                let advancedActions = advanced.compactMap { item -> MenuAction? in
                     switch item.content {
                     case let .command(action), let .check(action, _): action
                     default: nil
@@ -335,15 +388,23 @@ func shellLogicTests() -> [LogicTest] {
                     .openPetFolder, .copyDiagnostics, .reloadPets, .checkForUpdates,
                     .toggleLaunchAtLogin, .toggleAutomaticUpdates
                 ]
-                try expect(actions == expected, "Advanced contains \(actions)")
+                try expect(advancedActions == expected, "Advanced contains \(advancedActions)")
+
+                let foldedCount = movement.count + awareness.count + advanced.count
+                try expect(
+                    foldedCount == 14,
+                    "the one-agent harness has \(foldedCount) folded rows, expected 14"
+                )
 
                 // Called rather than passed: `localized` takes a comment as its
                 // second parameter, so a bare function reference is
                 // `(String, String) -> String` and the literals stop type-checking.
                 for title in [
+                    "menu.roaming", "menu.avoidPointer", "menu.catchDrag", "menu.tuning",
+                    "menu.accessibility", "menu.visualPlacement", "menu.workApps",
                     "menu.openPetFolder", "menu.copyDiagnostics", "menu.reloadPets",
                     "menu.update.check", "menu.launchAtLogin", "menu.update.auto"
-                ].map({ localized($0) }) {
+                ].map({ localized($0) }) + [agent.displayName] {
                     try expect(
                         !top.contains { $0.title == title },
                         "\(title) leaked back onto the top level"
@@ -351,7 +412,7 @@ func shellLogicTests() -> [LogicTest] {
                 }
             }
         },
-        LogicTest(name: "quit is the thirteenth top-level choice and stays last") {
+        LogicTest(name: "an agent-free menu has eight top-level choices and Quit is eighth") {
             try MainActor.assumeIsolated {
                 let harness = try RuntimeHarness()
                 defer { harness.tearDown() }
@@ -364,14 +425,22 @@ func shellLogicTests() -> [LogicTest] {
                     case .command, .check, .submenu: true
                     }
                 }
-                try expect(choices.count == 13, "expected 13 top-level choices, got \(choices.count)")
-                guard case .command(.quit) = choices[12].content else {
+                let expectedTitles = [
+                    "menu.hide", "menu.pet", "menu.size", "menu.movement",
+                    "menu.awareness", "menu.advanced", "menu.about", "menu.quit"
+                ].map { localized($0) }
+                try expect(
+                    choices.map(\.title) == expectedTitles,
+                    "the top-level choices are \(choices.map(\.title))"
+                )
+                try expect(choices.count == 8, "expected 8 top-level choices, got \(choices.count)")
+                guard case .command(.quit) = choices[7].content else {
                     throw LogicTestFailure(
-                        message: "the thirteenth choice is not Quit: \(choices[12].content)",
+                        message: "the eighth choice is not Quit: \(choices[7].content)",
                         file: #filePath, line: #line
                     )
                 }
-                try expect(choices[11].title == localized("menu.about"))
+                try expect(choices[6].title == localized("menu.about"))
             }
         },
         LogicTest(name: "every menu command carries a title and a shortcut that is one key") {
@@ -407,7 +476,7 @@ func shellLogicTests() -> [LogicTest] {
     ]
 }
 
-private func submenu(named title: String, in items: [MenuItem]) -> [MenuItem]? {
+func submenu(named title: String, in items: [MenuItem]) -> [MenuItem]? {
     for item in items {
         if item.title == title, case let .submenu(children) = item.content { return children }
     }

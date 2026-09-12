@@ -197,6 +197,8 @@ mod tests {
         for key in [
             "menu.title",
             "menu.hide",
+            "menu.movement",
+            "menu.awareness",
             "menu.advanced",
             "menu.pet",
             "menu.pet.builtin",

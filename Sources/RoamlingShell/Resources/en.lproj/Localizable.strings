@@ -8,10 +8,12 @@
 "menu.pet.substituted" = "Borrowed: %@";
 "menu.pet.placeholder" = "No stand-in: %@";
 "menu.size" = "Size";
+"menu.movement" = "Movement";
+"menu.awareness" = "Awareness";
 "menu.roaming" = "Roaming";
 "menu.avoidPointer" = "Avoid Pointer";
 "menu.catchDrag" = "Catch & Drag";
-"menu.tuning" = "Behavior Settings…";
+"menu.tuning" = "Movement Settings…";
 "menu.workApps" = "Work Apps";
 "menu.workApps.none" = "No apps seen yet";
 "menu.accessibility" = "Cursor Awareness";
@@ -63,7 +65,7 @@
 "accessibility.alert.title" = "Enable caret awareness?";
 "accessibility.alert.body" = "macOS will ask you to allow Roamling under Accessibility. Roamling then reads the focused control's position and the text cursor's position so the pet can sit near your work without covering it.\n\nIt never reads what you type, the text you select, window titles, or document contents.";
 "accessibility.revoke.hint" = "Turn off in System Settings › Privacy & Security › Accessibility";
-"tuning.window.title" = "Roamling Behavior Settings";
+"tuning.window.title" = "Roamling Movement Settings";
 "tuning.header" = "How your pet moves";
 "tuning.footer" = "Every change applies straight away and is remembered. Nothing here is required — the defaults are the authored behaviour, and Reset Defaults brings them back at any time.";
 "tuning.offDefault" = "%1$@ (default %2$@)";

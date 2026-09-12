@@ -8,10 +8,12 @@
 "menu.pet.substituted" = "대체 중: %@";
 "menu.pet.placeholder" = "대체 불가: %@";
 "menu.size" = "크기";
+"menu.movement" = "움직임";
+"menu.awareness" = "인식";
 "menu.roaming" = "돌아다니기";
 "menu.avoidPointer" = "포인터 피하기";
 "menu.catchDrag" = "잡기·끌기";
-"menu.tuning" = "동작 세부 설정…";
+"menu.tuning" = "움직임 설정…";
 "menu.workApps" = "일하는 앱";
 "menu.workApps.none" = "아직 본 앱이 없어요";
 "menu.accessibility" = "커서 인식";
@@ -63,7 +65,7 @@
 "accessibility.alert.title" = "커서 인식을 켤까요?";
 "accessibility.alert.body" = "macOS가 손쉬운 사용에서 Roamling을 허용할지 묻습니다. 허용하면 Roamling이 입력 중인 컨트롤과 텍스트 커서의 위치를 읽어, 펫이 작업하는 자리를 가리지 않고 그 근처에 앉습니다.\n\n입력하는 내용, 선택한 텍스트, 창 제목, 문서 내용은 읽지 않습니다.";
 "accessibility.revoke.hint" = "시스템 설정 › 개인정보 보호 및 보안 › 손쉬운 사용에서 끕니다";
-"tuning.window.title" = "Roamling 동작 세부 설정";
+"tuning.window.title" = "Roamling 움직임 설정";
 "tuning.header" = "펫이 움직이는 방식";
 "tuning.footer" = "바꾸면 바로 적용되고 그대로 기억됩니다. 꼭 건드려야 하는 것은 없습니다 — 기본값이 원래 의도된 움직임이고, 언제든 '기본값으로'로 되돌릴 수 있습니다.";
 "tuning.offDefault" = "%1$@ (기본 %2$@)";

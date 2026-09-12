@@ -439,9 +439,15 @@ func focusActivityLogicTests() -> [LogicTest] {
                 defer { harness.tearDown() }
 
                 @MainActor func rows() throws -> [MenuItem] {
+                    let awareness = try require(
+                        submenu(
+                            named: localized("menu.awareness"),
+                            in: ShellMenu.items(for: harness.runtime)
+                        ),
+                        "no awareness submenu in the menu"
+                    )
                     let row = try require(
-                        ShellMenu.items(for: harness.runtime)
-                            .first { $0.title == localized("menu.workApps") },
+                        awareness.first { $0.title == localized("menu.workApps") },
                         "no work-app submenu in the menu"
                     )
                     guard case let .submenu(children) = row.content else {

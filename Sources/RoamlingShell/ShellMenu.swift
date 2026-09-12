@@ -108,30 +108,8 @@ public enum ShellMenu {
             MenuItem(localized("menu.pet"), .submenu(petItems(for: runtime))),
             MenuItem(localized("menu.size"), .submenu(sizeItems(for: runtime))),
             .separator,
-            MenuItem(
-                localized("menu.roaming"),
-                .check(.toggleRoaming, isOn: runtime.isRoamingEnabled)
-            ),
-            MenuItem(
-                localized("menu.avoidPointer"),
-                .check(.togglePointerAvoidance, isOn: runtime.isPointerAvoidanceEnabled)
-            ),
-            MenuItem(
-                localized("menu.catchDrag"),
-                .check(.toggleInteractions, isOn: runtime.areInteractionsEnabled)
-            ),
-            MenuItem(localized("menu.workApps"), .submenu(workAppItems(for: runtime))),
-            MenuItem(localized("menu.tuning"), .command(.showTuning), shortcut: ","),
-        ]
-        // One submenu per agent, in the order the app handed them over. An app
-        // built with no agents simply has none, which is what a platform that
-        // cannot install hooks yet gets.
-        items += runtime.agentIntegrations.map { agent in
-            MenuItem(agent.displayName, .submenu(agentItems(for: agent)))
-        }
-        items += [
-            MenuItem(localized("menu.accessibility"), .submenu(accessibilityItems(for: runtime))),
-            MenuItem(localized("menu.visualPlacement"), .submenu(visualPlacementItems(for: runtime))),
+            MenuItem(localized("menu.movement"), .submenu(movementItems(for: runtime))),
+            MenuItem(localized("menu.awareness"), .submenu(awarenessItems(for: runtime))),
             .separator,
             MenuItem(localized("menu.advanced"), .submenu(advancedItems())),
         ]
@@ -144,6 +122,40 @@ public enum ShellMenu {
             MenuItem(localized("menu.quit"), .command(.quit), shortcut: "q")
         ]
         items.reserveCapacity(items.count)
+        return items
+    }
+
+    private static func movementItems(for runtime: RoamlingRuntime) -> [MenuItem] {
+        [
+            MenuItem(
+                localized("menu.roaming"),
+                .check(.toggleRoaming, isOn: runtime.isRoamingEnabled)
+            ),
+            MenuItem(
+                localized("menu.avoidPointer"),
+                .check(.togglePointerAvoidance, isOn: runtime.isPointerAvoidanceEnabled)
+            ),
+            MenuItem(
+                localized("menu.catchDrag"),
+                .check(.toggleInteractions, isOn: runtime.areInteractionsEnabled)
+            ),
+            MenuItem(localized("menu.tuning"), .command(.showTuning), shortcut: ","),
+        ]
+    }
+
+    private static func awarenessItems(for runtime: RoamlingRuntime) -> [MenuItem] {
+        var items = [
+            MenuItem(localized("menu.accessibility"), .submenu(accessibilityItems(for: runtime))),
+            MenuItem(localized("menu.visualPlacement"), .submenu(visualPlacementItems(for: runtime))),
+            MenuItem(localized("menu.workApps"), .submenu(workAppItems(for: runtime))),
+        ]
+        // One submenu per agent, in the order the app handed them over. An app
+        // built with no agents simply has none, which is what a platform that
+        // cannot install hooks yet gets. Keeping them inside Awareness makes
+        // the top-level shape independent of how many agents exist.
+        items += runtime.agentIntegrations.map { agent in
+            MenuItem(agent.displayName, .submenu(agentItems(for: agent)))
+        }
         return items
     }
 

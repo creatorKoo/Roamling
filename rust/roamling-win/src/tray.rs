@@ -460,105 +460,111 @@ unsafe fn build(state: &MenuState) -> Option<HMENU> {
         }
         let _ = separator(menu);
 
-        for (flag, id, key) in [
-            (checked(state.roaming), CMD_ROAMING, "menu.roaming"),
-            (
-                checked(state.avoiding),
-                CMD_AVOID_POINTER,
-                "menu.avoidPointer",
-            ),
-            (
-                checked(state.interactive),
-                CMD_INTERACTIONS,
-                "menu.catchDrag",
-            ),
-        ] {
-            let label = wide(localized(key));
-            let _ = AppendMenuW(menu, MF_STRING | flag, id, PCWSTR(label.as_ptr()));
+        if let Ok(movement) = CreatePopupMenu() {
+            for (flag, id, key) in [
+                (checked(state.roaming), CMD_ROAMING, "menu.roaming"),
+                (
+                    checked(state.avoiding),
+                    CMD_AVOID_POINTER,
+                    "menu.avoidPointer",
+                ),
+                (
+                    checked(state.interactive),
+                    CMD_INTERACTIONS,
+                    "menu.catchDrag",
+                ),
+            ] {
+                let label = wide(localized(key));
+                let _ = AppendMenuW(movement, MF_STRING | flag, id, PCWSTR(label.as_ptr()));
+            }
+            command(movement, CMD_TUNING, localized("menu.tuning"));
+            attach(menu, movement, localized("menu.movement"));
         }
-        if let Ok(work_apps) = CreatePopupMenu() {
-            if state.work_apps.is_empty() {
-                caption(work_apps, localized("menu.workApps.none"));
-            } else {
-                for (index, (label, _, selected)) in state.work_apps.iter().enumerate() {
-                    let label = wide(label);
-                    let _ = AppendMenuW(
-                        work_apps,
-                        MF_STRING | checked(*selected),
-                        CMD_WORK_APP_BASE + index,
-                        PCWSTR(label.as_ptr()),
-                    );
+
+        if let Ok(awareness) = CreatePopupMenu() {
+            // On macOS these two are submenus reporting an OS permission the
+            // app can only ask for. Windows grants both outright -- there is no
+            // prompt to route the user to -- so consent is the checkmark itself.
+            // `docs/windows.md`, the permission model.
+            for (flag, id, key) in [
+                (
+                    checked(state.cursor_aware),
+                    CMD_CURSOR_AWARE,
+                    "menu.accessibility",
+                ),
+                (checked(state.visual), CMD_VISUAL, "menu.visualPlacement"),
+            ] {
+                let label = wide(localized(key));
+                let _ = AppendMenuW(awareness, MF_STRING | flag, id, PCWSTR(label.as_ptr()));
+            }
+
+            if let Ok(work_apps) = CreatePopupMenu() {
+                if state.work_apps.is_empty() {
+                    caption(work_apps, localized("menu.workApps.none"));
+                } else {
+                    for (index, (label, _, selected)) in state.work_apps.iter().enumerate() {
+                        let label = wide(label);
+                        let _ = AppendMenuW(
+                            work_apps,
+                            MF_STRING | checked(*selected),
+                            CMD_WORK_APP_BASE + index,
+                            PCWSTR(label.as_ptr()),
+                        );
+                    }
                 }
+                attach(awareness, work_apps, localized("menu.workApps"));
             }
-            attach(menu, work_apps, localized("menu.workApps"));
-        }
-        command(menu, CMD_TUNING, localized("menu.tuning"));
 
-        // One submenu per agent, the same shape `ShellMenu.agentItems` builds:
-        // two status lines that cannot be clicked, then install-or-repair,
-        // remove once there is something to remove, and a test reaction.
-        for (index, (agent, status, listening)) in state.agents.iter().enumerate() {
-            let Ok(submenu) = CreatePopupMenu() else {
-                continue;
-            };
-            let base = CMD_AGENT_BASE + index * CMD_AGENT_STRIDE;
+            // One submenu per agent, the same shape `ShellMenu.agentItems`
+            // builds: two status lines that cannot be clicked, then
+            // install-or-repair, remove when applicable, and a test reaction.
+            for (index, (agent, status, listening)) in state.agents.iter().enumerate() {
+                let Ok(submenu) = CreatePopupMenu() else {
+                    continue;
+                };
+                let base = CMD_AGENT_BASE + index * CMD_AGENT_STRIDE;
 
-            caption(
-                submenu,
-                localized(match status {
-                    installer::Status::Installed => "status.hooks.installed",
-                    installer::Status::NeedsRepair => "status.hooks.needsRepair",
-                    installer::Status::NotInstalled => "status.hooks.notInstalled",
-                }),
-            );
-            // Two states, not four: the endpoint either bound at launch or it
-            // did not. There is no async start to be "starting" during, and it
-            // is only stopped when the app is going away.
-            caption(
-                submenu,
-                localized(if *listening {
-                    "status.receiver.ready"
-                } else {
-                    "status.receiver.unavailable"
-                }),
-            );
-            let _ = separator(submenu);
+                caption(
+                    submenu,
+                    localized(match status {
+                        installer::Status::Installed => "status.hooks.installed",
+                        installer::Status::NeedsRepair => "status.hooks.needsRepair",
+                        installer::Status::NotInstalled => "status.hooks.notInstalled",
+                    }),
+                );
+                // Two states, not four: the endpoint either bound at launch or
+                // it did not. There is no async start to be "starting" during,
+                // and it is only stopped when the app is going away.
+                caption(
+                    submenu,
+                    localized(if *listening {
+                        "status.receiver.ready"
+                    } else {
+                        "status.receiver.unavailable"
+                    }),
+                );
+                let _ = separator(submenu);
 
-            command(
-                submenu,
-                base + CMD_AGENT_INSTALL,
-                localized(if *status == installer::Status::NotInstalled {
-                    "action.install"
-                } else {
-                    "action.repair"
-                }),
-            );
-            if *status != installer::Status::NotInstalled {
-                command(submenu, base + CMD_AGENT_REMOVE, localized("action.remove"));
+                command(
+                    submenu,
+                    base + CMD_AGENT_INSTALL,
+                    localized(if *status == installer::Status::NotInstalled {
+                        "action.install"
+                    } else {
+                        "action.repair"
+                    }),
+                );
+                if *status != installer::Status::NotInstalled {
+                    command(submenu, base + CMD_AGENT_REMOVE, localized("action.remove"));
+                }
+                command(
+                    submenu,
+                    base + CMD_AGENT_TEST,
+                    localized("action.testReaction"),
+                );
+                attach(awareness, submenu, agent.display_name());
             }
-            command(
-                submenu,
-                base + CMD_AGENT_TEST,
-                localized("action.testReaction"),
-            );
-            attach(menu, submenu, agent.display_name());
-        }
-
-        // On macOS these two are submenus reporting an OS permission the app
-        // can only ask for. Windows grants both outright -- there is no prompt
-        // to route the user to -- so consent is the checkmark itself, and a
-        // submenu wrapping a single toggle would say less, not more.
-        // `docs/windows.md`, the permission model.
-        for (flag, id, key) in [
-            (
-                checked(state.cursor_aware),
-                CMD_CURSOR_AWARE,
-                "menu.accessibility",
-            ),
-            (checked(state.visual), CMD_VISUAL, "menu.visualPlacement"),
-        ] {
-            let label = wide(localized(key));
-            let _ = AppendMenuW(menu, MF_STRING | flag, id, PCWSTR(label.as_ptr()));
+            attach(menu, awareness, localized("menu.awareness"));
         }
 
         let _ = separator(menu);
@@ -577,11 +583,7 @@ unsafe fn build(state: &MenuState) -> Option<HMENU> {
             if state.checking {
                 caption(advanced, localized("status.update.checking"));
             } else if state.staged.is_none() {
-                command(
-                    advanced,
-                    CMD_UPDATE_CHECK,
-                    localized("menu.update.check"),
-                );
+                command(advanced, CMD_UPDATE_CHECK, localized("menu.update.check"));
             }
             let login_label = wide(localized("menu.launchAtLogin"));
             let _ = AppendMenuW(
@@ -738,22 +740,56 @@ mod tests {
     }
 
     #[test]
-    fn advanced_keeps_six_controls_and_quit_is_the_last_row() {
+    fn the_three_folded_menus_keep_every_command_reachable_and_quit_last() {
         let mut state = state();
         state.staged = None;
         let menu = unsafe { build(&state) }.expect("the menu did not build");
         let count = unsafe { GetMenuItemCount(menu) };
-        assert_eq!(count, 21, "the ordinary top-level menu changed length");
+        assert_eq!(count, 14, "the ordinary top-level menu changed length");
         assert_eq!(unsafe { GetMenuItemID(menu, 2) } as usize, CMD_HIDE);
-        assert_eq!(unsafe { GetMenuItemID(menu, count - 2) } as usize, CMD_ABOUT);
+        assert_eq!(
+            unsafe { GetMenuItemID(menu, count - 2) } as usize,
+            CMD_ABOUT
+        );
         assert_eq!(unsafe { GetMenuItemID(menu, count - 1) } as usize, CMD_QUIT);
 
-        let advanced = (0..count)
+        let submenus: Vec<HMENU> = (0..count)
             .map(|index| unsafe { GetSubMenu(menu, index) })
-            .find(|submenu| {
-                !submenu.is_invalid() && ids(*submenu).contains(&CMD_OPEN_PET_FOLDER)
-            })
+            .filter(|submenu| !submenu.is_invalid())
+            .collect();
+        let movement = *submenus
+            .iter()
+            .find(|submenu| ids(**submenu).contains(&CMD_ROAMING))
+            .expect("Movement is missing");
+        let awareness = *submenus
+            .iter()
+            .find(|submenu| ids(**submenu).contains(&CMD_CURSOR_AWARE))
+            .expect("Awareness is missing");
+        let advanced = *submenus
+            .iter()
+            .find(|submenu| ids(**submenu).contains(&CMD_OPEN_PET_FOLDER))
             .expect("Advanced is missing");
+
+        assert_eq!(
+            ids(movement),
+            vec![CMD_ROAMING, CMD_AVOID_POINTER, CMD_INTERACTIONS, CMD_TUNING]
+        );
+        let agent_one = CMD_AGENT_BASE;
+        let agent_two = CMD_AGENT_BASE + CMD_AGENT_STRIDE;
+        assert_eq!(
+            ids(awareness),
+            vec![
+                CMD_CURSOR_AWARE,
+                CMD_VISUAL,
+                CMD_WORK_APP_BASE,
+                CMD_WORK_APP_BASE + 1,
+                agent_one + CMD_AGENT_INSTALL,
+                agent_one + CMD_AGENT_REMOVE,
+                agent_one + CMD_AGENT_TEST,
+                agent_two + CMD_AGENT_INSTALL,
+                agent_two + CMD_AGENT_TEST,
+            ]
+        );
         assert_eq!(
             ids(advanced),
             vec![
@@ -765,6 +801,20 @@ mod tests {
                 CMD_UPDATE_AUTO,
             ]
         );
+
+        // Caption and separators are not choices. The agents live under
+        // Awareness, so the top level has the same eight choices as the
+        // agent-free Swift harness.
+        let choice_positions = [2, 4, 5, 7, 8, 10, 12, 13];
+        assert_eq!(choice_positions.len(), 8);
+        for index in choice_positions {
+            let id = unsafe { GetMenuItemID(menu, index) };
+            let submenu = unsafe { GetSubMenu(menu, index) };
+            assert!(
+                id != u32::MAX || !submenu.is_invalid(),
+                "row {index} is not a choice"
+            );
+        }
         unsafe {
             let _ = DestroyMenu(menu);
         }
@@ -775,8 +825,8 @@ mod tests {
         let state = state();
         let menu = unsafe { build(&state) }.expect("the menu did not build");
         let count = unsafe { GetMenuItemCount(menu) };
-        assert_eq!(count, 22, "the staged alert did not add one top-level row");
-        let alert = unsafe { GetMenuState(menu, 18, MF_BYPOSITION) };
+        assert_eq!(count, 15, "the staged alert did not add one top-level row");
+        let alert = unsafe { GetMenuState(menu, 11, MF_BYPOSITION) };
         assert_ne!(alert, u32::MAX, "the staged alert is missing");
         assert!(
             alert & (MF_DISABLED.0 | MF_GRAYED.0) != 0,

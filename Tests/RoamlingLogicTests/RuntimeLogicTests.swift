@@ -503,7 +503,7 @@ struct RuntimeHarness {
     let platform: FakePlatform
     private let defaults: TestDefaults
 
-    init() throws {
+    init(agents: [any AgentIntegration] = []) throws {
         let display = DisplaySnapshot(
             id: "1",
             name: "test",
@@ -515,6 +515,7 @@ struct RuntimeHarness {
         defaults = try makeTestDefaults()
         runtime = RoamlingRuntime(
             services: platform.services,
+            agents: agents,
             defaults: defaults.defaults,
             catalog: PetCatalog(roots: []),
             clock: { 0 }
