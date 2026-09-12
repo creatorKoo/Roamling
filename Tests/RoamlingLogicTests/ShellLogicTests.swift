@@ -22,13 +22,16 @@ func shellLogicTests() -> [LogicTest] {
                     ShellMenu.items(for: harness.runtime).map(\.title)
                 }
 
-                @MainActor func advancedTitles() throws -> [String] {
-                    try require(
-                        submenu(
-                            named: localized("menu.advanced"),
-                            in: ShellMenu.items(for: harness.runtime)
-                        )
-                    ).map(\.title)
+                // Deliberately not throwing: `expect` takes a non-throwing
+                // autoclosure, so a `try` evaluated inside one does not compile.
+                // A missing submenu comes back empty and fails the assertion
+                // that follows; the Advanced test below is the one that reports
+                // it as missing rather than merely absent from a list.
+                @MainActor func advancedTitles() -> [String] {
+                    submenu(
+                        named: localized("menu.advanced"),
+                        in: ShellMenu.items(for: harness.runtime)
+                    )?.map(\.title) ?? []
                 }
 
                 ShellMenu.updateStatus = .idle
