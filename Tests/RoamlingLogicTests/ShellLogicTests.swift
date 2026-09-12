@@ -334,10 +334,13 @@ func shellLogicTests() -> [LogicTest] {
                 ]
                 try expect(actions == expected, "Advanced contains \(actions)")
 
+                // Called rather than passed: `localized` takes a comment as its
+                // second parameter, so a bare function reference is
+                // `(String, String) -> String` and the literals stop type-checking.
                 for title in [
                     "menu.openPetFolder", "menu.copyDiagnostics", "menu.reloadPets",
                     "menu.update.check", "menu.launchAtLogin", "menu.update.auto"
-                ].map(localized) {
+                ].map({ localized($0) }) {
                     try expect(
                         !top.contains { $0.title == title },
                         "\(title) leaked back onto the top level"
