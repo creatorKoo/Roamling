@@ -9,12 +9,10 @@
 //! measured 0.03% of a frame in `docs/windows.md` section 12.
 
 use crate::emptiness::LuminanceField;
-use crate::interest::{BasicInterestPositionPlanner, InterestDestination};
 use crate::geometry::{WorldPoint, WorldRect, WorldSize};
+use crate::interest::{BasicInterestPositionPlanner, InterestDestination};
 use crate::safe_zone::BasicSafeZonePlanner;
-use crate::world::{
-    DesktopWorldSnapshot, DisplaySnapshot, FocusSnapshot, LocationHint, SafeZone,
-};
+use crate::world::{DesktopWorldSnapshot, DisplaySnapshot, FocusSnapshot, LocationHint, SafeZone};
 
 #[derive(uniffi::Record)]
 pub struct FfiRect {
@@ -113,11 +111,17 @@ pub fn rest_destination(
     let mut world = snapshot(&displays);
     world.safe_zones = zones
         .into_iter()
-        .map(|zone| SafeZone::new((&zone.frame).into(), zone.score, zone.confidence, zone.reason))
+        .map(|zone| {
+            SafeZone::new(
+                (&zone.frame).into(),
+                zone.score,
+                zone.confidence,
+                zone.reason,
+            )
+        })
         .collect();
-    let pointer = pointer.and_then(|values| {
-        (values.len() == 2).then(|| WorldPoint::new(values[0], values[1]))
-    });
+    let pointer = pointer
+        .and_then(|values| (values.len() == 2).then(|| WorldPoint::new(values[0], values[1])));
     BasicSafeZonePlanner::destination(
         &world,
         WorldPoint::new(current_x, current_y),
@@ -232,7 +236,10 @@ impl FfiInterestScene {
                 field.samples.clone(),
             )
         });
-        (world, LocationHint::new(Some((&self.region).into()), self.hint_confidence))
+        (
+            world,
+            LocationHint::new(Some((&self.region).into()), self.hint_confidence),
+        )
     }
 }
 
@@ -337,6 +344,7 @@ use crate::activity::{
     UserContext,
 };
 use crate::attention::{AttentionModel, ReactionPolicy};
+use crate::source_state::{Milestone, SourceLevel, StateDeclaration};
 use std::sync::Mutex;
 
 /// Enums cross as indices rather than as uniffi enums: the Swift side already
@@ -375,6 +383,74 @@ const SOURCE_TYPES: [ActivitySourceType; 5] = [
     ActivitySourceType::Custom,
 ];
 
+const STATE_LEVELS: [SourceLevel; 4] = [
+    SourceLevel::Away,
+    SourceLevel::Beside,
+    SourceLevel::Active,
+    SourceLevel::Paused,
+];
+
+const STATE_MILESTONES: [Milestone; 2] = [Milestone::SittingStarted, Milestone::SittingEnded];
+
+#[derive(uniffi::Record)]
+pub struct FfiStateDeclaration {
+    pub source_id: String,
+    /// An index into `SOURCE_TYPES`.
+    pub source_type: u8,
+    /// An index into `STATE_LEVELS`.
+    pub level: u8,
+    pub focused: bool,
+    pub hint_confidence: Option<f64>,
+    pub hint_region: Option<FfiRect>,
+    /// An index into `STATE_MILESTONES`.
+    pub milestone: Option<u8>,
+}
+
+impl From<&FfiStateDeclaration> for StateDeclaration {
+    fn from(value: &FfiStateDeclaration) -> Self {
+        StateDeclaration {
+            source_id: value.source_id.clone(),
+            source_type: SOURCE_TYPES[value.source_type as usize],
+            level: STATE_LEVELS[value.level as usize],
+            focused: value.focused,
+            hint: value.hint_confidence.map(|confidence| {
+                LocationHint::new(value.hint_region.as_ref().map(WorldRect::from), confidence)
+            }),
+            milestone: value
+                .milestone
+                .map(|index| STATE_MILESTONES[index as usize]),
+        }
+    }
+}
+
+impl From<StateDeclaration> for FfiStateDeclaration {
+    fn from(value: StateDeclaration) -> Self {
+        Self {
+            source_id: value.source_id,
+            source_type: SOURCE_TYPES
+                .iter()
+                .position(|candidate| *candidate == value.source_type)
+                .unwrap_or(0) as u8,
+            level: STATE_LEVELS
+                .iter()
+                .position(|candidate| *candidate == value.level)
+                .unwrap_or(0) as u8,
+            focused: value.focused,
+            hint_confidence: value.hint.as_ref().map(|hint| hint.confidence),
+            hint_region: value
+                .hint
+                .and_then(|hint| hint.approximate_region)
+                .map(FfiRect::from),
+            milestone: value.milestone.map(|milestone| {
+                STATE_MILESTONES
+                    .iter()
+                    .position(|candidate| *candidate == milestone)
+                    .unwrap_or(0) as u8
+            }),
+        }
+    }
+}
+
 #[derive(uniffi::Record)]
 pub struct FfiActivityEvent {
     pub id: String,
@@ -408,38 +484,6 @@ impl From<&FfiActivityEvent> for CompanionEvent {
     }
 }
 
-/// The way back out, for the one source that is made here rather than
-/// delivered: `FocusActivity` builds events instead of consuming them.
-impl From<CompanionEvent> for FfiActivityEvent {
-    fn from(value: CompanionEvent) -> Self {
-        FfiActivityEvent {
-            id: value.id,
-            source_id: value.source_id,
-            source_type: SOURCE_TYPES
-                .iter()
-                .position(|candidate| *candidate == value.source_type)
-                .unwrap_or(0) as u8,
-            timestamp: value.timestamp,
-            kind: KINDS
-                .iter()
-                .position(|candidate| *candidate == value.kind)
-                .unwrap_or(0) as u8,
-            intensity: value.intensity,
-            hint_confidence: value.location_hint.as_ref().map(|hint| hint.confidence),
-            hint_region: value
-                .location_hint
-                .and_then(|hint| hint.approximate_region)
-                .map(FfiRect::from),
-            context: value.context.map(|context| {
-                CONTEXTS
-                    .iter()
-                    .position(|candidate| *candidate == context)
-                    .unwrap_or(4) as u8
-            }),
-        }
-    }
-}
-
 /// Which source the pet is watching. Held across calls, so Swift keeps a handle
 /// rather than shipping the state back and forth.
 #[derive(uniffi::Object)]
@@ -451,7 +495,9 @@ pub struct Attention {
 impl Attention {
     #[uniffi::constructor]
     pub fn new() -> std::sync::Arc<Self> {
-        std::sync::Arc::new(Self { model: Mutex::new(AttentionModel::default()) })
+        std::sync::Arc::new(Self {
+            model: Mutex::new(AttentionModel::default()),
+        })
     }
 
     /// The id of the event to act on, or nil. Swift looks the event back up in
@@ -470,7 +516,11 @@ impl Attention {
     }
 
     pub fn current_source_id(&self) -> Option<String> {
-        self.model.lock().unwrap().current_source_id().map(str::to_owned)
+        self.model
+            .lock()
+            .unwrap()
+            .current_source_id()
+            .map(str::to_owned)
     }
 }
 
@@ -484,7 +534,9 @@ pub struct Reactions {
 impl Reactions {
     #[uniffi::constructor]
     pub fn new() -> std::sync::Arc<Self> {
-        std::sync::Arc::new(Self { policy: Mutex::new(ReactionPolicy::default()) })
+        std::sync::Arc::new(Self {
+            policy: Mutex::new(ReactionPolicy::default()),
+        })
     }
 
     /// The reaction's index, or nil for none.
@@ -530,9 +582,7 @@ impl Reactions {
 use crate::behavior::{BehaviorController, BehaviorInput, BEHAVIOR_STATES};
 use crate::geometry::WorldVector;
 use crate::movement::{MovementConfiguration, MovementController};
-use crate::pointer::{
-    PointerInteractionConfiguration, PointerInteractionModel, PointerProximity,
-};
+use crate::pointer::{PointerInteractionConfiguration, PointerInteractionModel, PointerProximity};
 
 const PROXIMITIES: [PointerProximity; 5] = [
     PointerProximity::Far,
@@ -608,12 +658,18 @@ impl Movement {
 
     pub fn position(&self) -> FfiPoint {
         let point = self.inner.lock().unwrap().position();
-        FfiPoint { x: point.x, y: point.y }
+        FfiPoint {
+            x: point.x,
+            y: point.y,
+        }
     }
 
     pub fn velocity(&self) -> FfiPoint {
         let velocity = self.inner.lock().unwrap().velocity();
-        FfiPoint { x: velocity.dx, y: velocity.dy }
+        FfiPoint {
+            x: velocity.dx,
+            y: velocity.dy,
+        }
     }
 
     pub fn maximum_speed(&self) -> f64 {
@@ -635,7 +691,10 @@ impl Movement {
             .lock()
             .unwrap()
             .destination()
-            .map(|point| FfiPoint { x: point.x, y: point.y })
+            .map(|point| FfiPoint {
+                x: point.x,
+                y: point.y,
+            })
     }
 
     pub fn set_route(&self, waypoints: Vec<FfiPoint>) {
@@ -652,11 +711,17 @@ impl Movement {
     }
 
     pub fn teleport(&self, x: f64, y: f64, stop: bool) {
-        self.inner.lock().unwrap().teleport(WorldPoint::new(x, y), stop);
+        self.inner
+            .lock()
+            .unwrap()
+            .teleport(WorldPoint::new(x, y), stop);
     }
 
     pub fn set_velocity(&self, dx: f64, dy: f64) {
-        self.inner.lock().unwrap().set_velocity(WorldVector::new(dx, dy));
+        self.inner
+            .lock()
+            .unwrap()
+            .set_velocity(WorldVector::new(dx, dy));
     }
 
     pub fn update(&self, delta_time: f64) -> FfiMovementUpdate {
@@ -843,9 +908,7 @@ impl Behavior {
 
 // -------------------------------------------------------------- the director
 
-use crate::placement::{
-    PetSituation, PlacementDirector, PlacementIntent, PlacementTravelReason,
-};
+use crate::placement::{PetSituation, PlacementDirector, PlacementIntent, PlacementTravelReason};
 
 const TRAVEL_REASONS: [PlacementTravelReason; 6] = [
     PlacementTravelReason::NewActivity,
@@ -972,7 +1035,8 @@ impl Placement {
     }
 
     pub fn decide(&self, situation: FfiSituation) -> FfiPlacementIntent {
-        let mut world = DesktopWorldSnapshot::new(self.displays.lock().unwrap().clone(), Vec::new());
+        let mut world =
+            DesktopWorldSnapshot::new(self.displays.lock().unwrap().clone(), Vec::new());
         world.focus = situation.focus.as_ref().map(|focus| {
             FocusSnapshot::new(
                 focus.window_frame.as_ref().map(WorldRect::from),
@@ -988,9 +1052,9 @@ impl Placement {
             world,
             position: WorldPoint::new(situation.x, situation.y),
             object_size: WorldSize::new(situation.object_width, situation.object_height),
-            pointer_position: situation
-                .pointer
-                .and_then(|values| (values.len() == 2).then(|| WorldPoint::new(values[0], values[1]))),
+            pointer_position: situation.pointer.and_then(|values| {
+                (values.len() == 2).then(|| WorldPoint::new(values[0], values[1]))
+            }),
             pointer_clearance: situation.pointer_clearance,
             walking_speed: situation.walking_speed,
             is_pointer_owned: situation.is_pointer_owned,
@@ -1302,7 +1366,11 @@ impl ActivityWatch {
     }
 
     pub fn active_source_id(&self) -> Option<String> {
-        self.inner.lock().unwrap().active_source_id().map(str::to_owned)
+        self.inner
+            .lock()
+            .unwrap()
+            .active_source_id()
+            .map(str::to_owned)
     }
 
     pub fn hint(&self) -> Option<FfiHint> {
@@ -1317,17 +1385,25 @@ impl ActivityWatch {
     }
 
     pub fn sustained_reaction(&self) -> Option<u8> {
-        self.inner.lock().unwrap().sustained_reaction().map(|reaction| {
-            REACTIONS
-                .iter()
-                .position(|candidate| *candidate == reaction)
-                .unwrap_or(0) as u8
-        })
+        self.inner
+            .lock()
+            .unwrap()
+            .sustained_reaction()
+            .map(|reaction| {
+                REACTIONS
+                    .iter()
+                    .position(|candidate| *candidate == reaction)
+                    .unwrap_or(0) as u8
+            })
     }
 
     /// The event the director last acted on. Read by the switch-over test.
     pub fn last_dispatched_id(&self) -> Option<String> {
-        self.inner.lock().unwrap().last_dispatched_id().map(str::to_owned)
+        self.inner
+            .lock()
+            .unwrap()
+            .last_dispatched_id()
+            .map(str::to_owned)
     }
 
     /// Whether nothing the desk says may reach the pet now. Read by the
@@ -1339,7 +1415,11 @@ impl ActivityWatch {
     /// The event queued for the pet once it is free. Read by the switch-over
     /// test.
     pub fn pending_event_id(&self) -> Option<String> {
-        self.inner.lock().unwrap().pending_event_id().map(str::to_owned)
+        self.inner
+            .lock()
+            .unwrap()
+            .pending_event_id()
+            .map(str::to_owned)
     }
 }
 
@@ -1355,8 +1435,8 @@ pub fn activity_wants_window_hint(kind: u8) -> bool {
 
 use crate::focus_activity::FocusActivity;
 
-/// The desk itself as an activity source: which app is in front and how long
-/// since a keystroke, turned into the same events an agent emits.
+/// The desk itself as a state source: which app is in front and how long since
+/// a keystroke, translated into declarations for the activity director.
 ///
 /// The shell samples; every judgement about what that sample means is inside.
 #[derive(uniffi::Object)]
@@ -1368,42 +1448,26 @@ pub struct FocusWatch {
 impl FocusWatch {
     #[uniffi::constructor]
     pub fn new() -> std::sync::Arc<Self> {
-        std::sync::Arc::new(Self { inner: Mutex::new(FocusActivity::new()) })
+        std::sync::Arc::new(Self {
+            inner: Mutex::new(FocusActivity::new()),
+        })
     }
 
     /// `app_id` is nil when this app itself is in front, or when the platform
     /// cannot name what is -- which means "unknown", never "the user left".
-    /// `dispatched_event` and `arrival_pending` are
-    /// `PetLoop.last_dispatched_activity_id` and `PetLoop.has_arrival_reaction`:
-    /// between them they say whether its greeting has reached the pet and been
-    /// worn. `pet_resting` is `PetLoop.is_resting`: seat news is held back
-    /// while it is true, because the director would drop it. `agent_on_duty`
-    /// is `PetLoop.agent_on_duty`: a long stretch left while it is true ends
-    /// without a wave.
-    #[allow(clippy::too_many_arguments)]
     pub fn observe(
         &self,
         app_id: Option<String>,
         watched: bool,
         seconds_since_key: f64,
-        dispatched_event: Option<String>,
-        arrival_pending: bool,
-        pet_resting: bool,
-        agent_on_duty: bool,
         now: f64,
-    ) -> Vec<FfiActivityEvent> {
-        self.inner.lock().unwrap().observe(
-            app_id.as_deref(),
-            watched,
-            seconds_since_key,
-            dispatched_event.as_deref(),
-            arrival_pending,
-            pet_resting,
-            agent_on_duty,
-            now,
-        )
+    ) -> Vec<FfiStateDeclaration> {
+        self.inner
+            .lock()
+            .unwrap()
+            .observe(app_id.as_deref(), watched, seconds_since_key, now)
             .into_iter()
-            .map(FfiActivityEvent::from)
+            .map(FfiStateDeclaration::from)
             .collect()
     }
 
@@ -1553,7 +1617,10 @@ impl PetLoop {
     }
 
     pub fn set_displays(&self, displays: Vec<FfiDisplay>) {
-        self.inner.lock().unwrap().set_displays(displays_from(&displays));
+        self.inner
+            .lock()
+            .unwrap()
+            .set_displays(displays_from(&displays));
     }
 
     pub fn set_luminance(&self, field: Option<FfiLuminanceField>) {
@@ -1587,7 +1654,10 @@ impl PetLoop {
     }
 
     pub fn set_pointer_avoidance_enabled(&self, enabled: bool) {
-        self.inner.lock().unwrap().set_pointer_avoidance_enabled(enabled);
+        self.inner
+            .lock()
+            .unwrap()
+            .set_pointer_avoidance_enabled(enabled);
     }
 
     pub fn set_interactions_enabled(&self, enabled: bool) -> bool {
@@ -1602,7 +1672,10 @@ impl PetLoop {
     }
 
     pub fn set_position(&self, x: f64, y: f64) {
-        self.inner.lock().unwrap().set_position(WorldPoint::new(x, y));
+        self.inner
+            .lock()
+            .unwrap()
+            .set_position(WorldPoint::new(x, y));
     }
 
     pub fn clear_click_reaction(&self, clear_caught_transition: bool) {
@@ -1635,7 +1708,10 @@ impl PetLoop {
             WorldPoint::new(carried_x, carried_y),
             now,
         );
-        FfiPoint { x: point.x, y: point.y }
+        FfiPoint {
+            x: point.x,
+            y: point.y,
+        }
     }
 
     pub fn set_scale(&self, width: f64, height: f64) -> FfiPoint {
@@ -1644,7 +1720,10 @@ impl PetLoop {
             .lock()
             .unwrap()
             .set_scale(WorldSize::new(width, height));
-        FfiPoint { x: point.x, y: point.y }
+        FfiPoint {
+            x: point.x,
+            y: point.y,
+        }
     }
 
     /// Everything before the platform is asked anything. True when an
@@ -1742,9 +1821,29 @@ impl PetLoop {
             .collect()
     }
 
+    pub fn declare_state(
+        &self,
+        declaration: FfiStateDeclaration,
+        now: f64,
+    ) -> Vec<FfiLuminanceRequest> {
+        self.inner
+            .lock()
+            .unwrap()
+            .declare_state(StateDeclaration::from(&declaration), now)
+            .into_iter()
+            .map(|request| FfiLuminanceRequest {
+                region: request.region.into(),
+                interval: request.interval,
+            })
+            .collect()
+    }
+
     pub fn position(&self) -> FfiPoint {
         let point = self.inner.lock().unwrap().position();
-        FfiPoint { x: point.x, y: point.y }
+        FfiPoint {
+            x: point.x,
+            y: point.y,
+        }
     }
 
     pub fn state(&self) -> u8 {
@@ -1760,33 +1859,11 @@ impl PetLoop {
     }
 
     pub fn active_source_id(&self) -> Option<String> {
-        self.inner.lock().unwrap().active_source_id().map(str::to_owned)
-    }
-
-    /// Whether the pet still owes the reaction it was last told to wear. The
-    /// working-app source waits for this to go false before it says anything
-    /// after a greeting, so the hop is over before the next picture lands.
-    pub fn has_arrival_reaction(&self) -> bool {
-        self.inner.lock().unwrap().has_arrival_reaction()
-    }
-
-    /// The id of the event the pet last acted on, so the working-app source
-    /// can tell its own greeting reached the pet rather than merely went out.
-    pub fn last_dispatched_activity_id(&self) -> Option<String> {
-        self.inner.lock().unwrap().last_dispatched_activity_id().map(str::to_owned)
-    }
-
-    /// Whether the pet is sitting, looking for a place to sleep, or asleep --
-    /// the director's own test for dropping an event that does not wake it.
-    /// The working-app source holds its seat news back while this is true.
-    pub fn is_resting(&self) -> bool {
-        self.inner.lock().unwrap().is_resting()
-    }
-
-    /// Whether an agent is on duty -- the director's own test for keeping the
-    /// desk from the pet. The working-app source says no wave while it holds.
-    pub fn agent_on_duty(&self, now: f64) -> bool {
-        self.inner.lock().unwrap().agent_on_duty(now)
+        self.inner
+            .lock()
+            .unwrap()
+            .active_source_id()
+            .map(str::to_owned)
     }
 
     /// How many random numbers the pet has spent. Only the recorded-session

@@ -76,17 +76,17 @@ func focusActivityLogicTests() -> [LogicTest] {
                     "the hop is missing from the diagnostics the user can copy"
                 )
 
-                // Hands off. Nine seconds is still working, because a pause for
-                // thought is not the end of anything.
-                scene.platform.userIdle.keyboardDuration = 9.0
-                scene.run(seconds: 3)
+                // Hands off, and from here the pause grows with the clock the
+                // way a real keyboard's does. Nine seconds is still working,
+                // because a pause for thought is not the end of anything.
+                scene.platform.userIdle.lastKeyAt = scene.clock.read()
+                scene.run(seconds: 9)
                 try expect(
                     scene.runtime.behaviorState == .work,
                     "a nine-second pause ended the work picture"
                 )
 
-                scene.platform.userIdle.keyboardDuration = 11.0
-                scene.run(seconds: 2) { runtime, _ in runtime.behaviorState == .waitingForUser }
+                scene.run(seconds: 3) { runtime, _ in runtime.behaviorState == .waitingForUser }
                 try expect(
                     scene.runtime.behaviorState == .waitingForUser,
                     "ten quiet seconds did not ask; the pet is \(scene.runtime.behaviorState)"
@@ -120,6 +120,7 @@ func focusActivityLogicTests() -> [LogicTest] {
                 )
 
                 // And typing brings it back to work, without a second hop.
+                scene.platform.userIdle.lastKeyAt = nil
                 scene.platform.userIdle.keyboardDuration = 0.2
                 let back = scene.run(seconds: 30) { runtime, _ in
                     runtime.behaviorState == .work && !runtime.isPlacementTravelling

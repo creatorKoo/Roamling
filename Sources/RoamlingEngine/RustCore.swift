@@ -260,23 +260,35 @@ enum RustCore {
         }
     }
 
-    /// The way back: the working-app source builds events rather than
-    /// consuming them, and it is the only thing on this side that does.
-    static func companionEvent(_ event: FfiActivityEvent) -> CompanionEvent {
-        let region = event.hintRegion.map {
+    static func sourceStateDeclaration(
+        _ declaration: FfiStateDeclaration
+    ) -> SourceStateDeclaration {
+        let region = declaration.hintRegion.map {
             WorldRect(x: $0.x, y: $0.y, width: $0.width, height: $0.height)
         }
-        return CompanionEvent(
-            id: event.id,
-            sourceID: event.sourceId,
-            sourceType: sourceType(at: event.sourceType),
-            timestamp: event.timestamp,
-            kind: kindOrder[Int(event.kind)],
-            intensity: event.intensity,
-            context: event.context.map { contextOrder[Int($0)] },
-            locationHint: event.hintConfidence.map {
+        return SourceStateDeclaration(
+            sourceID: declaration.sourceId,
+            sourceType: sourceType(at: declaration.sourceType),
+            level: SourceStateLevel(rawValue: declaration.level) ?? .away,
+            focused: declaration.focused,
+            locationHint: declaration.hintConfidence.map {
                 LocationHint(approximateRegion: region, confidence: $0)
-            }
+            },
+            milestone: declaration.milestone.flatMap(SourceMilestone.init(rawValue:))
+        )
+    }
+
+    static func ffiStateDeclaration(
+        _ declaration: SourceStateDeclaration
+    ) -> FfiStateDeclaration {
+        FfiStateDeclaration(
+            sourceId: declaration.sourceID,
+            sourceType: sourceTypeIndex(declaration.sourceType),
+            level: declaration.level.rawValue,
+            focused: declaration.focused,
+            hintConfidence: declaration.locationHint?.confidence,
+            hintRegion: declaration.locationHint?.approximateRegion.map(rect),
+            milestone: declaration.milestone?.rawValue
         )
     }
 
@@ -955,7 +967,39 @@ public final class RustActivityDirector: ActivityDirecting {
     }
 }
 
-/// The desk as an activity source: which app is in front, and how long since a
+public enum SourceStateLevel: UInt8 {
+    case away
+    case beside
+    case active
+    case paused
+}
+
+public enum SourceMilestone: UInt8 {
+    case sittingStarted
+    case sittingEnded
+}
+
+public struct SourceStateDeclaration {
+    public let sourceID: String
+    public let sourceType: ActivitySourceType
+    public let level: SourceStateLevel
+    public let focused: Bool
+    public let locationHint: LocationHint?
+    public let milestone: SourceMilestone?
+
+    func located(at hint: LocationHint?) -> SourceStateDeclaration {
+        SourceStateDeclaration(
+            sourceID: sourceID,
+            sourceType: sourceType,
+            level: level,
+            focused: focused,
+            locationHint: hint ?? locationHint,
+            milestone: milestone
+        )
+    }
+}
+
+/// The desk as a state source: which app is in front, and how long since a
 /// keystroke.
 ///
 /// Nothing here decides anything. The shell samples the two facts, this hands
@@ -966,41 +1010,18 @@ public final class RustFocusActivity {
 
     public init() {}
 
-    /// `dispatchedEvent` and `arrivalPending` are the runtime's
-    /// `lastDispatchedActivityID` and `hasArrivalReaction`. Together they say
-    /// whether the greeting has reached the pet and been worn, which is what
-    /// the beat after the hop is timed from. The event and not the seat's
-    /// owner, because the pet is already sitting at this app's seat when the
-    /// first keystroke comes.
-    ///
-    /// `petResting` is the runtime's `isResting`. Seat news is held back while
-    /// it is true -- the director would drop it -- and sent the first sample
-    /// the pet is awake.
-    ///
-    /// `agentOnDuty` is the runtime's `agentOnDuty(at:)`. A long stretch left
-    /// while it is true ends without a wave: the director would keep one from
-    /// the pet but not forget it, and an agent finishing a moment later would
-    /// hand it over late.
     public func observe(
         application: String?,
         watched: Bool,
         secondsSinceKey: TimeInterval,
-        dispatchedEvent: String?,
-        arrivalPending: Bool,
-        petResting: Bool,
-        agentOnDuty: Bool,
         at timestamp: TimeInterval
-    ) -> [CompanionEvent] {
+    ) -> [SourceStateDeclaration] {
         handle.observe(
             appId: application,
             watched: watched,
             secondsSinceKey: secondsSinceKey,
-            dispatchedEvent: dispatchedEvent,
-            arrivalPending: arrivalPending,
-            petResting: petResting,
-            agentOnDuty: agentOnDuty,
             now: timestamp
-        ).map(RustCore.companionEvent)
+        ).map(RustCore.sourceStateDeclaration)
     }
 
     /// Most recent first, this app excluded.
@@ -1056,16 +1077,6 @@ public final class RustPetLoop {
     public var isPlacementTravelling: Bool { handle.isPlacementTravelling() }
     public var isWatchingWindow: Bool { handle.isWatchingWindow() }
     public var activeSourceID: String? { handle.activeSourceId() }
-    /// Whether the pet still owes the reaction it was last told to wear.
-    public var hasArrivalReaction: Bool { handle.hasArrivalReaction() }
-    /// The event the pet last acted on.
-    public var lastDispatchedActivityID: String? { handle.lastDispatchedActivityId() }
-    /// Sitting, looking for a place to sleep, or asleep -- the director's own
-    /// test for dropping an event that does not wake the pet.
-    public var isResting: Bool { handle.isResting() }
-    /// Whether an agent is on duty -- the director's own test for keeping the
-    /// desk from the pet.
-    public func agentOnDuty(at now: TimeInterval) -> Bool { handle.agentOnDuty(now: now) }
     public var randomDraws: UInt64 { handle.draws() }
 
     public func preferredTickInterval(at now: TimeInterval) -> TimeInterval {
@@ -1216,6 +1227,16 @@ public final class RustPetLoop {
     ) -> [(region: WorldRect, interval: TimeInterval)] {
         handle.handleActivityEvent(event: RustCore.activityEvent(event), now: now)
             .map { (RustCore.worldRect($0.region), $0.interval) }
+    }
+
+    public func declareState(
+        _ declaration: SourceStateDeclaration,
+        at now: TimeInterval
+    ) -> [(region: WorldRect, interval: TimeInterval)] {
+        handle.declareState(
+            declaration: RustCore.ffiStateDeclaration(declaration),
+            now: now
+        ).map { (RustCore.worldRect($0.region), $0.interval) }
     }
 
     private func interaction(_ output: FfiInteractionOutput) -> Interaction {

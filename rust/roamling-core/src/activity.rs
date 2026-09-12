@@ -30,13 +30,14 @@ pub enum CompanionEventKind {
     /// The user is at their own work and nothing calls for a reaction: an app
     /// they named as work came to the front. The pet walks over and sits.
     ///
-    /// Only the working-app source says this; agent normalization never does.
-    /// No other kind walks the pet over without dressing it in something, and
-    /// this one is re-sent every minute to keep the seat, so what it wears has
-    /// to be the one reaction whose replay cannot be seen -- `Calm`.
+    /// **Nothing produces this any more.** The working app was the only source
+    /// that ever said it, and since the state layer landed it declares
+    /// `SourceLevel::Beside` instead (`source_state.rs`). Kept because kinds
+    /// cross the FFI as indices and every differential fixture names the
+    /// others by position, so removing it would mean regenerating all ten.
     ///
-    /// Last in the list because kinds cross the FFI as indices, and every
-    /// fixture recorded before it existed names the others by position.
+    /// Last in the list for the same reason: the fixtures recorded before it
+    /// existed still name the earlier kinds by their old positions.
     Present,
 }
 

@@ -320,10 +320,19 @@ final class FakeUserIdleProvider: UserIdleProviding {
     /// Since the last keystroke. Held apart from `duration` so a test can put
     /// the user's hands on the keyboard without also waking the idle rules.
     var keyboardDuration: TimeInterval = 3_600
+    /// When the hands came off, in clock time. A frozen `keyboardDuration`
+    /// answers "the last key was N seconds ago" at every sample, which walks
+    /// that key forward with the clock: the pause never grows and the machine
+    /// contradicts what it said a moment earlier. Set this instead whenever
+    /// the test is about how long the keyboard has been still.
+    var lastKeyAt: TimeInterval?
 
     func idleDuration(at timestamp: TimeInterval) -> TimeInterval { duration }
 
-    func keyboardIdleDuration(at timestamp: TimeInterval) -> TimeInterval { keyboardDuration }
+    func keyboardIdleDuration(at timestamp: TimeInterval) -> TimeInterval {
+        guard let lastKeyAt else { return keyboardDuration }
+        return max(timestamp - lastKeyAt, 0)
+    }
 }
 
 @MainActor

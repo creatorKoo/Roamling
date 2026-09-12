@@ -69,14 +69,16 @@ module만 추출할 수 있다. 선행 Rust/C ABI는 만들지 않는다.
 
 **agent가 아닌 activity source도 하나 있다.** 사용자가 지정한 앱에서 일할 때 반응하는
 `focus_activity.rs`(Rust core)다. 이 module에는 없는데, 훅도 transport도 payload도 없기
-때문이다 — 셸이 0.5초마다 입력 일곱을 넘기면 core가 상태 기계를 돌려 같은 `CompanionEvent`를
-만든다. 기계에서 읽는 것은 앞에 있는 앱(`app`)과 마지막 키 입력 후 초(`seconds_since_key`) 둘이고,
-`watched`는 사용자 설정이며, 나머지 넷은 펫에게서 읽는다 — 마지막으로 처리한 이벤트
-(`dispatched_event`), 아직 갚지 못한 도착 반응이 있는지(`arrival_pending`), 쉬는 중인지(`pet_resting`),
-agent가 자리를 지키는 중인지(`agent_on_duty`). source가 늘어도 **agent 전용 어휘는 생기지
-않았다.** `CompanionEventKind`에 늘어난 것은 `present` 하나이고, 그것도 "사용자가 자기 일 앞에
-있고 반응할 것은 없다"는 domain 뜻이라 어느 source가 내도 된다(이유는 아래 Domain events 절).
-흐름은 `docs/behavior-flow.md` §5b.
+때문이다 — 셸이 0.5초마다 입력 셋(앞에 있는 앱 `app`, 그 앱이 지정 앱인지 `watched`, 마지막 키
+입력 후 초 `seconds_since_key`)과 `now`를 넘기면 core가 상태 기계를 돌려
+`Vec<StateDeclaration>`을 돌려준다. 셸은 거기에 창 위치만 얹어 `declare_state`를 부른다.
+
+**이쪽은 사건이 아니라 상태다 (2026-09-12).** agent는 "무슨 일이 있었다"를 말하고 지정 앱은
+"지금 이렇다"를 매 샘플 다시 말한다. 반응은 선언이 **바뀔 때** 정해지고, 갱신이 2초 끊기면
+자동으로 만료한다. 그래서 재발신도, 펫의 상태를 셸이 되먹이는 입력도 없다 — 그 넷
+(`dispatched_event` · `arrival_pending` · `pet_resting` · `agent_on_duty`)은 전부 director 안의
+사실이었다. 두 종류의 갈림과 낱말은 `docs/state-sources.md`, 흐름은
+`docs/behavior-flow.md` §5b.
 
 ### RoamlingEngine
 
@@ -128,24 +130,28 @@ Claude/Codex payload를 일반 event로 정규화한다. `ActivitySource`는 eve
 내놓고 product-specific detail은 adapter 안에서 끝난다.
 
 **"agent events"가 아니라 "domain events"라는 것이 값을 하는 자리가 여기다.** 지정 앱
-source는 훅도 세션도 도구 호출도 없지만 `activityStarted` · `highIntensity` ·
-`attentionRequired` · `achievement` · `activityEnded`를 그대로 쓴다. **늘어난 것은 `present`
-하나다** — "사용자가 자기 일 앞에 있고, 반응할 것은 없다". 걸어와서 아무것도 안 입고 앉는 kind가
-없었고, 60초마다 재발신되므로 재생해도 안 보이는 `calm`을 입어야 했다. attention(자리를 잡는 kind
-중 최하위 점수) · reaction(반응 없음) · director(`calm`으로 자리 잡기)에 한 갈래씩 붙었고 placement ·
-애니메이션 해석은 그대로다. agent 정규화는 이 kind를 내지 않지만 agent 전용 어휘도 아니다.
-새 source를 붙이는 비용이 이 문서가 주장하는 만큼이라는 첫 번째 실측이다. kind는 FFI를
-인덱스로 건너므로 새 kind는 표의 **끝에만** 붙는다.
+source는 훅도 세션도 도구 호출도 없다. 처음 붙일 때(2026-09-11)는 사건형으로 붙여서
+`activityStarted` · `highIntensity` · `attentionRequired` · `achievement` · `activityEnded`를
+그대로 썼고, 늘어난 kind는 `present` 하나였다 — 걸어와서 아무것도 안 입고 앉는 kind가 없었기
+때문이다. **새 source를 붙이는 비용이 이 문서가 주장하는 만큼이라는 첫 번째 실측이었다.**
+
+**그리고 그 실측이 두 번째 답을 줬다 (2026-09-12).** 어휘는 맞았지만 **모양**이 틀렸다. 사건형
+파이프라인(attention 점수 · dwell · 쿨다운 · 도착 반응 1회)에 상태를 실어 나르려니 source에
+우회 코드가 열 개 붙었다. 그래서 director에 상태 층을 하나 더 뒀다 — `source_state.rs`. 사건형
+경로는 그대로고, 지정 앱·영상·게임처럼 "지금 이렇다"를 말하는 source는 그쪽으로 간다.
+`CompanionEventKind::present`는 이제 아무도 만들지 않지만 지우지 않았다(kind가 FFI를 인덱스로
+건너서 differential 픽스처 10개가 위치로 이름을 부른다). 새 kind는 여전히 표의 **끝에만** 붙는다.
 
 **`sourceType`을 읽는 규칙이 하나 생겼다 (2026-09-11).** Swift에만 있던 필드였고 Rust로 넘어올 때
-버려졌다 — 읽는 규칙이 없었기 때문이다. 이제 director가 **agent가 자리를 지키는 동안 `system`
-이벤트를 attention 후보에서 뺀다**(`ActivityDirector::candidates`). 점수로는 표현할 수 없었다: 지정
-앱의 첫 키 입력 점프는 방금 시작된 agent 턴과 이력 여유 안에서 비겨 밀렸고, 갸웃
-(`attentionRequired`, 긴급)은 일하는 agent 자리를 곧바로 뺏었다. attention 자체(점수 · 이력 여유 ·
-dwell · 쿨다운)는 그대로이고 `system` 이벤트가 없으면 후보 목록도 예전과 같다 — 그래서 differential
-픽스처와 녹화 세션이 그대로 통과한다. Rust `CompanionEvent::new`의 기본값이 `Agent`인 이유도 같다
-(훅에서 온 기존 호출부가 전부 agent다). `custom(String)`의 문자열은 규칙이 읽지 않으므로 FFI
-경계에서 버린다. 흐름은 `docs/behavior-flow.md` §5b.
+버려졌다 — 읽는 규칙이 없었기 때문이다. 이제 director가 **agent가 자리를 지키는 동안 다른 source를
+막는다**(술어는 `ActivityDirector::agent_on_duty`). 점수로는 표현할 수 없었다: 지정 앱의 첫 키
+입력 점프는 방금 시작된 agent 턴과 이력 여유 안에서 비겨 밀렸고, 갸웃(긴급)은 일하는 agent 자리를
+곧바로 뺏었다. attention 자체(점수 · 이력 여유 · dwell · 쿨다운)는 그대로다 — 상태형 source는
+attention을 아예 거치지 않고, 사건형 후보 목록에서 `system`을 빼는 갈래(`candidates`)는 남아
+있지만 지금 `system` 이벤트를 만드는 것은 아무것도 없다. 그래서 differential 픽스처와 녹화 세션이
+그대로 통과한다. Rust `CompanionEvent::new`의 기본값이 `Agent`인 이유도 같다(훅에서 온 기존
+호출부가 전부 agent다). `custom(String)`의 문자열은 규칙이 읽지 않으므로 FFI 경계에서 버린다.
+흐름은 `docs/behavior-flow.md` §5b.
 
 MVP 1의 Claude transport는 `127.0.0.1:47831`에만 bind하고 임의 생성 token을
 `X-Roamling-Token` header로 확인한다. user가 menu에서 설치를 선택하기 전에는 Claude

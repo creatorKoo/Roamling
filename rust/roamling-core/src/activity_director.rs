@@ -22,6 +22,9 @@ use crate::activity::{
 };
 use crate::attention::{AttentionModel, ReactionPolicy};
 use crate::geometry::WorldRect;
+use crate::source_state::{
+    reaction_for, sustained_reaction, SourceLevel, SourceStates, StateDeclaration, Transition,
+};
 use crate::world::LocationHint;
 
 /// One thing the caller must do, in the order the Swift original did it.
@@ -30,14 +33,22 @@ pub enum ActivityEffect {
     /// Wake the pet, because what arrived is worth getting up for.
     CancelRest,
     /// The trip is off but the window is still the one being watched.
-    SettleInPlace { source_id: String },
+    SettleInPlace {
+        source_id: String,
+    },
     /// `movement.cancelRoute(stop: false)`.
     CancelRoute,
-    SetNextWanderAt { timestamp: f64 },
+    SetNextWanderAt {
+        timestamp: f64,
+    },
     /// `behavior.handle(.reaction(_))`.
-    ApplyReaction { reaction: CompanionReaction },
+    ApplyReaction {
+        reaction: CompanionReaction,
+    },
     /// Ask the platform for a fresh capture near the window being watched.
-    RequestLuminance { region: WorldRect },
+    RequestLuminance {
+        region: WorldRect,
+    },
 }
 
 /// Routine tool completions are useful as adapter-level evidence but do not
@@ -61,6 +72,10 @@ pub fn wants_window_hint(kind: CompanionEventKind) -> bool {
 pub struct ActivityDirector {
     attention: AttentionModel,
     reactions: ReactionPolicy,
+    states: SourceStates,
+    /// The latest state change for each source that has not reached the pet.
+    /// Unlike event `pending`, these do not compete in attention.
+    state_transitions: BTreeMap<String, Transition>,
     /// Keyed by source and iterated in key order. It was a dictionary, and
     /// Swift randomizes dictionary order per process, so on a tie between two
     /// agents the pet watched whichever one the launch happened to pick.
@@ -114,6 +129,45 @@ impl ActivityDirector {
     /// lasting condition qualifies; the caller checks `is_ongoing`.
     pub fn sustained_reaction(&self) -> Option<CompanionReaction> {
         self.active_reaction
+    }
+
+    /// Declares what a state-shaped source is doing now. Repeated declarations
+    /// refresh the source without replaying its transition reaction.
+    pub fn declare_state(
+        &mut self,
+        declaration: StateDeclaration,
+        is_resting: bool,
+        now: f64,
+    ) -> Vec<ActivityEffect> {
+        if let Some(mut transition) = self.states.declare(declaration, now) {
+            // A first-typing greeting stays owed while an agent or rest keeps
+            // it from the pet, even if the source moves on to Paused before
+            // the seat is available. Away deliberately replaces it: there is
+            // no late greeting after the sitting itself has ended.
+            if transition.to != SourceLevel::Away
+                && transition.milestone.is_none()
+                && self
+                    .state_transitions
+                    .get(&transition.source_id)
+                    .is_some_and(|pending| {
+                        pending.milestone == Some(crate::source_state::Milestone::SittingStarted)
+                    })
+            {
+                transition.milestone = Some(crate::source_state::Milestone::SittingStarted);
+            }
+            self.state_transitions
+                .insert(transition.source_id.clone(), transition);
+        }
+        self.apply_state_transitions(is_resting, now)
+    }
+
+    /// Expires state-shaped sources whose declarations stopped arriving.
+    pub fn expire_states(&mut self, is_resting: bool, now: f64) -> Vec<ActivityEffect> {
+        for transition in self.states.expire(now) {
+            self.state_transitions
+                .insert(transition.source_id.clone(), transition);
+        }
+        self.apply_state_transitions(is_resting, now)
     }
 
     /// The event this arrived as, already located: the caller resolves the
@@ -174,7 +228,14 @@ impl ActivityDirector {
             self.pending = Some(selected);
             return effects;
         }
-        self.dispatch(selected, is_held_by_pointer, is_resting, random_unit, now, &mut effects);
+        self.dispatch(
+            selected,
+            is_held_by_pointer,
+            is_resting,
+            random_unit,
+            now,
+            &mut effects,
+        );
         effects
     }
 
@@ -206,7 +267,9 @@ impl ActivityDirector {
         if !is_idle {
             return effects;
         }
-        let Some(event) = self.pending.take() else { return effects };
+        let Some(event) = self.pending.take() else {
+            return effects;
+        };
         // Queued before an agent came back on duty: the agent finished, the
         // desk's word was next, and the agent started again while the pet was
         // still busy. Nothing re-reads the queue against `candidates`, so the
@@ -216,17 +279,20 @@ impl ActivityDirector {
         if event.source_type == ActivitySourceType::System && self.agent_on_duty(now) {
             return effects;
         }
-        self.dispatch(event, is_held_by_pointer, is_resting, random_unit, now, &mut effects);
+        self.dispatch(
+            event,
+            is_held_by_pointer,
+            is_resting,
+            random_unit,
+            now,
+            &mut effects,
+        );
         effects
     }
 
     /// The reaction an event asked for is owed to the user until the pet
     /// settles, whether it walked to a new seat or kept the one it had.
-    pub fn deliver_arrival_reaction(
-        &mut self,
-        is_resting: bool,
-        now: f64,
-    ) -> Vec<ActivityEffect> {
+    pub fn deliver_arrival_reaction(&mut self, is_resting: bool, now: f64) -> Vec<ActivityEffect> {
         let mut effects = Vec::new();
         let reaction = self
             .arrival_reaction
@@ -241,12 +307,111 @@ impl ActivityDirector {
     /// seat. A moment is delivered once; only `is_ongoing` reactions repeat.
     pub fn sustain_on_seat(&mut self, is_resting: bool, now: f64) -> Vec<ActivityEffect> {
         let mut effects = Vec::new();
-        let Some(sustained) = self.active_reaction else { return effects };
+        let Some(sustained) = self.active_reaction else {
+            return effects;
+        };
         if !sustained.is_ongoing() {
             return effects;
         }
         self.apply_reaction(sustained, is_resting, now, &mut effects);
         effects
+    }
+
+    fn apply_state_transitions(&mut self, is_resting: bool, now: f64) -> Vec<ActivityEffect> {
+        let mut effects = Vec::new();
+
+        if self.agent_on_duty(now) {
+            // A sitting that ended beside an agent was never the pet's. Do not
+            // leave its goodbye waiting to appear after the agent finishes.
+            self.state_transitions
+                .retain(|_, transition| transition.to != SourceLevel::Away);
+            return effects;
+        }
+
+        if is_resting {
+            let goodbye_is_waiting = self.state_transitions.values().any(|transition| {
+                reaction_for(transition.source_type, transition)
+                    == Some(CompanionReaction::SmallCelebrate)
+            });
+            if goodbye_is_waiting {
+                effects.push(ActivityEffect::CancelRest);
+            }
+            return effects;
+        }
+
+        let ended: Vec<String> = self
+            .state_transitions
+            .iter()
+            .filter(|(_, transition)| transition.to == SourceLevel::Away)
+            .map(|(source_id, _)| source_id.clone())
+            .collect();
+        for source_id in ended {
+            let transition = self
+                .state_transitions
+                .remove(&source_id)
+                .expect("the transition key came from this table");
+            let reaction = reaction_for(transition.source_type, &transition);
+            let owned_seat = self.active_source_id.as_deref() == Some(source_id.as_str());
+            if let Some(reaction) = reaction {
+                // The goodbye is worn where the pet is, before the source lets
+                // go of its seat. It also applies after a prior quiet release.
+                self.apply_reaction(reaction, false, now, &mut effects);
+            }
+            if owned_seat {
+                self.clear_active(now, &mut effects);
+                if reaction.is_none() {
+                    // Releasing a quiet or paused seat must also leave the
+                    // ongoing picture; this is seat mechanics, not a state
+                    // transition reaction.
+                    self.apply_reaction(CompanionReaction::Calm, false, now, &mut effects);
+                }
+            }
+        }
+
+        let Some(winner) = self.states.winner(now).cloned() else {
+            return effects;
+        };
+        let transition = self.state_transitions.remove(&winner.source_id);
+        if self.active_source_id.as_deref() != Some(winner.source_id.as_str())
+            || transition.is_some()
+        {
+            self.begin_watching_state(&winner, transition.as_ref(), now, &mut effects);
+        } else {
+            // Focus and the approximate window can move without changing the
+            // source level. They are current facts, not transition reactions.
+            if winner.hint.is_some() {
+                self.hint = winner.hint;
+            }
+            self.heard_at = now;
+            self.active_reaction = sustained_reaction(winner.source_type, winner.level);
+        }
+        effects
+    }
+
+    fn begin_watching_state(
+        &mut self,
+        declaration: &StateDeclaration,
+        transition: Option<&Transition>,
+        now: f64,
+        effects: &mut Vec<ActivityEffect>,
+    ) {
+        let sustained = sustained_reaction(declaration.source_type, declaration.level);
+        let arrival = transition
+            .and_then(|transition| reaction_for(declaration.source_type, transition))
+            .or(sustained)
+            // A quiet seat has no authored reaction. `Calm` is the existing
+            // mechanical landing that ends the walk in idle.
+            .or(Some(CompanionReaction::Calm));
+        self.begin_watching_source(
+            &declaration.source_id,
+            declaration.source_type,
+            declaration.hint.as_ref(),
+            sustained,
+            arrival,
+            false,
+            now,
+            effects,
+        );
     }
 
     fn dispatch(
@@ -371,7 +536,8 @@ impl ActivityDirector {
                     effects,
                 );
             }
-            CompanionEventKind::ActivityEnded | CompanionEventKind::Calm
+            CompanionEventKind::ActivityEnded
+            | CompanionEventKind::Calm
             | CompanionEventKind::Idle => {
                 if event.kind == CompanionEventKind::Calm
                     && (self.active_source_id.is_none()
@@ -400,28 +566,53 @@ impl ActivityDirector {
         now: f64,
         effects: &mut Vec<ActivityEffect>,
     ) {
-        if let Some(hint) = &event.location_hint {
+        self.begin_watching_source(
+            &event.source_id,
+            event.source_type,
+            event.location_hint.as_ref(),
+            Some(sustained),
+            Some(reaction),
+            is_resting,
+            now,
+            effects,
+        );
+    }
+
+    fn begin_watching_source(
+        &mut self,
+        source_id: &str,
+        source_type: ActivitySourceType,
+        location_hint: Option<&LocationHint>,
+        sustained: Option<CompanionReaction>,
+        reaction: Option<CompanionReaction>,
+        is_resting: bool,
+        now: f64,
+        effects: &mut Vec<ActivityEffect>,
+    ) {
+        if let Some(hint) = location_hint {
             self.hint = Some(hint.clone());
             if let Some(region) = hint.approximate_region {
                 effects.push(ActivityEffect::RequestLuminance { region });
             }
-        } else if self.active_source_id.as_deref() != Some(event.source_id.as_str()) {
+        } else if self.active_source_id.as_deref() != Some(source_id) {
             // A different agent arriving without a window to point at: the last
             // one's window is not evidence about this one, and leaving it in
             // place would walk the pet to the wrong screen.
             self.hint = None;
         }
-        self.active_source_id = Some(event.source_id.clone());
-        self.active_source_type = Some(event.source_type);
+        self.active_source_id = Some(source_id.to_string());
+        self.active_source_type = Some(source_type);
         self.heard_at = now;
-        self.active_reaction = Some(sustained);
+        self.active_reaction = sustained;
         if self.hint.is_none() {
             // Nothing to walk to, so the reaction plays where the pet is.
             self.arrival_reaction = None;
-            self.apply_reaction(reaction, is_resting, now, effects);
+            if let Some(reaction) = reaction {
+                self.apply_reaction(reaction, is_resting, now, effects);
+            }
             return;
         }
-        self.arrival_reaction = Some(reaction);
+        self.arrival_reaction = reaction;
     }
 
     fn finish_transient(&mut self, event: &CompanionEvent, now: f64) {
@@ -497,7 +688,9 @@ impl ActivityDirector {
         self.arrival_reaction = None;
         self.hint = None;
         effects.push(ActivityEffect::CancelRoute);
-        effects.push(ActivityEffect::SetNextWanderAt { timestamp: now + 2.0 });
+        effects.push(ActivityEffect::SetNextWanderAt {
+            timestamp: now + 2.0,
+        });
     }
 
     /// Reactions never wake the creature by themselves. Callers that mean to
@@ -549,8 +742,15 @@ mod tests {
         window: WorldRect,
         confidence: f64,
     ) -> CompanionEvent {
-        CompanionEvent::new(id, source, at, kind, intensity, Some(LocationHint::new(Some(window), confidence)))
-            .with_context(Some(UserContext::Working))
+        CompanionEvent::new(
+            id,
+            source,
+            at,
+            kind,
+            intensity,
+            Some(LocationHint::new(Some(window), confidence)),
+        )
+        .with_context(Some(UserContext::Working))
     }
 
     fn reactions(effects: &[ActivityEffect]) -> Vec<CompanionReaction> {
@@ -575,13 +775,24 @@ mod tests {
     fn present_walks_the_pet_over_and_sits_it_down_wearing_nothing() {
         let mut director = ActivityDirector::default();
         let effects = director.handle_event(
-            event("f1", HWP, CompanionEventKind::Present, 0.5, 100.0, editor(), 0.8),
+            event(
+                "f1",
+                HWP,
+                CompanionEventKind::Present,
+                0.5,
+                100.0,
+                editor(),
+                0.8,
+            ),
             false,
             false,
             0.5,
             100.0,
         );
-        assert!(reactions(&effects).is_empty(), "reacted before walking: {effects:?}");
+        assert!(
+            reactions(&effects).is_empty(),
+            "reacted before walking: {effects:?}"
+        );
         assert!(director.is_watching_window());
         assert!(director.has_arrival_reaction());
         assert_eq!(director.last_dispatched_id(), Some("f1"));
@@ -593,13 +804,24 @@ mod tests {
         assert!(director.sustain_on_seat(false, 103.0).is_empty());
 
         let effects = director.handle_event(
-            event("f2", HWP, CompanionEventKind::Present, 0.5, 160.0, editor(), 0.8),
+            event(
+                "f2",
+                HWP,
+                CompanionEventKind::Present,
+                0.5,
+                160.0,
+                editor(),
+                0.8,
+            ),
             false,
             false,
             0.5,
             160.0,
         );
-        assert!(reactions(&effects).is_empty(), "the re-send reacted: {effects:?}");
+        assert!(
+            reactions(&effects).is_empty(),
+            "the re-send reacted: {effects:?}"
+        );
         assert_eq!(director.last_dispatched_id(), Some("f2"));
         assert_eq!(director.active_source_id(), Some(HWP));
         let again = director.deliver_arrival_reaction(false, 160.1);
@@ -634,14 +856,29 @@ mod tests {
                 now += 0.5;
                 sent += 1;
                 let effects = director.handle_event(
-                    event(&format!("f{sent}"), HWP, CompanionEventKind::Present, 1.0, now, editor(), 1.0),
+                    event(
+                        &format!("f{sent}"),
+                        HWP,
+                        CompanionEventKind::Present,
+                        1.0,
+                        now,
+                        editor(),
+                        1.0,
+                    ),
                     false,
                     false,
                     0.5,
                     now,
                 );
-                assert!(effects.is_empty(), "{agent_kind:?} lost the pet at {now}: {effects:?}");
-                assert_eq!(director.active_source_id(), Some(AGENT), "{agent_kind:?} at {now}");
+                assert!(
+                    effects.is_empty(),
+                    "{agent_kind:?} lost the pet at {now}: {effects:?}"
+                );
+                assert_eq!(
+                    director.active_source_id(),
+                    Some(AGENT),
+                    "{agent_kind:?} at {now}"
+                );
                 assert_eq!(director.last_dispatched_id(), Some("a1"));
             }
         }
@@ -653,7 +890,15 @@ mod tests {
     fn present_lets_a_sleeping_pet_sleep() {
         let mut director = ActivityDirector::default();
         let effects = director.handle_event(
-            event("f1", HWP, CompanionEventKind::Present, 0.5, 100.0, editor(), 0.8),
+            event(
+                "f1",
+                HWP,
+                CompanionEventKind::Present,
+                0.5,
+                100.0,
+                editor(),
+                0.8,
+            ),
             false,
             true,
             0.5,
@@ -673,11 +918,168 @@ mod tests {
         event(id, HWP, kind, 1.0, at, editor(), 1.0).with_source_type(ActivitySourceType::System)
     }
 
+    fn state(
+        level: SourceLevel,
+        milestone: Option<crate::source_state::Milestone>,
+    ) -> StateDeclaration {
+        StateDeclaration {
+            source_id: HWP.into(),
+            source_type: ActivitySourceType::System,
+            level,
+            focused: true,
+            hint: Some(LocationHint::new(Some(editor()), 0.8)),
+            milestone,
+        }
+    }
+
+    #[test]
+    fn state_transitions_separate_arrival_from_what_the_pet_keeps_wearing() {
+        use crate::source_state::Milestone;
+
+        let mut director = ActivityDirector::default();
+        let beside = director.declare_state(state(SourceLevel::Beside, None), false, 100.0);
+        assert!(reactions(&beside).is_empty());
+        assert_eq!(director.active_source_id(), Some(HWP));
+        assert!(director.has_arrival_reaction());
+        assert_eq!(
+            reactions(&director.deliver_arrival_reaction(false, 101.0)),
+            [CompanionReaction::Calm]
+        );
+        assert_eq!(director.sustained_reaction(), None);
+
+        let active = director.declare_state(
+            state(SourceLevel::Active, Some(Milestone::SittingStarted)),
+            false,
+            102.0,
+        );
+        assert!(reactions(&active).is_empty());
+        assert_eq!(
+            reactions(&director.deliver_arrival_reaction(false, 102.1)),
+            [CompanionReaction::Spark]
+        );
+        assert_eq!(director.sustained_reaction(), Some(CompanionReaction::Work));
+        assert_eq!(
+            reactions(&director.sustain_on_seat(false, 103.0)),
+            [CompanionReaction::Work]
+        );
+    }
+
+    #[test]
+    fn a_state_transition_waits_while_the_pet_rests() {
+        let mut director = ActivityDirector::default();
+        assert!(director
+            .declare_state(state(SourceLevel::Beside, None), true, 100.0)
+            .is_empty());
+        assert_eq!(director.active_source_id(), None);
+
+        director.declare_state(state(SourceLevel::Beside, None), false, 100.5);
+        assert_eq!(director.active_source_id(), Some(HWP));
+        assert!(director.has_arrival_reaction());
+    }
+
+    #[test]
+    fn a_sleeping_pet_wakes_before_a_state_goodbye_is_applied() {
+        use crate::source_state::Milestone;
+
+        let mut director = ActivityDirector::default();
+        director.declare_state(state(SourceLevel::Beside, None), false, 100.0);
+        director.deliver_arrival_reaction(false, 100.1);
+
+        let waiting = director.declare_state(
+            state(SourceLevel::Away, Some(Milestone::SittingEnded)),
+            true,
+            101.0,
+        );
+        assert_eq!(waiting, [ActivityEffect::CancelRest]);
+        assert_eq!(director.active_source_id(), Some(HWP));
+
+        let goodbye = director.declare_state(state(SourceLevel::Away, None), false, 101.5);
+        assert_eq!(reactions(&goodbye), [CompanionReaction::SmallCelebrate]);
+        assert_eq!(director.active_source_id(), None);
+    }
+
+    #[test]
+    fn an_agent_defers_a_state_greeting_but_discards_its_goodbye() {
+        use crate::source_state::Milestone;
+
+        let mut director = agent_at_work(100.0);
+        director.declare_state(
+            state(SourceLevel::Active, Some(Milestone::SittingStarted)),
+            false,
+            110.0,
+        );
+        director.declare_state(state(SourceLevel::Paused, None), false, 111.0);
+        assert_eq!(director.active_source_id(), Some(AGENT));
+
+        director.handle_event(
+            event(
+                "a2",
+                AGENT,
+                CompanionEventKind::Achievement,
+                0.55,
+                112.0,
+                terminal(),
+                0.8,
+            ),
+            false,
+            false,
+            0.5,
+            112.0,
+        );
+        director.declare_state(state(SourceLevel::Paused, None), false, 112.5);
+        assert_eq!(director.active_source_id(), Some(HWP));
+        assert_eq!(
+            reactions(&director.deliver_arrival_reaction(false, 113.0)),
+            [CompanionReaction::Spark]
+        );
+        assert_eq!(director.sustained_reaction(), Some(CompanionReaction::Paw));
+
+        let mut director = agent_at_work(200.0);
+        director.declare_state(
+            state(SourceLevel::Active, Some(Milestone::SittingStarted)),
+            false,
+            210.0,
+        );
+        let ended = director.declare_state(
+            state(SourceLevel::Away, Some(Milestone::SittingEnded)),
+            false,
+            211.0,
+        );
+        assert!(ended.is_empty());
+        director.handle_event(
+            event(
+                "a2",
+                AGENT,
+                CompanionEventKind::Achievement,
+                0.55,
+                212.0,
+                terminal(),
+                0.8,
+            ),
+            false,
+            false,
+            0.5,
+            212.0,
+        );
+        assert!(director
+            .declare_state(state(SourceLevel::Away, None), false, 212.5)
+            .is_empty());
+        assert_eq!(director.active_source_id(), None);
+    }
+
     /// An agent at work beside its own window, the pet already dressed for it.
     fn agent_at_work(at: f64) -> ActivityDirector {
         let mut director = ActivityDirector::default();
         director.handle_event(
-            event("a1", AGENT, CompanionEventKind::HighIntensity, 0.8, at, terminal(), 0.8),
+            event(
+                "a1",
+                AGENT,
+                CompanionEventKind::HighIntensity,
+                0.8,
+                at,
+                terminal(),
+                0.8,
+            ),
             false,
             false,
             0.5,
@@ -701,10 +1103,22 @@ mod tests {
             while now < 160.0 {
                 now += 0.5;
                 sent += 1;
-                let effects =
-                    director.handle_event(desk(&format!("f{sent}"), kind, now), false, false, 0.5, now);
-                assert!(effects.is_empty(), "{kind:?} took the pet at {now}: {effects:?}");
-                assert_eq!(director.active_source_id(), Some(AGENT), "{kind:?} at {now}");
+                let effects = director.handle_event(
+                    desk(&format!("f{sent}"), kind, now),
+                    false,
+                    false,
+                    0.5,
+                    now,
+                );
+                assert!(
+                    effects.is_empty(),
+                    "{kind:?} took the pet at {now}: {effects:?}"
+                );
+                assert_eq!(
+                    director.active_source_id(),
+                    Some(AGENT),
+                    "{kind:?} at {now}"
+                );
                 assert_eq!(director.last_dispatched_id(), Some("a1"));
             }
         }
@@ -722,7 +1136,10 @@ mod tests {
             0.5,
             105.0,
         );
-        assert!(effects.is_empty(), "the question took the seat: {effects:?}");
+        assert!(
+            effects.is_empty(),
+            "the question took the seat: {effects:?}"
+        );
         assert_eq!(director.active_source_id(), Some(AGENT));
         assert_eq!(director.sustained_reaction(), Some(CompanionReaction::Work));
     }
@@ -741,12 +1158,24 @@ mod tests {
                 0.5,
                 at,
             );
-            assert!(effects.is_empty(), "the desk took a quiet agent's seat at {at}: {effects:?}");
+            assert!(
+                effects.is_empty(),
+                "the desk took a quiet agent's seat at {at}: {effects:?}"
+            );
             assert_eq!(director.active_source_id(), Some(AGENT));
         }
-        assert!(!director.expire_silent(false, 400.0).is_empty(), "the watch did not expire");
+        assert!(
+            !director.expire_silent(false, 400.0).is_empty(),
+            "the watch did not expire"
+        );
 
-        director.handle_event(desk("f2", CompanionEventKind::Present, 401.0), false, false, 0.5, 401.0);
+        director.handle_event(
+            desk("f2", CompanionEventKind::Present, 401.0),
+            false,
+            false,
+            0.5,
+            401.0,
+        );
         assert_eq!(director.active_source_id(), Some(HWP));
         assert_eq!(director.last_dispatched_id(), Some("f2"));
     }
@@ -770,7 +1199,9 @@ mod tests {
             );
             assert_eq!(director.active_source_id(), None, "{last_word:?}");
             assert!(
-                director.resume_pending_if_ready(false, false, false, 0.5, 112.5).is_empty(),
+                director
+                    .resume_pending_if_ready(false, false, false, 0.5, 112.5)
+                    .is_empty(),
                 "{last_word:?}: the desk went ahead of the agent's goodbye"
             );
             director.resume_pending_if_ready(true, false, false, 0.5, 113.0);
@@ -803,7 +1234,11 @@ mod tests {
         assert_eq!(director.last_dispatched_id(), Some("a1"));
 
         director.handle_event(desk("f3", HighIntensity, 111.0), false, false, 0.5, 111.0);
-        assert_eq!(director.active_source_id(), Some(AGENT), "the desk took it straight back");
+        assert_eq!(
+            director.active_source_id(),
+            Some(AGENT),
+            "the desk took it straight back"
+        );
     }
 
     /// Plan §9.6b. The agent finishes and the desk's word is queued. The pet
@@ -831,7 +1266,9 @@ mod tests {
         let mut now = 112.0;
         while now < 115.5 {
             now += 0.5;
-            assert!(director.resume_pending_if_ready(false, false, false, 0.5, now).is_empty());
+            assert!(director
+                .resume_pending_if_ready(false, false, false, 0.5, now)
+                .is_empty());
         }
 
         director.handle_event(
@@ -841,15 +1278,28 @@ mod tests {
             0.5,
             116.0,
         );
-        assert_eq!(director.active_source_id(), Some(AGENT), "the agent's next turn did not take the seat");
+        assert_eq!(
+            director.active_source_id(),
+            Some(AGENT),
+            "the agent's next turn did not take the seat"
+        );
         assert_eq!(director.last_dispatched_id(), Some("a3"));
 
         let effects = director.resume_pending_if_ready(true, false, false, 0.5, 116.5);
-        assert!(effects.is_empty(), "the queued desk word acted: {effects:?}");
-        assert_eq!(director.active_source_id(), Some(AGENT), "the queued desk word took the agent's seat");
+        assert!(
+            effects.is_empty(),
+            "the queued desk word acted: {effects:?}"
+        );
+        assert_eq!(
+            director.active_source_id(),
+            Some(AGENT),
+            "the queued desk word took the agent's seat"
+        );
         assert_eq!(director.last_dispatched_id(), Some("a3"));
         assert!(
-            director.resume_pending_if_ready(true, false, false, 0.5, 117.0).is_empty(),
+            director
+                .resume_pending_if_ready(true, false, false, 0.5, 117.0)
+                .is_empty(),
             "the dropped word came back"
         );
 
@@ -861,7 +1311,11 @@ mod tests {
             120.0,
         );
         director.resume_pending_if_ready(true, false, false, 0.5, 121.0);
-        assert_eq!(director.active_source_id(), Some(HWP), "dropping the queued word forgot the desk");
+        assert_eq!(
+            director.active_source_id(),
+            Some(HWP),
+            "dropping the queued word forgot the desk"
+        );
         assert_eq!(director.last_dispatched_id(), Some("f1"));
     }
 }

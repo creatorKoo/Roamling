@@ -535,37 +535,30 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     /// means. Both readings are cheap and cached by the OS; the throttle is
     /// here so that a sixty-per-second tick does not turn them into a poll.
     ///
-    /// Whatever comes back goes down the ordinary path, so a working app is
-    /// located, reacted to and forgotten exactly as an agent's turn is.
+    /// Whatever comes back goes down the state path. The shell adds the one
+    /// platform fact the translator cannot know: where the watched window is.
     private func sampleWorkingApplication(at timestamp: TimeInterval) {
         guard timestamp - focusSampledAt >= Self.focusSampleInterval else { return }
         focusSampledAt = timestamp
         let frontmost = windowProvider.frontmostApplicationIdentifier()
-        let events = focusActivity.observe(
+        let watched = frontmost.map(workApps.contains) ?? false
+        let declarations = focusActivity.observe(
             application: frontmost,
-            watched: frontmost.map(workApps.contains) ?? false,
+            watched: watched,
             secondsSinceKey: userIdleProvider.keyboardIdleDuration(at: timestamp),
-            // The two facts this side does not read from the machine but from
-            // the pet: which event it last acted on, and whether it still owes
-            // a reaction for it. Together they mean "the greeting reached the
-            // pet and was worn", which is what the beat after the hop is timed
-            // from -- the seat is already this app's when the user starts
-            // typing, so the seat's owner cannot say it.
-            dispatchedEvent: core.lastDispatchedActivityID,
-            arrivalPending: core.hasArrivalReaction,
-            // And whether it would hear anything now. The key that wakes a
-            // sleeping pet does so later in this tick than this sample, and
-            // the director drops what a resting pet is told, so the source
-            // holds its news until the first sample the pet is awake.
-            petResting: core.isResting,
-            // And whether an agent is on duty. A long stretch left beside one
-            // ends without a wave: the director would keep it from the pet but
-            // not forget it, and the agent finishing a moment later would hand
-            // it over late.
-            agentOnDuty: core.agentOnDuty(at: timestamp),
             at: timestamp
         )
-        for event in events { handleActivityEvent(event) }
+        let hint = watched ? windowProvider.currentActivityLocationHint() : nil
+        for declaration in declarations {
+            let located = declaration.located(at: declaration.focused ? hint : nil)
+            for request in core.declareState(located, at: timestamp) {
+                requestLuminanceRefresh(
+                    at: timestamp,
+                    near: request.region,
+                    every: request.interval
+                )
+            }
+        }
     }
 
     private func handleActivityEvent(_ event: CompanionEvent) {

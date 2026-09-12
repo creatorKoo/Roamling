@@ -273,181 +273,129 @@ steady로 분류한다. 이전에는 1.2초 만에 `observe`로 넘어가서, �
 ## 5b. 흐름 D — 지정한 앱에서 일할 때
 
 에이전트가 아닌 활동 source가 하나 있다. **사용자가 메뉴에서 고른 앱**이다(한글·한쇼·
-파워포인트처럼 코딩과 무관한 앱을 쓰는 사람을 위한 것이다). 셸이 0.5초마다 두 가지만
-읽는다 — 앞에 있는 앱의 id, 마지막 키 입력 후 초 — 그리고 그것이 무슨 뜻인지는
-`rust/roamling-core/src/focus_activity.rs`가 전부 정한다. 나오는 것은 §5와 **똑같은
-`CompanionEvent`**이므로 아래 표의 오른쪽 절반은 §5에서 그대로 읽으면 된다.
+파워포인트처럼 코딩과 무관한 앱을 쓰는 사람을 위한 것이다). 셸이 0.5초마다 세 가지만
+읽고(`RoamlingRuntime.sampleWorkingApplication`) — 앞에 있는 앱의 id, 그 앱이 지정 앱인지,
+마지막 키 입력 후 초 — 그것이 무슨 뜻인지는 `rust/roamling-core/src/focus_activity.rs`가
+전부 정한다.
 
-| 사용자가 한 일 | 나가는 이벤트 | 반응 | 화면 |
+**이 source는 §5와 달리 사건을 내지 않는다.** 매 샘플 "지금 이렇다"를 선언하고
+(`StateDeclaration`), 반응은 그 선언이 **바뀔 때** 정해진다. 상태형 source의 설계 전체는
+`docs/state-sources.md`에 있고, 2026-09-12 이전의 사건형 구조와 그때 붙어 있던 우회 코드의
+기록은 `docs/history/focus-activity-flow.md`에 있다.
+
+### 상태 넷과 이정표 둘
+
+`source_state.rs`의 낱말이다. 왼쪽이 source가 말하는 것, 오른쪽이 펫이 입는 것이다.
+
+| 등급 | 뜻 | 도착 반응 | 유지 반응 |
 |---|---|---|---|
-| 지정 앱이 앞으로 옴 | `present` | `calm` | 창 옆으로 걸어와 그냥 앉음(row 0). 점프·갸웃 없음 |
-| 그 세션의 첫 키 입력 | `activityStarted` → **펫이 받아 입은 뒤** 0.84초 뒤 `highIntensity` | `spark` → `work` | 점프, 이어서 row 7 |
-| 세션 안의 다음 키 입력 | `highIntensity` (0.7) | `work` | row 7, 유지 |
-| 마지막 키 입력 후 10초 | `attentionRequired` | `paw` | row 6 (갸웃) |
-| 갸웃 중 키 입력 | `highIntensity` | `work` | row 7 |
-| 갸웃 5초 | `activityEnded` | `calm` | 자리를 비우고 원래대로 돌아다님 |
-| 돌아다니는 중 다시 키 입력 | `highIntensity` | `work` | 걸어와서 row 7, 점프 없음 |
-| 키 없이 보기만 함 | 60초마다 `present`를 새 id로 재발신 | `calm` (안 보임) | 옆에 계속 앉아 있음 |
-| 계속 타이핑 | 60초마다 `highIntensity`를 새 id로 재발신 | 유지 | 변화 없음 |
-| 다른 앱이 3초 미만 앞에 옴 | 없음 | — | 앉은 채 |
-| 다른 앱이 3초 이상 앞에 옴 | (이번 세션 타이핑 누적 3분 이상이고 agent가 자리를 지키고 있지 않으면 자리를 비운 뒤라도 `achievement` 0.8 먼저 — 그러면 `activityEnded`는 펫이 손 흔들기를 받은 샘플에, 최대 5초 뒤) `activityEnded` | `smallCelebrate` → 없음 | 펫이 있는 자리에서 row 3 인사 후 자리를 비움. agent가 자리를 지키는 중이면 손 흔들기 없이 자리만 비움 |
-| 지정 앱 → 다른 지정 앱 | `activityEnded` + `present` | `calm` | 새 창으로 걸어가 앉음. 그 앱의 첫 키 입력에 점프 |
-| 펫 자신이 앞에 옴 (메뉴·설정 창) | 보내지 않음. 단 손 흔들기 뒤 보류된 자리 비움(`activityEnded`)은 nil 동안에도 나간다. 돌아오면 그사이 기한이 된 것을 한 번 | — | 셸이 nil을 넘기고, nil은 "모름"이지 "떠남"이 아니다. 손 흔들기 누적만 멈추고 시계는 흐른다 |
-| agent가 자리를 지키는 동안 위의 무엇이든 | 같은 이벤트(떠날 때의 `achievement`만 예외 — 보내지 않음), 막히면 15초마다 새 id로 재발신 | — (후보가 아님) | agent 옆에 그대로. Claude가 끝나면(Stop·ActivityEnded) 곧바로, 5분 침묵 만료면 다음 재발신(최대 15초) 때 이어받는다 — 점프가 남아 있으면 점프부터 |
+| `Away` | 이 source는 볼 것이 없다 | — (좌석 반납) | — |
+| `Beside` | 앞에 있지만 하는 일은 모름 | `calm` (걸어와 앉기) | 없음 — 그냥 앉아 있음(row 0) |
+| `Active` | 일하는 중 | `work` | `work` (row 7) |
+| `Paused` | 하다 멈춤 | `paw` | `paw` (row 6, 갸웃) |
 
-**반응은 앱이 아니라 키 입력에 한다.** 앱이 앞에 온 것만으로는 사용자가 무엇을 하려는지 알 수
-없다. 문서를 읽는 사람 옆에서 10초마다 갸웃하는 펫은 "never annoying"을 정면으로 어긴다 — 첫
-구현(v1)이 그랬고, 써 보고 바로 나온 수정이 이것이다. 그래서 앱이 앞에 오면 옆에 앉기만 하고,
-점프는 **그 세션의 첫 키 입력**에, 갸웃은 **타이핑이 멈췄을 때**만 나온다. 갸웃도 5초
-(`WAITING_BEFORE_RELEASE`, 써 보고 정한 값이 아니라 제안값)면 자리를 돌려주고 원래대로 돌아다닌다
-— 질문이지 감시가 아니다.
+| 이정표 | 언제 | 반응 |
+|---|---|---|
+| `SittingStarted` | 그 세션의 첫 키 입력 | `spark` (점프, row 5) |
+| `SittingEnded` | 3분 이상 친 세션이 끝남 | `smallCelebrate` (손 흔들기, row 3) |
+
+이정표는 **등급이 그대로여도 전이로 친다**(`SourceStates::declare`). 그리고 등급 반응을
+이긴다 — 첫 키 입력은 `Active`(= `work`)로 가는 전이지만 점프가 나간다(`reaction_for`).
+점프는 **도착 반응이라 한 번만** 나가고, 그 뒤 펫이 계속 입는 것은 **유지 반응** `work`다
+(`sustained_reaction`). 순서를 지키는 것이 타이머가 아니라 이 구분이다.
+
+### 사용자가 한 일 → 무엇이 나가는가
+
+| 사용자가 한 일 | 선언 | 화면 |
+|---|---|---|
+| 지정 앱이 앞으로 옴 | `Beside` | 창 옆으로 걸어와 그냥 앉음. 점프·갸웃 없음 |
+| 그 세션의 첫 키 입력 | `Active` + `SittingStarted` | 점프, 이어서 row 7 |
+| 세션 안의 다음 키 입력 | `Active` | row 7, 유지 |
+| 마지막 키 입력 후 10초 | `Paused` | row 6 (갸웃) |
+| 갸웃 중 키 입력 | `Active` | row 7 |
+| 갸웃 5초 | `Away` | 자리를 비우고 원래대로 돌아다님 |
+| 돌아다니는 중 다시 키 입력 | `Active` | 걸어와서 row 7, 점프 없음 |
+| 키 없이 보기만 함 | `Beside`를 0.5초마다 다시 | 옆에 계속 앉아 있음 |
+| 다른 앱이 3초 미만 앞에 옴 | 같은 등급, `focused: false` | 앉은 채. 포커스만 놓는다 |
+| 다른 앱이 3초 이상 앞에 옴 | `Away` (+ 누적 3분이면 `SittingEnded`) | 있는 자리에서 인사하고 자리 비움 |
+| 지정 앱 → 다른 지정 앱 | 한 샘플에 옛 것 `Away` + 새 것 `Beside` | 새 창으로 걸어가 앉음. 그 앱의 첫 키에 점프 |
+| 펫 자신이 앞에 옴 (메뉴·설정) | **직전 선언을 이정표만 떼고 다시** | 아무 일 없음. nil은 "모름"이지 "떠남"이 아니다 |
+| agent가 자리를 지킴 | 선언은 그대로 계속 | agent 옆에 그대로 — 아래 "agent와 같이" |
+
+**선언이 2초(`STATE_EXPIRY`) 동안 갱신되지 않으면 `Away`로 만료한다**
+(`SourceStates::expire`, 매 틱 `pet_runtime`에서 부른다). 셸이 말을 멈춘 것을 감지하는 유일한
+장치다. 앞의 앱을 모를 때(nil) 코어가 직전 선언을 다시 내주는 것도 이 만료 때문이다 — 안 그러면
+메뉴를 2초 넘게 연 것만으로 세션이 끝난다.
+
+### 왜 앱이 아니라 키 입력에 반응하는가
+
+앱이 앞에 온 것만으로는 사용자가 무엇을 하려는지 알 수 없다. 문서를 읽는 사람 옆에서 10초마다
+갸웃하는 펫은 "never annoying"을 정면으로 어긴다 — 첫 구현(v1)이 그랬고, 써 보고 바로 나온
+수정이 이것이다. 그래서 앱이 앞에 오면 옆에 앉기만 하고(`Beside`), 점프는 **그 세션의 첫 키
+입력**에, 갸웃은 **타이핑이 멈췄을 때**만 나온다. 갸웃도 5초(`WAITING_BEFORE_RELEASE`)면 자리를
+돌려주고 원래대로 돌아다닌다 — 질문이지 감시가 아니다.
 
 **세션은 앱 앞에 있는 한 이어진다.** 거르는 단계가 둘이다. **3초**(`FOCUS_GRACE`)가 "떠났는가"를
 정하고, **2분**(`BREAK`)이 "돌아온 것이 새 세션인가"를 정한다. 2분 안에 같은 앱으로 돌아오면 같은
 세션이라 다음 키 입력은 점프 없이 바로 일하고, 2분 넘게 떠났다 오거나 다른 지정 앱으로 바뀌면 새
 세션이라 첫 키 입력의 점프가 다시 걸린다. 유예가 없으면 브라우저를 1초 보고 온 것도 "끝 → 시작"이
-되어 펫이 종일 일어섰다 앉는다. 손 흔들기는 **한 덩어리 일을 마치고 일어날 때**만 나와야 한다.
-
-`achievement`가 떠나는 순간에 쓰이는 것은 우연이 아니다 — director가 `achievement`에서
-좌석을 비우고(`clear_active`) 그 자리에서 축하한다. 인사에 쓸 수 없는 것도 같은 이유다
-(인사하고 바로 떠나 버린다). 그래서 인사는 `activityStarted`의 `spark`이고, Petdex에서
-`jumping`이 "시작" 행이라 뜻도 맞다.
-
-**`present`는 이 source 때문에 늘어난 kind다.** "걸어와서 아무것도 안 입고 앉기"를 뜻하는 kind가
-없었다 — `activityStarted`는 `spark`, `highIntensity`는 `work`, `attentionRequired`는 `paw`를 입고,
-`inspecting`은 `wants_window_hint`가 거짓이라 셸이 창 위치를 안 채워 걷지도 않는다. 게다가 dispatch마다
-도착 반응이 다시 걸리고 앉은 펫은 그것을 다시 입으므로, 60초마다 재발신되는 kind는 재생해도 안
-보이는 `calm`(= idle)만 입을 수 있다. attention 점수는 30이라 최고점(30+10+5+3=48)이
-`activityStarted`의 최저점 50보다 낮다. 다만 agent 옆에서 이 source를 막는 것은 점수가 아니다 —
-아래 "agent와 같이 있을 때"의 규칙이 막는다.
+되어 펫이 종일 일어섰다 앉는다.
 
 **Cmd-Tab과 Alt-Tab도 키 입력이다.** 그래서 그 앱이 **끊김 없이 앞에 있기 시작한 첫 샘플보다
 나중에** 눌린 키만 타이핑으로 센다(`now - seconds_since_key > in_front_since`). 다른 앱이나 nil이
-한 샘플이라도 끼면 다시 센다 — 흘끗 보고 키보드로 돌아온 것도 타이핑이 아니다. **갸웃까지의
-10초도 셀 수 있는 마지막 키부터 잰다**(`last_counted_key_at`). 원시 `seconds_since_key`로 재면 타이핑
-중 Cmd-Tab으로 다른 창을 보고 돌아오는 키 두 번이 10초 창을 다시 시작시켰다. 인사가 끝났을 때의
-`running`/갸웃 판단과 막힌 인사를 거두는 판단도 같은 값을 본다.
+한 샘플이라도 끼면 다시 센다. **갸웃까지의 10초도 셀 수 있는 마지막 키부터 잰다**
+(`last_counted_key_at`, `keys_stopped`). 원시 `seconds_since_key`로 재면 타이핑 중 Cmd-Tab으로 다른
+창을 보고 돌아오는 키 두 번이 10초 창을 다시 시작시켰다.
 
-**인사 뒤 박자는 키 입력이 아니라 펫이 인사를 받아 입은 때부터 잰다.** `begin_watching`이 아직
-전하지 못한 도착 반응을 나중에 온 것으로 덮어쓰기 때문에, 키 입력에서 0.84초를 세면 걸어가는
-동안이나 director가 아직 dispatch하지 않은 동안에 `work`가 `spark`를 지운다. 그래서 셸이 매 샘플에
-`last_dispatched_activity_id`(펫이 마지막으로 처리한 이벤트)와 `has_arrival_reaction`(아직 갚지
-못한 도착 반응이 있는가)을 같이 넘기고, 코어는 "director가 **이 인사의 id**를 dispatch했고 갚을
-반응은 없다"가 된 샘플부터 0.84초를 센다. **좌석 주인(active source)으로는 판정할 수 없다** — 첫
-키 입력 때 펫은 이미 이 앱의 `present` 자리에 앉아 있어서 곧바로 참이 된다.
-`GREETING_TIMEOUT`(20초)은 **dispatch된 뒤부터** 센다 — 받은 인사를 걸어가다 끝내 못 입는 경우의
-상한이다. dispatch 전의 기다림은 아래 "agent와 같이 있을 때"가 다룬다.
+### 손 흔들기 — 3분 이상 친 세션이 끝날 때
 
-**쉬는 펫에게는 자리 소식을 보내지 않고, 깨면 보낸다 (2026-09-11 발견·해결).**
-`activityStarted`는 자는 펫을 깨우지 않고(`wakes_resting_pet` 거짓), director는 쉬는 펫(앉기 ·
-잠자리 찾기 · 잠)에게 온 깨우지 않는 이벤트를 **큐에 넣지 않고 버린다**(`recent`에만 남는다). 펫을
-깨우는 것은 키 입력 자체(`finish_tick`의 `user_idle < 0.8`)인데, macOS 셸의 `tick()`에서 그 판정은
-지정 앱 샘플보다 **뒤에** 돈다. 그래서 자리에서 잠든 펫에게 첫 키 입력의 점프가 가서 버려지고,
-20초 뒤 점프 없이 `highIntensity`로 일했다. 자는 펫의 틱 간격(0.5초)이 샘플 간격과 같아 실기에서는
-거의 항상 이 순서였다. 같은 이유로 `present`와 자리를 비운 뒤의 `highIntensity`도 다음
-재발신(최대 60초)까지 늦었다.
+떠남(3초 유예 뒤)에 이번 세션의 타이핑 누적이 3분(`WAVE_AFTER_TYPING`) 이상이면 `Away` 선언에
+`SittingEnded`를 싣는다(`end_milestone`). **phase와 무관하다** — 앉아 있든, 갸웃 중이든, 갸웃
+5초 뒤 자리를 돌려주고 돌아다니는 중이든. 보통은 타이핑을 멈추고 한참 뒤에 앱을 닫기 때문에,
+"펫이 그 앱 옆에 있을 때만"으로 두면 손 흔들기가 거의 안 나온다. director는 좌석을 비우기
+전에 **펫이 있는 자리에서** 그 반응을 입힌다(`apply_state_transitions`) — 걸어오지 않는다.
+누적은 떠나는 순간 0이 된다: 흔들었든 아래 규칙으로 안 흔들었든, 곧 다시 떠나도 또 흔들지 않는다.
 
-이제 셸이 매 샘플에 `is_resting`을 같이 넘긴다 — **director가 버릴 때 쓰는 것과 같은 술어**라서
-source가 보낸 것을 director가 "쉬는 중"으로 버리는 경우가 구조적으로 없다. source는 쉬는 동안
-자리 kind 넷(`present` · `activityStarted` · `highIntensity` · `attentionRequired`)을 **보내지 않고**,
-phase · 타이머 · 세션은 그대로 진행한다. 깬 첫 샘플에 **그 시점의 phase에 맞는 kind**를 새 id로
-보낸다 — 쉬는 동안의 옛 소식을 쌓아 두지 않는다. 세션 첫 키 입력이 쉬는 동안이었으면 깬 뒤
-`activityStarted`를 보내고, 인사 박자와 20초 상한은 **그 발신 시각부터** 센다. `activityEnded`와
-`achievement`는 보류하지 않는다 — director가 `activityEnded`를 쉬는지 보기 전에 처리하고, 손
-흔들기는 떠날 때의 것이다. 하네스의 `a pet asleep at the seat still hops for the first keystroke`가
-이것을 지킨다. 샘플을 틱 끝으로 옮기는 안은 기각했다 — 실기에서는 일반 idle과 키보드 idle이 따로
-캐시돼 경쟁이 좁아질 뿐 남는다.
+누적은 **`Active`인 동안에만** 쌓인다(`typed_seconds += elapsed`). 읽기만 한 시간은 안 센다.
 
-**손 흔들기 뒤의 `activityEnded`는 펫이 손 흔들기를 받을 때까지 기다린다 (2026-09-11, 검토 #7).**
-쉬는 펫에게 온 `achievement`는 펫을 깨우고(`CancelRest`) `pending`이 되는데, director는 펫이 **Idle에
-선 뒤**(wake 0.7초 + stretch 1.0초)에야 그것을 dispatch한다. 같은 샘플에, 또는 깬 첫 샘플에 보낸
-`activityEnded`는 대기 중인 손 흔들기를 `queue_next_candidate`로 지우고 `calm`을 입혀서 3분 일한 끝의
-인사가 사라졌다. 이제 흔들었으면 `activityEnded`를 보류하고 **`dispatched_event`가 그 손 흔들기 id가
-된 첫 샘플**에 보낸다 — 깨어 있는 펫이면 바로 다음 샘플, 쉬는 펫이면 일어선 뒤다. 그때는 director가
-이미 자리를 비운 뒤라 아무것도 덮지 않는다. 상한은 `WAVE_HOLD_TIMEOUT`(5초)이다 — 사용자 손에 들린
-펫처럼 끝내 받지 못해도 보낸다. 보류 중에 앞의 앱을 모르게 돼도(nil) 보낸다 — 떠난 것은 이미
-정해졌다. 보류 중에 지정 앱으로 돌아오면 보류한 `activityEnded`를 먼저 보내고 도착 규칙대로 간다.
+### 쉬는 펫
 
-**손 흔들기는 세션 3분이면 떠날 때 펫이 있는 자리에서 한다 (규칙 "가", 2026-09-11 사용자 확정).**
-떠남(3초 유예 뒤)에 이번 세션의 타이핑 누적이 3분 이상이면 **phase와 무관하게** `achievement`를 보낸다 —
-앉아 있든, 갸웃 중이든, 갸웃 5초 뒤 자리를 돌려주고 돌아다니는 중이든. director가 `achievement`에서 좌석을
-비우고 그 자리에서 축하하므로 펫은 걸어오지 않고 있는 곳에서 흔든다. 누적은 떠나는 순간 0이 된다 — 흔들었든
-아래 규칙으로 흔들지 않았든, 곧 다시 떠나도 또 흔들지 않는다.
+director가 **전이를 보관한다**(`state_transitions`). 쉬는 펫에게는 아무것도 입히지 않고, 깨는
+첫 순간에 그때 유효한 것을 입힌다. source는 펫이 쉬는지 알 필요가 없다 — 그냥 계속 선언한다.
+예외는 손 흔들기 하나다: `SittingEnded`가 대기 중이면 director가 `CancelRest`를 내서 펫을
+먼저 깨운다. 3분 일한 끝의 인사는 늦게라도 보여야 하기 때문이다.
 
-그 전에는 `dispatched_event`가 이 source의 id(`focus:`)일 때만 흔들었는데, **보통 흐름(타이핑 → 멈춤 →
-10초 갸웃 → 5초 뒤 자리 해제 → 떠남)에서 한 번도 안 나왔다** — 자리 해제의 `activityEnded`가 director가
-마지막으로 처리한 id를 지운다. 흔드는 것은 마지막 키 뒤 약 15초 안에 떠날 때뿐이었고, 끝난 agent의 id가
-남아 있으면 비어 있는 펫의 손 흔들기까지 막았다. 그래서 펫이 어디 있는지를 source가 대리 신호로 추측하지
-않는다.
+### agent와 같이 있을 때 — agent가 우선이다 (2026-09-11 사용자 확정)
 
-**agent가 자리를 지키는 동안에는 손 흔들기를 보내지 않는다 (9.7a).** 떠날 때 셸이 넘긴 `agent_on_duty` —
-director가 지정 앱 이벤트를 후보에서 뺄 때 쓰는 같은 술어 — 가 참이면 누적이 3분이어도 `activityEnded`만
-보낸다. 처음(9.6a)에는 보내 두고 director가 거르게 했는데, 걸러진 `achievement`는 dispatch만 안 될 뿐
-뒤따르는 `activityEnded`(최대 5초)가 나갈 때까지 director의 `recent`에 남았다. 그 사이 agent가 끝나면
-(`Stop`) agent 이벤트가 `recent`에서 빠지고 좌석 주인도 지워져 `agent_on_duty`가 거짓이 되고,
-`queue_next_candidate`가 그 손 흔들기를 큐에 올려 펫이 agent 축하(0.7초)를 마치자마자 입었다 — 반응 간격
-때문에 보통 `glance`로. 사용자가 떠난 뒤에 편집기 세션에 늦게 반응한 것이다. 손 흔들기를 보낸 **뒤에**
-agent가 들어온 경우(펫이 사용자 손에 들려 있는 동안 등)는 여전히 director가 거르고, 5초 상한에 나가는
-`activityEnded`가 그것을 `recent`에서 지우므로 말한 뒤 5초보다 늦게 나오지는 않는다. 위의 보류(쉬는 펫이
-일어나 손 흔들기를 받을 때까지)는 보험으로 남는다 — 기본값에서 휴식에는 전체 입력 idle 75초가 필요하고 키가
-펫을 깨우므로 실기에서는 거의 닿지 않는다. 하네스의 `a pet asleep at the seat still waves when a long sitting
-ends`, `a long sitting waves on the way out, even after the seat went back`, `beside a working agent a long
-sitting ends without a wave`, `an agent finishing just after a long sitting ends plays nothing of it late`가
-이것을 지킨다.
+Claude Code에 메시지를 보내고 편집기에서 타이핑했더니 20초 동안 반응이 없다가 점프 없이
+`running`이 됐다. attention 점수로 방금 시작된 agent 턴 ≈ 62와 첫 키 입력의 점프 ≈ 61이 이력
+여유(12) 안이라 점프가 밀렸고, 거꾸로 갸웃(긴급 · 100)은 일하는 agent의 자리를 곧바로 뺏었다.
+타이핑은 지고 멈추면 이기는 상태였다.
 
-**앞의 앱을 모르면(nil) 새 소식은 보내지 않고 손 흔들기 누적만 멈춘다 — 시계는 흐른다.** (손 흔들기 뒤 보류된 자리 비움만 nil 동안에도 나간다.) 펫 자신의 메뉴·설정
-창이 앞에 오면 셸이 nil을 넘긴다. 그동안 갸웃 · 자리 해제 · 재발신 무엇도 나가지 않지만 타이머는 벽시계라
-멈추지 않아서, 돌아온 첫 샘플에 그사이 기한이 된 것이 한 번 나간다. 그래서 **타이핑 중에 펫 메뉴를 10초
-넘게 열었다 닫으면 다시 치기 전에 갸웃한다**(메뉴를 닫은 키는 타이핑으로 세지 않는다). 갸웃 중이었으면
-자리 해제는 원래 시각을 지키고, 앉아만 있었으면 밀린 `present`가 한 번 나간다. 손 흔들기 뒤에 보류된
-`activityEnded`는 nil이어도 나간다.
+**규칙: agent가 자리를 지키는 동안 지정 앱의 상태 전이는 펫에게 가지 않는다**
+(`apply_state_transitions`의 첫 분기, 술어는 `agent_on_duty`). "지키는 동안"은 30초(attention이
+이벤트를 세는 시간) 안에 들은 agent 이벤트가 있거나, 자리 주인이 agent이고 5분 침묵 만료 전인
+것이다 — 뒤의 절반이 도구 하나가 긴 agent의 자리를 지킨다. attention(점수 · 이력 여유 · dwell ·
+쿨다운)은 그대로다.
 
-**agent와 같이 있을 때 — agent가 우선이다 (2026-09-11 실기 결함, 사용자 확정).** Claude Code에
-메시지를 보내고 TextEdit에서 타이핑했더니 20초 동안 반응이 없다가 점프 없이 `running`이 됐다.
-attention 점수(kind 기본 + 강도×10 + 신선도 최대 5 + 창 확신도×3)로 방금 시작된 agent 턴 ≈ 62와 첫
-키 입력의 점프 ≈ 61이 이력 여유(12) 안이라 **점프가 밀렸고**, 인사가 dispatch를 기다리다 20초
-상한에 보낸 `highIntensity`(≈ 88)가 이겼다. 거꾸로 갸웃(`attentionRequired`, 긴급 · 100)은 일하는
-agent의 자리를 곧바로 뺏었다. agent가 없는 기계에서는 생기지 않는다.
+막혀 있는 동안 source가 다시 말할 필요는 없다. **선언은 어차피 0.5초마다 갱신되므로**, agent가
+자리를 놓는 순간 다음 샘플에 지정 앱이 이긴다. 그동안 보관된 전이는 둘로 갈린다:
 
-**규칙: agent가 자리를 지키는 동안 지정 앱 이벤트는 점수와 무관하게 후보가 아니다.** "지키는
-동안"은 30초(attention이 이벤트를 세는 시간) 안에 들은 agent 이벤트가 있거나, 자리 주인이 agent이고
-5분 침묵 만료 전인 것이다 — 뒤의 절반이 도구 하나가 긴 agent의 자리를 지킨다. director가
-attention에 넘기는 **후보 목록에서** `sourceType == system`을 뺄 뿐, attention(점수 · 이력 여유 ·
-dwell · 쿨다운)은 그대로다. 그래서 지정 앱의 점프 · `running` · 갸웃 · `present` 모두 agent 자리를
-못 뺏고, 지정 앱이 자리를 쥐고 있을 때 agent 이벤트가 오면 지정 앱이 후보에서 빠지므로 agent가
-가져간다(attention의 dwell 3초는 그대로). agent의 `Stop`(`achievement`)이나 `activityEnded`로 자리가
-비면, 기다리던 지정 앱 이벤트가 `recent`에 살아 있으므로 곧바로 다음 후보로 큐에 들어가고 펫이
-한가해지는 대로 dispatch된다. **큐에 들어간 뒤 펫이 한가해지기 전에 agent 이벤트가 오면 그 대기 이벤트는
-dispatch하지 않고 버린다**(`resume_pending_if_ready`) — 큐는 후보 필터를 다시 거치지 않아서 agent 자리를
-가져갔다. 버리는 조건은 좌석이 아니라 `agent_on_duty`다. agent 이벤트는 attention이 고르기 전에 `recent`에
-들어가므로 펫이 Idle이 되기 전에 오기만 하면 성립하고, agent가 자리를 되찾을 필요는 없다. 되찾는 데는
-attention의 쿨다운(방금 떠난 agent에 2초)과 dwell(큐가 막 잡은 지정 앱에 3초)이 지나야 하지만 긴급 kind는
-dwell을 건너뛰어 2초면 된다 — 버리지 않았다면 그 전에 펫이 한가해지는 순간 대기 이벤트가 먼저 나갔다.
-`recent`에는 남아서 agent가 다음에 자리를 비우면 이어받는다.
+- **인사(`SittingStarted`)는 보관한다.** 등급이 `Paused`로 넘어가도 이정표를 새 전이에 옮겨
+  단다(`declare_state`). 자리를 받은 그때 점프한다 — 못 본 점프는 쓴 것이 아니다.
+- **작별(`SittingEnded`)은 버린다.** agent 옆에서 끝난 세션은 펫의 것이 아니었다. 남겨 두면
+  agent가 몇 초 뒤 끝났을 때 그 축하 직후에 늦게 튀어나온다(실제로 그랬다).
+- `Away` 전이는 인사를 **덮는다** — 세션이 끝난 뒤의 늦은 인사는 없다.
 
-**막혀 있는 동안 source는 15초마다 다시 말한다**(`BLOCKED_RESEND`). attention이 30초 지난 이벤트를
-잊으므로, 다시 말하지 않으면 agent가 자리를 비우는 순간 넘겨받을 것이 없다. 마지막으로 보낸 자리
-소식이 15초 동안 펫이 처리 중인 이벤트(`dispatched_event`)가 아니면 **지금 phase의 kind**를 새 id로
-보낸다 — `present`, 아직 못 전한 인사면 `activityStarted`, 타이핑이면 `highIntensity`, 갸웃이면
-`attentionRequired`, 자리를 비웠으면 없음. 한 번 전해졌다가 agent에게 밀린 소식도 같다. 쉬는 펫에게는
-이것도 보류한다.
-
-**인사는 펫이 받을 때까지 소모되지 않는다.** 막힌 채 타이핑이 10초 멈추면 인사를 거두고 갸웃으로
-가되 세션의 점프는 남는다 — 자리를 받은 뒤의 첫 키 입력이 점프한다. 자리가 빌 때 여전히 타이핑
-중이면 그때 받은 인사가 점프한다. 1초 안에 전해지지 않으면 점프를 포기하는 안은 기각했다 — 막힘은
-의도된 동작이고, agent가 없으면 인사는 즉시 dispatch된다. 하네스의 `beside a working agent the work
-app neither hops, runs nor asks`와 `when the agent finishes, the work app takes the seat: walk, hop,
-then work`가 이것을 지킨다.
-
-**60초 재발신(`HEARTBEAT`)이 없으면 문서를 읽기만 하는 사람 옆에서 좌석이 사라진다.**
-`ActivityLifetime::SILENCE_BEFORE_EXPIRY`가 300초이고, 이 source는 키를 누르지 않는 한
-할 말이 없기 때문이다. 재발신은 **앉아 있는 동안만** 한다(`present`·타이핑) — 갸웃은 5초면
-끝나고, 비운 자리는 지킬 것이 없다. 같은 종류라도 **id를 새로 준다** — director가 마지막으로
-처리한 id와 같으면 버리기 때문이다.
+### 그 밖에
 
 **키 입력 판정에 훅을 쓰지 않는다.** macOS는 `CGEventSource.secondsSinceLastEventType(_:
 eventType: .keyDown)`으로 "얼마나 지났는지"만 묻는다. 무엇을 눌렀는지는 아무도 볼 수 없고
-권한도 필요 없다. Windows 쪽 대응은 `docs/windows.md`에 있다.
+권한도 필요 없다. Windows 쪽 대응은 `docs/windows.md` W8에 있다.
+
+**`CompanionEventKind::present`는 이 source가 사건형이던 때 늘어난 kind인데, 이제 아무도 만들지
+않는다.** 지우지 않은 이유는 `activity.rs`의 주석에 있다 — kind가 FFI를 인덱스로 건너서
+differential 픽스처 10개가 위치로 이름을 부른다.
 
 기본값은 **빈 목록**이다. 사용자가 메뉴에서 앱을 고르기 전까지 이 흐름은 아무것도 하지
 않는다 — 여기서 잘못 짐작하는 것은 "never annoying"을 정면으로 어기는 쪽이다.
@@ -477,13 +425,11 @@ eventType: .keyDown)`으로 "얼마나 지났는지"만 묻는다. 무엇을 눌
 | 지정 앱 갸웃 | **5초** (제안값) | 키 입력 → 타이핑, 아니면 자리 해제 | `focus_activity.rs` `WAITING_BEFORE_RELEASE` |
 | 지정 앱 이탈 유예 | **3초** | 다른 앱이 계속 앞에 있음 | `focus_activity.rs` `FOCUS_GRACE` |
 | 새 세션 기준 | **120초** 이상 떠나 있었거나 다른 지정 앱 | — | `focus_activity.rs` `BREAK` |
-| 손 흔들기 기준 | 이번 세션 타이핑 누적 **180초**, 떠날 때 phase 무관(자리를 비운 뒤도). agent가 자리를 지키면(`agent_on_duty`) 보내지 않음 | 180초 이상이면 떠나는 순간 누적 0(agent가 자리를 지켜 보내지 않았어도). 그 미만은 짧은 휴식을 넘어 이어짐 | `focus_activity.rs` `WAVE_AFTER_TYPING` |
-| 손 흔들기 뒤 자리 해제 | 펫이 손 흔들기를 받을 때까지, 최대 **5초**. 받지 못한 채 상한에 나가면 손 흔들기도 director에서 지워져 그보다 늦게는 안 나온다. agent가 자리를 지키면 손 흔들기가 없으니 보류도 없다 | 손 흔들기 id dispatch | `focus_activity.rs` `WAVE_HOLD_TIMEOUT` |
-| 지정 앱 앞의 앱을 모름(nil) | 모르는 동안. 보내지 않음 — 단 손 흔들기 뒤 보류된 자리 비움은 nil 동안에도 나간다. 손 흔들기 누적만 멈춤, 시계는 흐름 | 앱이 다시 보임 → 그사이 기한이 된 것을 한 번 | `focus_activity.rs` `observe` |
-| 인사 뒤 다음 박자 | **펫이 인사를 받아 입은 뒤 0.84초** — Petdex `jumping` 표준 | 인사 id dispatch + 도착 반응 소진 | `focus_activity.rs` `GREETING_DELAY` |
-| 인사 침묵 상한 | dispatch 뒤 **20초** | 받은 인사를 끝내 입지 못함 | `focus_activity.rs` `GREETING_TIMEOUT` |
-| 막힌 자리 소식 재발신 | **15초** | 펫이 처리 중인 이벤트가 되면 멈춤. 자리를 비웠으면 없음 | `focus_activity.rs` `BLOCKED_RESEND` |
-| 지정 앱 재발신 | **60초** | 앉아 있는 동안(`present`·타이핑)만 | `focus_activity.rs` `HEARTBEAT` |
+| 손 흔들기 기준 | 이번 세션 `Active` 누적 **180초**, 떠날 때 등급 무관(자리를 비운 뒤도) | 180초 이상이면 떠나는 순간 누적 0(agent가 자리를 지켜 버려졌어도). 그 미만은 짧은 휴식을 넘어 이어짐 | `focus_activity.rs` `WAVE_AFTER_TYPING` |
+| 지정 앱 선언 만료 | **2초** 갱신 없음 → `Away` | 셸이 다시 선언 | `source_state.rs` `STATE_EXPIRY` |
+| 지정 앱 샘플 간격 | **0.5초** | — | `RoamlingRuntime.focusSampleInterval` |
+| 지정 앱 앞의 앱을 모름(nil) | 모르는 동안. **직전 선언을 이정표만 떼고 다시 낸다** — 만료를 막을 뿐 아무 일도 일어나지 않는다. 시계는 흐름 | 앱이 다시 보임 → 그때 상태에 맞는 선언 | `focus_activity.rs` `observe` |
+| 인사 점프 | **0.84초** (도착 반응, 한 번) — Petdex `jumping` 표준. 끝나면 유지 반응 `work`로 | `BehaviorTiming.spark` | `source_state.rs` `reaction_for` |
 
 무제한인 상태는 이제 둘뿐이고, 둘 다 Petdex가 steady로 분류한 것이다 — **작업 중**과
 **사용자를 기다리는 중**. 나머지는 전부 유한하고, **Petdex 어휘를 쓰는 것은 Petdex와 같은

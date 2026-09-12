@@ -19,6 +19,7 @@
 
 use crate::activity::{CompanionEvent, CompanionReaction};
 use crate::activity_director::{ActivityDirector, ActivityEffect};
+use crate::behavior::BehaviorController;
 use crate::behavior::{BehaviorInput, BehaviorState};
 use crate::capability::{capability_for, PetCapability};
 use crate::emptiness::LuminanceField;
@@ -28,10 +29,10 @@ use crate::movement::{MovementConfiguration, MovementController};
 use crate::placement::{PetSituation, PlacementDirector, PlacementIntent, PlacementTravelReason};
 use crate::pointer::{PointerDecision, PointerInteractionModel, PointerProximity};
 use crate::safe_zone::{BasicSafeZonePlanner, RestDestination};
+use crate::source_state::StateDeclaration;
 use crate::topology::DisplayTopology;
 use crate::tuning::RuntimeTuning;
 use crate::world::{DesktopWorldSnapshot, DisplaySnapshot, FocusSnapshot, LocationHint};
-use crate::behavior::BehaviorController;
 
 /// How long the pet dozes before the capture is asked for again.
 const LUMINANCE_REFRESH_INTERVAL: f64 = 3.0;
@@ -61,7 +62,11 @@ impl Aimlessness {
     /// rather than silently turning the pet metronomic.
     pub fn new(seed: u64) -> Self {
         Self {
-            seed: if seed == 0 { 0x2545_F491_4F6C_DD1D } else { seed },
+            seed: if seed == 0 {
+                0x2545_F491_4F6C_DD1D
+            } else {
+                seed
+            },
             draws: 0,
         }
     }
@@ -278,39 +283,6 @@ impl PetRuntime {
         self.activity.active_source_id()
     }
 
-    /// Whether the pet still owes the user the reaction the last event asked
-    /// for. True from the moment a located event arrives until the pet reaches
-    /// the seat it chose, so it is also the honest answer to "is the pet still
-    /// walking over there" -- which is what the working-app source needs, and
-    /// cannot work out from the two facts it is given.
-    pub fn has_arrival_reaction(&self) -> bool {
-        self.activity.has_arrival_reaction()
-    }
-
-    /// The event the pet last acted on. With `has_arrival_reaction` it says
-    /// whether a particular event has reached the pet *and* been worn, which
-    /// is what the working-app source times its greeting hop from.
-    pub fn last_dispatched_activity_id(&self) -> Option<&str> {
-        self.activity.last_dispatched_id()
-    }
-
-    /// Sitting, looking for a place to sleep, or asleep: the test the director
-    /// applies before it drops an event that does not wake the pet. The
-    /// working-app source reads the same test to hold its seat news back
-    /// rather than have it dropped.
-    pub fn is_resting(&self) -> bool {
-        self.behavior.state().is_resting()
-    }
-
-    /// Whether an agent is on duty: the director's own test for keeping the
-    /// desk from the pet. The working-app source reads it when the user
-    /// leaves and says no wave while it holds -- a wave passed over stayed in
-    /// the director until the end behind it, and an agent finishing meanwhile
-    /// handed it to the pet late.
-    pub fn agent_on_duty(&self, now: f64) -> bool {
-        self.activity.agent_on_duty(now)
-    }
-
     pub fn draws(&self) -> u64 {
         self.rng.draws()
     }
@@ -433,10 +405,7 @@ impl PetRuntime {
             .set_configuration(proposed.pointer_configuration());
         self.pointer_model.reset();
         self.movement.set_maximum_speed(proposed.walking_speed);
-        if pause_changed
-            && !self.movement.has_route()
-            && !self.behavior.state().is_held()
-        {
+        if pause_changed && !self.movement.has_route() && !self.behavior.state().is_held() {
             self.next_wander_at = now + proposed.wander_delay(0.5);
         }
     }
@@ -479,7 +448,13 @@ impl PetRuntime {
         self.persist_position = false;
 
         self.behavior.handle(BehaviorInput::Tick, now);
-        let effects = self.activity.expire_silent(self.behavior.state().is_resting(), now);
+        let effects = self
+            .activity
+            .expire_states(self.behavior.state().is_resting(), now);
+        self.apply_activity(effects, now);
+        let effects = self
+            .activity
+            .expire_silent(self.behavior.state().is_resting(), now);
         self.apply_activity(effects, now);
         // The draw happens whether or not anything is pending, because the
         // Swift original evaluated it as an argument. Moving it inside the
@@ -494,16 +469,12 @@ impl PetRuntime {
         );
         self.apply_activity(effects, now);
 
-        self.activity.is_watching_window()
-            && now - self.focus_queried_at >= FOCUS_REFRESH_INTERVAL
+        self.activity.is_watching_window() && now - self.focus_queried_at >= FOCUS_REFRESH_INTERVAL
     }
 
     pub fn finish_tick(&mut self, input: &TickInput) -> TickOutput {
         let now = input.now;
-        let delta_time = swift_min(
-            swift_max(now - self.last_tick_at.unwrap_or(now), 0.0),
-            0.1,
-        );
+        let delta_time = swift_min(swift_max(now - self.last_tick_at.unwrap_or(now), 0.0), 0.1);
         self.last_tick_at = Some(now);
 
         if input.user_idle_duration < 0.8 && self.behavior.state().is_resting() {
@@ -530,7 +501,11 @@ impl PetRuntime {
         // Only a hand actually on the pet is petting it. Beside it, the pet
         // just watches as it would any cursor -- minus the stepping away.
         self.is_petted = is_adored && input.pointer_is_over_pet;
-        let proximity = if is_adored { PointerProximity::Watching } else { decision.proximity };
+        let proximity = if is_adored {
+            PointerProximity::Watching
+        } else {
+            decision.proximity
+        };
 
         if !self.is_click_reaction_pending
             && decision.should_arm_catch()
@@ -579,7 +554,11 @@ impl PetRuntime {
             let agent = match self.activity.active_source_id() {
                 Some(id) => format!(
                     "{id} window={}",
-                    if self.activity.hint().is_none() { "none" } else { "found" }
+                    if self.activity.hint().is_none() {
+                        "none"
+                    } else {
+                        "found"
+                    }
                 ),
                 None => "none".to_string(),
             };
@@ -716,7 +695,8 @@ impl PetRuntime {
             self.is_dragging = true;
             self.behavior.handle(BehaviorInput::DragMoved, now);
         }
-        self.movement.teleport(pointer.offset(self.drag_offset), true);
+        self.movement
+            .teleport(pointer.offset(self.drag_offset), true);
         self.interaction(now, None, true)
     }
 
@@ -730,7 +710,8 @@ impl PetRuntime {
             return self.interaction(now, Some(false), false);
         }
         if was_dragged || self.is_dragging {
-            self.movement.teleport(pointer.offset(self.drag_offset), true);
+            self.movement
+                .teleport(pointer.offset(self.drag_offset), true);
             self.finish_drop(now);
             let mut output = self.interaction(now, Some(false), true);
             output.persist_position = true;
@@ -754,7 +735,11 @@ impl PetRuntime {
 
     /// The agent adapters deliver on their own schedule, so this is its own
     /// entry point rather than part of the tick.
-    pub fn handle_activity_event(&mut self, event: CompanionEvent, now: f64) -> Vec<LuminanceRequest> {
+    pub fn handle_activity_event(
+        &mut self,
+        event: CompanionEvent,
+        now: f64,
+    ) -> Vec<LuminanceRequest> {
         self.luminance_requests.clear();
         let roll = self.rng.unit();
         let effects = self.activity.handle_event(
@@ -764,6 +749,21 @@ impl PetRuntime {
             roll,
             now,
         );
+        self.apply_activity(effects, now);
+        std::mem::take(&mut self.luminance_requests)
+    }
+
+    /// A state source declares its current fact independently of the event
+    /// path. The director owns rest deferral, source precedence and placement.
+    pub fn declare_state(
+        &mut self,
+        declaration: StateDeclaration,
+        now: f64,
+    ) -> Vec<LuminanceRequest> {
+        self.luminance_requests.clear();
+        let effects =
+            self.activity
+                .declare_state(declaration, self.behavior.state().is_resting(), now);
         self.apply_activity(effects, now);
         std::mem::take(&mut self.luminance_requests)
     }
@@ -880,11 +880,14 @@ impl PetRuntime {
         let pointer = input.pointer;
         let is_watching = self.activity.is_watching_window();
         let is_roaming = self.is_roaming_enabled && !is_watching;
-        let is_stroll_due =
-            is_roaming && !self.movement.has_route() && now >= self.next_wander_at;
+        let is_stroll_due = is_roaming && !self.movement.has_route() && now >= self.next_wander_at;
 
         if is_watching {
-            if let Some(region) = self.activity.hint().and_then(|hint| hint.approximate_region) {
+            if let Some(region) = self
+                .activity
+                .hint()
+                .and_then(|hint| hint.approximate_region)
+            {
                 self.request_luminance(region, LUMINANCE_REFRESH_INTERVAL);
             }
         } else if !self.movement.has_route() {
@@ -1020,7 +1023,8 @@ impl PetRuntime {
         }
         self.is_evade_transitioning = false;
         self.rest_destination = None;
-        self.behavior.handle(BehaviorInput::BeginInterestTravel, now);
+        self.behavior
+            .handle(BehaviorInput::BeginInterestTravel, now);
         self.movement.set_maximum_speed(self.tuning.walking_speed);
         self.next_wander_at = f64::INFINITY;
         self.movement.update(delta_time);
@@ -1272,8 +1276,8 @@ impl PetRuntime {
             .map(|display| display.id.clone());
         // Short-circuits exactly as Swift's `&&` does: a single display draws
         // nothing at all, and a draw taken here would shift every draw after it.
-        let should_explore = self.displays.len() > 1
-            && self.rng.unit() < self.tuning.cross_display_wander_chance;
+        let should_explore =
+            self.displays.len() > 1 && self.rng.unit() < self.tuning.cross_display_wander_chance;
         let target = if should_explore {
             let alternatives: Vec<DisplaySnapshot> = self
                 .displays
@@ -1313,7 +1317,11 @@ impl PetRuntime {
         // trek before Roamling finally pauses.
         if Some(&target.id) != current_id.as_ref() {
             let boundary = target.visible_frame.closest_point(position);
-            let inward = target.visible_frame.center().vector_from(boundary).normalized();
+            let inward = target
+                .visible_frame
+                .center()
+                .vector_from(boundary)
+                .normalized();
             let depth = 140.0 + self.rng.unit() * 220.0;
             return Some(safe.closest_point(boundary.offset(inward.scaled(depth))));
         }
