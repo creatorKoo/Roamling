@@ -638,7 +638,7 @@ dependencies = [
 
 [[package]]
 name = "roamling-agent"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "roamling-core",
  "serde_json",
@@ -646,7 +646,7 @@ dependencies = [
 
 [[package]]
 name = "roamling-core"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "image",
  "roamling-update",
@@ -655,7 +655,7 @@ dependencies = [
 
 [[package]]
 name = "roamling-pet"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "image",
  "roamling-core",
@@ -665,7 +665,7 @@ dependencies = [
 
 [[package]]
 name = "roamling-update"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "ed25519-dalek",
  "rand_core",
@@ -675,7 +675,7 @@ dependencies = [
 
 [[package]]
 name = "roamling-win"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "roamling-agent",
  "roamling-core",
