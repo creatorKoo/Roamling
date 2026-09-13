@@ -141,6 +141,21 @@ pub fn primary_button_down() -> bool {
     unsafe { (GetAsyncKeyState(VK_LBUTTON.0 as i32) as u16 & 0x8000) != 0 }
 }
 
+/// Whether Shift is down right now.
+///
+/// Read as the tray menu is being built. The colour mixer is thirteen sliders
+/// for something most people will never want, so it waits for someone who
+/// holds a key; the presets beside it are always there.
+///
+/// **Shift, not Alt.** Alt belongs to Windows here: pressing it while a menu is
+/// up cancels menu mode, so an Alt-gated item is one the user can never reach
+/// -- the menu shuts as they reach for it. Shift is the local idiom for the
+/// same thing, which is what Explorer's Shift+right-click already means.
+pub fn shift_is_down() -> bool {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{GetAsyncKeyState, VK_SHIFT};
+    unsafe { (GetAsyncKeyState(VK_SHIFT.0 as i32) as u16 & 0x8000) != 0 }
+}
+
 /// The affection key: left Control, the Windows stand-in for the Mac's left
 /// Command. Held, a cursor coming close is a hand rather than a threat.
 pub fn affection_held() -> bool {

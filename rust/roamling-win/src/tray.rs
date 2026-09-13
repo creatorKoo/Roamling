@@ -44,8 +44,10 @@ pub const CMD_UPDATE_CHECK: usize = 13;
 pub const CMD_UPDATE_AUTO: usize = 14;
 pub const CMD_LAUNCH_AT_LOGIN: usize = 15;
 pub const CMD_HIDE: usize = 16;
-#[cfg(debug_assertions)]
-pub const CMD_PALETTE_DEBUG: usize = 17;
+/// The colour mixer. Offered only when the menu was opened with Alt held.
+pub const CMD_PALETTE_CUSTOM: usize = 17;
+/// One id per entry in `built_in_mochi_presets`, in menu order.
+pub const CMD_PALETTE_BASE: usize = 300;
 /// The built-in mascot, then one id per discovered package.
 pub const CMD_PET_BUILT_IN: usize = 1_000;
 pub const CMD_PET_BASE: usize = 1_001;
@@ -296,6 +298,14 @@ pub struct MenuState {
     pub pets: Vec<(String, bool)>,
     /// Whether the built-in mascot is the one showing.
     pub built_in: bool,
+    /// Which colour preset is ticked, by index into `built_in_mochi_presets`.
+    /// `None` once the mixer has been used, because a mixed colour matches no
+    /// preset and ticking the nearest one would be a lie.
+    pub palette: Option<usize>,
+    /// Whether Shift was held as the menu opened. The mixer is thirteen
+    /// sliders for something most people will never want, so it waits for
+    /// someone who holds a key; the presets are always there.
+    pub palette_custom: bool,
     pub auto_update: bool,
     /// Whether the OS starts the app at sign-in, read from the registry.
     pub launch_at_login: bool,
@@ -412,8 +422,21 @@ unsafe fn build(state: &MenuState) -> Option<HMENU> {
                 CMD_PET_BUILT_IN,
                 PCWSTR(name.as_ptr()),
             );
-            #[cfg(debug_assertions)]
-            command(pets, CMD_PALETTE_DEBUG, "Mochi Palette Lab (Debug)...");
+            if let Ok(colours) = CreatePopupMenu() {
+                for (index, (key, _)) in roamling_pet::built_in_mochi_presets().iter().enumerate() {
+                    let label = wide(localized(key));
+                    let _ = AppendMenuW(
+                        colours,
+                        MF_STRING | checked(state.palette == Some(index)),
+                        CMD_PALETTE_BASE + index,
+                        PCWSTR(label.as_ptr()),
+                    );
+                }
+                attach(pets, colours, localized("menu.palette"));
+            }
+            if state.palette_custom {
+                command(pets, CMD_PALETTE_CUSTOM, localized("menu.palette.custom"));
+            }
             if !state.pets.is_empty() {
                 let _ = separator(pets);
             }
@@ -638,6 +661,9 @@ mod tests {
                 ("Installed Two".into(), false),
             ],
             built_in: false,
+            palette: Some(0),
+            // On, so the reachability tests walk the mixer as well.
+            palette_custom: true,
             auto_update: true,
             launch_at_login: false,
             staged: Some("0.2.0".into()),
@@ -724,8 +750,12 @@ mod tests {
             CMD_WORK_APP_BASE,
             CMD_WORK_APP_BASE + 1,
         ];
-        #[cfg(debug_assertions)]
-        expected.push(CMD_PALETTE_DEBUG);
+        // Every colour preset, and the mixer, which `state()` asks for by
+        // saying Alt was held.
+        for index in 0..roamling_pet::built_in_mochi_presets().len() {
+            expected.push(CMD_PALETTE_BASE + index);
+        }
+        expected.push(CMD_PALETTE_CUSTOM);
         for id in expected {
             assert!(found.contains(&id), "{id} is not in the menu: {found:?}");
         }

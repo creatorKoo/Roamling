@@ -111,3 +111,37 @@
 "result.update.ready.detail" = "It will be running the next time Roamling starts. Nothing else is needed.";
 "error.update.failed" = "Couldn’t check for updates";
 "alert.launchAtLogin.failed" = "Could not change the login item";
+
+"menu.palette" = "Colour";
+"menu.palette.custom" = "Mix a colour…";
+"palette.default" = "Original";
+"palette.black" = "Black";
+"palette.white" = "White";
+"palette.red" = "Red";
+"palette.hotpink" = "Hot pink";
+"palette.yellow" = "Yellow";
+"palette.blue" = "Blue";
+"palette.purple" = "Purple";
+"palette.rainbow" = "Rainbow";
+
+"palette.window.title" = "Roamling Colour";
+"palette.header" = "Make Mochi your own";
+"palette.footer" = "Move a slider and the Mochi on screen changes with it, and stays that way. A group you do not touch keeps the drawing exactly as it was — changing the body will not flatten the markings. To undo, press Start over, or pick Colour › Original from the menu.";
+"palette.section.marking" = "Markings";
+"palette.section.body" = "Body";
+"palette.section.eye" = "Eyes";
+"palette.hint.marking" = "The patches on the head, back and tail. Changing only these already makes a different cat.";
+"palette.hint.body" = "The cream coat. Worth touching only for a black cat or a white one.";
+"palette.hint.eye" = "The whole eye — the dark rim, the iris and the white catchlight. Raise the dark end and drop the depth for white eyes.";
+"palette.hue" = "Colour";
+"palette.hueEnd" = "Ends at";
+"palette.hint.hueEnd" = "Set this away from Colour and the hue travels from the dark end to the light one. That is how a rainbow is made. Leave them equal for a single colour.";
+"palette.dark" = "Dark end";
+"palette.light" = "Light end";
+"palette.hint.range" = "The two ends of the shading. Spread them for more depth, close them for a flatter look. They cannot cross.";
+"palette.chroma" = "Depth";
+"palette.hint.chroma" = "Zero is grey; the higher it goes the more colour shows.";
+"palette.pick" = "Pick a colour…";
+"palette.hint.pick" = "“Pick a colour…” opens the Windows colour picker. What you choose becomes the middle of that part's shading; the dark and light ends follow it, keeping the spread they have now.";
+"palette.reset" = "Start over";
+"palette.done" = "Close";

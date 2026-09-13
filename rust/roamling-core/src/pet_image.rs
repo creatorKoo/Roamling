@@ -54,18 +54,80 @@ const CREAM_HIGH: f32 = 100.1;
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PaletteTargets {
     pub hue: f32,
+    /// Where the hue arrives by the light end of the ramp. Equal to `hue` for
+    /// every colour the answer cats drew -- all thirteen held one hue across
+    /// the whole marking -- so this exists for the one thing they could not
+    /// show us. A rainbow needs the colour to travel, and travelling along the
+    /// shading is free: `rank` already says where each pixel sits.
+    pub hue_end: f32,
     pub light_low: f32,
     pub light_high: f32,
     pub chroma: f32,
 }
 
 impl PaletteTargets {
+    /// One hue all the way through, which is what a measured colour is.
     pub const fn new(hue: f32, light_low: f32, light_high: f32, chroma: f32) -> Self {
         Self {
             hue,
+            hue_end: hue,
             light_low,
             light_high,
             chroma,
+        }
+    }
+
+    /// A hue that travels as the shading climbs. `hue_end` is not wrapped to
+    /// the shorter way round: 0 to 359 is meant to be the long way, or there
+    /// would be no rainbow.
+    pub const fn sweeping(
+        hue: f32,
+        hue_end: f32,
+        light_low: f32,
+        light_high: f32,
+        chroma: f32,
+    ) -> Self {
+        Self {
+            hue,
+            hue_end,
+            light_low,
+            light_high,
+            chroma,
+        }
+    }
+
+    /// The one colour this ramp reads as: its middle, in hue as well as in
+    /// lightness. A swatch showing it has to be built from the same arithmetic
+    /// the recolour uses, or it tells the person a colour the cat is not
+    /// wearing -- which is the whole reason a swatch exists.
+    pub fn middle(self) -> PaletteColour {
+        from_hls(
+            (self.hue + self.hue_end) / 2.0,
+            (self.light_low + self.light_high) / 2.0,
+            self.chroma,
+        )
+    }
+
+    /// Point the ramp at a colour, keeping the width of its shading.
+    ///
+    /// A region is five numbers and a colour picker gives one colour, so
+    /// something has to say which of the five it is. It is the middle (user
+    /// decision 2026-09-13): the span between the ends is what makes a cat's
+    /// dark line work read as line work, and it was measured, so picking a
+    /// colour slides that span rather than collapsing it.
+    ///
+    /// A picked colour is one colour, so it ends any sweep. The hue-end slider
+    /// is still there to start another.
+    pub fn aimed_at(self, colour: PaletteColour) -> Self {
+        let span = (self.light_high - self.light_low).clamp(0.0, 100.0);
+        let hue = hue_of(colour);
+        let light_low = (lightness(colour) - span / 2.0).clamp(0.0, 100.0 - span);
+        Self {
+            hue,
+            hue_end: hue,
+            light_low,
+            light_high: light_low + span,
+            chroma: chroma_of(colour),
         }
     }
 }
@@ -143,6 +205,7 @@ impl PetImageSource {
     /// separate 57 cats' worth of outlines at once.
     pub fn region_map(&self, cell: (usize, usize)) -> PaletteMap {
         let mut regions = vec![REGION_KEEP; self.width * self.height];
+        let mut ink = vec![false; self.width * self.height];
         for (index, pixel) in self.pixels.chunks_exact(4).enumerate() {
             if pixel[3] <= OPAQUE {
                 continue;
@@ -152,8 +215,54 @@ impl PetImageSource {
                 regions[index] = REGION_MARKING;
             } else if is_body(colour) {
                 regions[index] = REGION_BODY;
+            } else if (MARKING_HIGH..CREAM_LOW).contains(&lightness(colour)) {
+                regions[index] = REGION_ACCENT;
+            } else if lightness(colour) < INK_HIGH {
+                ink[index] = true;
             }
         }
+        let body: Vec<bool> = regions.iter().map(|region| *region == REGION_BODY).collect();
+        // The outline is drawn antialiased, so the marking pixels touching it
+        // are part ink and part fur, and they are what gives the line its
+        // weight. Which ones they are cannot be read off lightness: measured
+        // over the sheet they run 11/19/26/40/54 at the five percentiles while
+        // fur away from the outline runs 23/26/36/52/54. Adjacency separates
+        // them exactly, and it is known here once rather than per repaint.
+        let edges: Vec<bool> = (0..regions.len())
+            .map(|index| regions[index] == REGION_MARKING && self.beside(&ink, index))
+            .collect();
+
+        // The accent band holds two different things. The blush, the nose and
+        // the inner ear are colours, and the answer cats leave all three alone.
+        // But the same lightness range also holds the gradient where the fur
+        // meets the cream body, and that is not a colour -- it is a blend of
+        // the two. Leaving it alone is what drew a ragged orange line between a
+        // yellow cat's fur and its face: the fur beside it had gone yellow and
+        // the blend had not.
+        //
+        // A blend can be reached from both of the things it blends; a blush can
+        // be reached from the body alone. The marking it is reached from has to
+        // be real fur, because every ink stroke on this cat carries a skirt of
+        // antialiasing that lands in the marking band, and without that clause
+        // the mouth counts as a seam and ends up wearing a halo.
+        let mut clear = ink.clone();
+        for _ in 0..SEAM_INK_CLEAR {
+            clear = (0..clear.len())
+                .map(|index| clear[index] || self.beside(&clear, index))
+                .collect();
+        }
+        for index in 0..clear.len() {
+            clear[index] = regions[index] == REGION_MARKING && !clear[index];
+        }
+        for index in 0..regions.len() {
+            if regions[index] == REGION_ACCENT
+                && self.beside(&clear, index)
+                && self.beside(&body, index)
+            {
+                regions[index] = REGION_SEAM;
+            }
+        }
+
         // Eyes last: they sit inside the marking band by lightness and have to
         // win, which is the whole reason the ring pass exists.
         for (origin_x, origin_y) in self.cells(cell) {
@@ -161,7 +270,19 @@ impl PetImageSource {
                 regions[spot] = REGION_EYE;
             }
         }
-        PaletteMap { regions }
+        PaletteMap { regions, edges }
+    }
+
+    fn beside(&self, mask: &[bool], index: usize) -> bool {
+        let (x, y) = ((index % self.width) as isize, (index / self.width) as isize);
+        NEIGHBOURS.iter().any(|(step_x, step_y)| {
+            let (near_x, near_y) = (x + step_x, y + step_y);
+            near_x >= 0
+                && near_y >= 0
+                && (near_x as usize) < self.width
+                && (near_y as usize) < self.height
+                && mask[near_y as usize * self.width + near_x as usize]
+        })
     }
 
     fn cells(&self, cell: (usize, usize)) -> Vec<(usize, usize)> {
@@ -259,16 +380,27 @@ impl PetImageSource {
             }
         };
 
-        seeds
+        let masks: Vec<Vec<usize>> = seeds
             .into_iter()
             .map(|seed| self.grown_eye(&seed, origin_x, origin_y, cell))
             // With no partner to vouch for it a ring is on its own, and the
-            // sizes separate cleanly: every eye found as half of a pair grows
-            // to 289-357px, while the blobs that turned out to be tail,
-            // shoulder and hind leg came in at 410, 715, 931 and 1,091. The
-            // frames that genuinely show a single eye sit at 303-318 and stay.
+            // sizes separate cleanly. Re-measured every time the growth changes,
+            // by turning the pair rule and this filter off and growing every
+            // ring on the sheet: real eyes run 51-291px and the false blobs out
+            // on the jump row come in at 461 and 727. The cap sits in that gap,
+            // where it already was -- measured there, not scaled into it.
             .filter(|mask| !lone || mask.len() <= EYE_MASK_MAX)
-            .collect::<Vec<_>>()
+            // An eye is not tall. Area alone does not say that: the front paw
+            // on the stretching frame is drawn as a ring round a cream pad,
+            // which passes the hole test, and its rim is 304px, which passes
+            // the area test -- but it is 68 pixels tall.
+            .filter(|mask| {
+                let (_, _, top, bottom) = bounds(mask, cell_width);
+                bottom - top < EYE_SPAN_MAX
+            })
+            .collect();
+
+        masks
             .into_iter()
             .flatten()
             .map(|spot| {
@@ -288,6 +420,20 @@ impl PetImageSource {
     /// the ink component and is exactly what would otherwise be painted as fur.
     /// Bounded, so it cannot run away into the marking -- that escape is how
     /// every earlier attempt died.
+    ///
+    /// The bound is the marking band's ceiling, not the cream body's floor. The
+    /// difference is the accent band, where the eyelid and the skin round the
+    /// eye live: 7% of the mask, measured over the sheet, and all of it outside
+    /// the drawn eye. That cost nothing while eyes stayed brown, and on a black
+    /// cat with gold eyes it was a gold ring drawn on the cheek. The iris this
+    /// growth exists to collect sits below the ceiling, with the rest of the
+    /// marking.
+    ///
+    /// Lightness alone is still not enough, because the shading in the eye
+    /// socket is the same brown as the iris. What separates them is which side
+    /// of the rim they are on, and that is what `sees_out` asks. Shortening the
+    /// growth instead does not work: at one step the crescent is left behind
+    /// and comes out painted as fur, which on a blue cat is a blue eye bottom.
     fn grown_eye(
         &self,
         seed: &[usize],
@@ -301,6 +447,14 @@ impl PetImageSource {
         for spot in seed {
             inside[*spot] = true;
         }
+        let seeded = inside.clone();
+        // The rim draws the eye's extent, so growth stays inside the box the
+        // rim spans. Three steps is enough to walk round the outside of the
+        // rim and out into the fur beside it, and there the fur is the same
+        // brown as the iris: measured on the caught frame, three pixels of the
+        // head marking at lightness 44-52 had been taken into the mask and came
+        // out bright green. Nothing the growth is for lies outside this box.
+        let (left, right, top, bottom) = bounds(seed, cell_width);
         let mut frontier = mask.clone();
         for _ in 0..EYE_GROWTH {
             let mut next = Vec::new();
@@ -309,8 +463,17 @@ impl PetImageSource {
                     if inside[neighbour] {
                         continue;
                     }
+                    let (x, y) = (neighbour % cell_width, neighbour / cell_width);
+                    if x < left || x > right || y < top || y > bottom {
+                        continue;
+                    }
                     let pixel = self.cell_pixel(neighbour, origin_x, origin_y, cell);
-                    if pixel[3] <= OPAQUE || lightness([pixel[0], pixel[1], pixel[2]]) >= CREAM_LOW {
+                    if pixel[3] <= OPAQUE
+                        || lightness([pixel[0], pixel[1], pixel[2]]) >= MARKING_HIGH
+                    {
+                        continue;
+                    }
+                    if self.sees_out(neighbour, &seeded, origin_x, origin_y, cell) {
                         continue;
                     }
                     inside[neighbour] = true;
@@ -323,7 +486,38 @@ impl PetImageSource {
             mask.extend(next.iter().copied());
             frontier = next;
         }
+        // Fill whatever the finished mask wraps around, however the seed
+        // arrived. Only the ring of a pair was handed its holes; `best_pair`
+        // returns its partner as the bare ink component, so one eye of every
+        // pair came in without its interior. The growth put the iris back --
+        // but the catchlight is cream, above where the growth stops, so nothing
+        // could reach it. That is a white dot in one eye and a dark hole in the
+        // other, swapping sides from frame to frame as the pair is chosen
+        // differently: the dot moving left and right while the cat blinks.
+        let holes = enclosed(&mask, cell_width, cell_height);
+        mask.extend(holes);
         mask
+    }
+
+    /// Can this pixel see the face without crossing the rim?
+    ///
+    /// The cream body is the outside world here. The sclera is cream as well,
+    /// but the rim encloses it, so it arrived in the seed and is not outside.
+    fn sees_out(
+        &self,
+        spot: usize,
+        seeded: &[bool],
+        origin_x: usize,
+        origin_y: usize,
+        cell: (usize, usize),
+    ) -> bool {
+        around(spot, cell.0, cell.1).into_iter().any(|neighbour| {
+            if seeded[neighbour] {
+                return false;
+            }
+            let pixel = self.cell_pixel(neighbour, origin_x, origin_y, cell);
+            pixel[3] > OPAQUE && lightness([pixel[0], pixel[1], pixel[2]]) >= CREAM_LOW
+        })
     }
 
     /// The best pair: a ring we trust, and the blob that looks like its twin --
@@ -512,9 +706,25 @@ impl PetImageSource {
         // region nobody moved keeps its own bytes.
         let moved = |region: u8| match region {
             REGION_MARKING => targets.marking != identity.marking,
-            REGION_BODY => targets.body != identity.body,
+            REGION_BODY | REGION_ACCENT => targets.body != identity.body,
             REGION_EYE => targets.eye != identity.eye,
+            // A seam lies between two regions, so either one moving moves it.
+            REGION_SEAM => {
+                targets.marking != identity.marking || targets.body != identity.body
+            }
             _ => false,
+        };
+        // How far the body travelled, so the accent can travel with it.
+        let middle = |aim: PaletteTargets| (aim.light_low + aim.light_high) / 2.0;
+        let body_shift = middle(targets.body) - middle(identity.body);
+        // And how much colour it kept. A blush that darkens with the body but
+        // holds its own depth comes back as orange specks on a black cat --
+        // there is still room for chroma at that lightness, and it shows. The
+        // accent belongs to the body's colour family, so it fades with it.
+        let body_depth = if identity.body.chroma > 0.0 {
+            targets.body.chroma / identity.body.chroma
+        } else {
+            1.0
         };
 
         // Rank inside each region's own lightness order, not the raw value.
@@ -522,10 +732,11 @@ impl PetImageSource {
         // it by value leaves every colour darker than the answer cats. Rank
         // also carries an eye across intact: the pupil is the darkest thing in
         // it and the catchlight the lightest, whatever colour they end up.
-        let mut ramps: [Vec<f32>; 4] = Default::default();
+        let mut ramps: [Vec<f32>; REGION_COUNT] = Default::default();
         for (index, pixel) in self.pixels.chunks_exact(4).enumerate() {
             let region = map.regions[index];
-            if pixel[3] > OPAQUE && moved(region) {
+            let laid = region != REGION_ACCENT && region != REGION_SEAM;
+            if pixel[3] > OPAQUE && laid && moved(region) {
                 ramps[region as usize].push(lightness([pixel[0], pixel[1], pixel[2]]));
             }
         }
@@ -537,13 +748,99 @@ impl PetImageSource {
         for (index, pixel) in pixels.chunks_exact_mut(4).enumerate() {
             let alpha = u32::from(pixel[3]);
             let region = map.regions[index];
-            if pixel[3] > OPAQUE && moved(region) {
-                let ramp = &ramps[region as usize];
-                if let (Some(aim), false) = (targets.targets(region), ramp.is_empty()) {
-                    let here = lightness([pixel[0], pixel[1], pixel[2]]);
-                    let position = rank(ramp, here);
-                    let light = aim.light_low + position * (aim.light_high - aim.light_low);
-                    pixel[..3].copy_from_slice(&from_hls(aim.hue, light, aim.chroma));
+            let colour = [pixel[0], pixel[1], pixel[2]];
+            // The catchlight is not one of the eye's colours. It is a white dot
+            // drawn on top of the iris, and every open eye on the sheet has one.
+            // Running it through the eye's ramp gives it that eye's hue at the
+            // top of its range -- a gold dot on a gold iris, which reads as no
+            // dot at all. Measured: the black cat's white is inside the mask in
+            // 54 of the 55 cells that have open eyes, and it is 2 to 16 pixels
+            // depending on the frame, so the small ones vanished and the large
+            // ones did not. That is the dot coming and going.
+            let catchlight = region == REGION_EYE && lightness(colour) >= CREAM_LOW;
+            if pixel[3] > OPAQUE && moved(region) && !catchlight {
+                // How much of this pixel belongs to its band. The boundary
+                // between marking and body is a gradient, so a hard threshold
+                // repaints one pixel and skips the next and the seam comes out
+                // as scattered dots -- the speckle along every edge. Fading the
+                // last few lightness steps joins them back up.
+                let weight = match region {
+                    // A pixel touching the outline hands back to the outline
+                    // over a much longer fade, because that is how wide the
+                    // antialiasing was drawn. Applied to the whole band it
+                    // would drag half the real fur back with it; gated on
+                    // touching ink it costs none of it.
+                    REGION_MARKING => band_weight(
+                        lightness(colour),
+                        MARKING_LOW,
+                        MARKING_HIGH,
+                        if map.edges[index] {
+                            EDGE_FEATHER
+                        } else {
+                            BAND_FEATHER
+                        },
+                    ),
+                    REGION_ACCENT => {
+                        band_weight(lightness(colour), MARKING_HIGH, CREAM_LOW, BAND_FEATHER)
+                    }
+                    REGION_BODY => {
+                        band_weight(lightness(colour), CREAM_LOW, CREAM_HIGH, BAND_FEATHER)
+                    }
+                    _ => 1.0,
+                };
+                // What a pixel becomes when it belongs to the body rather than
+                // to a colour of its own: it keeps its hue, and follows the
+                // body in lightness and depth. That is the accent, and it is
+                // also what an outline blend wants -- staying put would leave a
+                // pale speck sitting on a black cat.
+                let as_body = || {
+                    let light = (lightness(colour) + body_shift).clamp(0.0, 100.0);
+                    from_hls(hue_of(colour), light, chroma_of(colour) * body_depth)
+                };
+                if region == REGION_ACCENT {
+                    pixel[..3].copy_from_slice(&as_body());
+                } else if region == REGION_SEAM {
+                    // Rebuilt as the blend it is: the brightest fur at the end
+                    // it leaves, the body at the end it arrives. Both ends join
+                    // their neighbours exactly, because the brightest fur is
+                    // where the marking's own ramp finishes.
+                    let across = ((lightness(colour) - MARKING_HIGH)
+                        / (CREAM_LOW - MARKING_HIGH))
+                        .clamp(0.0, 1.0);
+                    let brightest = from_hls(
+                        targets.marking.hue_end,
+                        targets.marking.light_high,
+                        targets.marking.chroma,
+                    );
+                    pixel[..3].copy_from_slice(&mix(brightest, as_body(), across));
+                } else {
+                    let ramp = &ramps[region as usize];
+                    if let (Some(aim), false) = (targets.targets(region), ramp.is_empty()) {
+                        let position = place(ramp, lightness(colour));
+                        let light = aim.light_low + position * (aim.light_high - aim.light_low);
+                        let hue = aim.hue + position * (aim.hue_end - aim.hue);
+                        let fresh = from_hls(hue, light, aim.chroma);
+                        // A marking pixel that is part black outline and part
+                        // cream body lands in the fur's lightness band by
+                        // accident, and painting it fur colour scatters bright
+                        // dots along every edge -- invisible on a brown cat,
+                        // glaring on a yellow one. Such a blend is grey:
+                        // measured over the sheet, pixels beside the ink sit at
+                        // chroma 71 against fur's 95. Too close for a threshold,
+                        // so it mixes: grey goes with the body, colour goes with
+                        // the fur, and the two overlap smoothly.
+                        let fresh = if region == REGION_MARKING {
+                            mix(as_body(), fresh, colourfulness(chroma_of(colour)))
+                        } else {
+                            fresh
+                        };
+                        // The band's edge hands off to the neighbouring region,
+                        // not back to the original colour. Fading towards what
+                        // was there is only invisible when the new colour is
+                        // near the old one -- on a black cat it left the
+                        // original pale brown sitting in the seam.
+                        pixel[..3].copy_from_slice(&mix(as_body(), fresh, weight));
+                    }
                 }
             }
             for channel in 0..3 {
@@ -562,6 +859,11 @@ impl PetImageSource {
 #[derive(Debug, Clone)]
 pub struct PaletteMap {
     regions: Vec<u8>,
+    /// Marking pixels that touch the ink outline, one per pixel alongside
+    /// `regions`. Not a sixth region: they are marking, and they take the
+    /// marking's colour -- they just hand back to the outline over a longer
+    /// fade than the rest of the band does.
+    edges: Vec<bool>,
 }
 
 impl PaletteMap {
@@ -587,6 +889,28 @@ impl PaletteMap {
             .iter()
             .filter(|region| **region == REGION_BODY)
             .count()
+    }
+
+    pub fn accent_pixels(&self) -> usize {
+        self.regions
+            .iter()
+            .filter(|region| **region == REGION_ACCENT)
+            .count()
+    }
+
+    pub fn seam_pixels(&self) -> usize {
+        self.regions
+            .iter()
+            .filter(|region| **region == REGION_SEAM)
+            .count()
+    }
+
+    /// One byte per pixel, so a tool can paint the map and look at it. Counting
+    /// the regions says a mask is the right size; only seeing it says the mask
+    /// is in the right place, and the eye that leaked onto the eyelid counted
+    /// perfectly normally.
+    pub fn regions(&self) -> &[u8] {
+        &self.regions
     }
 }
 
@@ -614,6 +938,26 @@ const REGION_MARKING: u8 = 1;
 /// is near L 26. Only the ring of outline around it tells them apart.
 const REGION_EYE: u8 = 2;
 const REGION_BODY: u8 = 3;
+/// The blush, the nose, the inner ears -- and the shading that runs between
+/// marking and body, which lives in the same lightness band and cannot be told
+/// apart from them by colour (`docs/palette.md` §0).
+///
+/// It keeps its own hue and depth but follows the body's lightness, because
+/// that is what it is: a highlight lying on the body. Leaving it still while
+/// the body moves is what drew a glowing cream line around every dark edge of
+/// the black cat.
+const REGION_ACCENT: u8 = 4;
+/// The gradient where the marking meets the body. Sits in the accent's
+/// lightness band and is not an accent: it is a blend, and it gets rebuilt from
+/// the two answers it lies between.
+const REGION_SEAM: u8 = 5;
+const REGION_COUNT: usize = 6;
+
+/// How far a marking pixel has to be from any ink before an accent pixel beside
+/// it counts as a seam. One step is not enough: the mouth and the whiskers are
+/// ink strokes on the cream face, their antialiasing reaches two pixels out into
+/// the marking band, and treating that as fur put a halo round the mouth.
+const SEAM_INK_CLEAR: usize = 2;
 
 const HOLE_MIN: usize = 8;
 const HOLE_MAX: usize = 80;
@@ -625,6 +969,18 @@ const PARTNER_ROW_SLACK: usize = 6;
 const PARTNER_SIDE_GAP: usize = 4;
 /// Largest grown mask a ring may produce when nothing vouches for it as a pair.
 const EYE_MASK_MAX: usize = 400;
+/// And no eye is taller than this. A shape test, not a size one, and it catches
+/// what the size test cannot.
+///
+/// Height rather than the longer side, because an eye is drawn wide and the
+/// things that are not eyes are drawn tall. Measured over both sheets: every
+/// real eye fits in 22, and where a whisker touches the rim and comes along
+/// with it the pair reaches 27. Above that there is nothing real -- a whisker
+/// running off on its own is 36, and the front paw on the stretching frame,
+/// which is a ring round a cream pad and passes both the hole test and the area
+/// test, is 68. Capping the longer side instead was tried first and took a real
+/// eye with it: at r7c3 the far eye and a whisker are one ink blob 40 wide.
+const EYE_SPAN_MAX: usize = 30;
 /// A half-lidded eye's stroke: small, flat, and one of a matched pair.
 const LID_SIZE_LOW: usize = 15;
 const LID_SIZE_HIGH: usize = 150;
@@ -656,6 +1012,94 @@ fn is_marking(colour: PaletteColour) -> bool {
 
 fn is_body(colour: PaletteColour) -> bool {
     (CREAM_LOW..CREAM_HIGH).contains(&lightness(colour))
+}
+
+fn chroma_of(colour: PaletteColour) -> f32 {
+    let low = *colour.iter().min().expect("three channels") as f32;
+    let high = *colour.iter().max().expect("three channels") as f32;
+    high - low
+}
+
+/// Degrees, the ordinary hexagon. Grey has no hue and answers zero.
+fn hue_of(colour: PaletteColour) -> f32 {
+    let chroma = chroma_of(colour);
+    if chroma == 0.0 {
+        return 0.0;
+    }
+    let (red, green, blue) = (colour[0] as f32, colour[1] as f32, colour[2] as f32);
+    let high = red.max(green).max(blue);
+    let sixth = if high == red {
+        ((green - blue) / chroma).rem_euclid(6.0)
+    } else if high == green {
+        (blue - red) / chroma + 2.0
+    } else {
+        (red - green) / chroma + 4.0
+    };
+    (sixth * 60.0).rem_euclid(360.0)
+}
+
+/// How much of a pixel's place on the ramp comes from its own lightness rather
+/// than its rank among the others.
+///
+/// Rank alone flattens the histogram. Mochi's shading is gentle and bunched --
+/// the marking's p5/p50/p95 are 17/29/53 -- so flattening it stretches those
+/// small steps into visible bands, which is the graininess the recoloured cats
+/// had. Value alone leaves everything bunched where it started and the colour
+/// never arrives. Most of the way towards value, with enough rank left to keep
+/// the median where the answer cats put it.
+const RAMP_FROM_VALUE: f32 = 0.65;
+
+/// Lightness units over which a band hands off to its neighbour.
+const BAND_FEATHER: f32 = 5.0;
+
+/// And over which the outline's antialiasing hands back to the outline.
+///
+/// Four times as wide, because the skirt is that wide -- 28% of it sits below
+/// lightness 20 and 45% below 25, where the band's floor is 10. A yellow cat is
+/// the worst case and not by tuning: saturated yellow cannot be dark, so its
+/// marking has to start at lightness 50, and every one of those skirt pixels
+/// was being lifted there. The line came out thin and broken because the weight
+/// around it had been painted away.
+const EDGE_FEATHER: f32 = 30.0;
+
+/// Chroma at which a marking pixel is fully fur rather than an outline blend,
+/// and where it is fully blend. Measured over the sheet: pixels beside the ink
+/// run 17/48/71/98/173 at the five percentiles, fur 77/87/95/206/214.
+const BLEND_CHROMA: f32 = 35.0;
+const FUR_CHROMA: f32 = 80.0;
+
+fn colourfulness(chroma: f32) -> f32 {
+    ((chroma - BLEND_CHROMA) / (FUR_CHROMA - BLEND_CHROMA)).clamp(0.0, 1.0)
+}
+
+/// How much of a pixel belongs to its band, 0 at the edges and 1 inside.
+/// `rising` is the fade at the dark end, which is the only one that ever needs
+/// to be wider than the other.
+fn band_weight(light: f32, low: f32, high: f32, rising: f32) -> f32 {
+    let inside = ((light - low) / rising).min((high - light) / BAND_FEATHER);
+    inside.clamp(0.0, 1.0)
+}
+
+/// Between two colours, `t` of the way to the second.
+fn mix(from: PaletteColour, to: PaletteColour, t: f32) -> PaletteColour {
+    let mut out = [0_u8; 3];
+    for channel in 0..3 {
+        let was = from[channel] as f32;
+        out[channel] = (was + (to[channel] as f32 - was) * t).round() as u8;
+    }
+    out
+}
+
+/// Where `value` belongs on the ramp, as 0.0 to 1.0.
+fn place(ramp: &[f32], value: f32) -> f32 {
+    let low = ramp[0];
+    let high = ramp[ramp.len() - 1];
+    let spread = if high > low {
+        ((value - low) / (high - low)).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    RAMP_FROM_VALUE * spread + (1.0 - RAMP_FROM_VALUE) * rank(ramp, value)
 }
 
 /// Where `value` sits in a sorted ramp, as 0.0 to 1.0.
@@ -994,19 +1438,28 @@ mod tests {
         let plain = image.image();
         // Repainting a region replaces its varying chroma with one value, so a
         // region nobody asked about has to be left alone completely.
-        for index in [0_usize, 1, 2] {
+        for index in [0_usize, 1] {
             assert_eq!(
                 recolored.pixels[index * 4..index * 4 + 3],
                 plain.pixels[index * 4..index * 4 + 3],
                 "pixel {index} should not have moved"
             );
         }
-        assert_ne!(recolored.pixels[12..15], plain.pixels[12..15]);
+        assert_ne!(recolored.pixels[12..15], plain.pixels[12..15], "the body");
+        // The blush is a highlight lying on the body, so it travels with it.
+        // Holding it still is what drew a glowing cream line around every dark
+        // edge of the black cat.
+        assert_ne!(
+            recolored.pixels[8..11],
+            plain.pixels[8..11],
+            "the blush should follow the body"
+        );
     }
 
     #[test]
     fn a_recoloured_eye_keeps_its_pupil_dark_and_its_catchlight_bright() {
-        // Same 7x7 ring as the detection test: ink rim, pale hole.
+        // The 7x7 ring of the detection test, filled in the way a drawn eye is:
+        // ink rim, a brown iris, and one white dot on top of it.
         let mut pixels = vec![[254, 242, 220, 255]; 49];
         for y in 1..6 {
             for x in 1..6 {
@@ -1014,10 +1467,11 @@ mod tests {
                 pixels[y * 7 + x] = if edge {
                     [5, 4, 4, 255]
                 } else {
-                    [250, 250, 250, 255]
+                    [120, 70, 40, 255]
                 };
             }
         }
+        pixels[3 * 7 + 3] = [250, 250, 250, 255];
         let image = PetImageSource {
             width: 7,
             height: 7,
@@ -1042,17 +1496,98 @@ mod tests {
         // Lightness is placed by rank, so the darkest thing in the eye stays
         // the darkest and the brightest stays the brightest whatever hue they
         // are given. That is what carries an eye's structure across.
-        //
-        // The bright end does not land exactly on `light_high`: ties take the
-        // lower edge of their run, and here nine of twenty-five pixels share
-        // one lightness. On a real sheet lightness is near-continuous and the
-        // gap is invisible. What has to hold is the order and the bounds.
-        assert!(at(1, 1) < at(3, 3), "the rim should stay darker than the hole");
+        assert!(at(1, 1) < at(2, 2), "the rim should stay darker than the iris");
         assert!(at(1, 1) <= 12.0, "the rim should sit at the dark end");
         assert!(
-            (50.0..=90.0).contains(&at(3, 3)),
-            "the catchlight should be well up the ramp and inside it"
+            (20.0..=80.0).contains(&at(2, 2)),
+            "the iris should take the eye's colour, inside the range asked for"
         );
+        // And the white dot on top is not one of the eye's colours. Giving it
+        // the eye's hue at the top of the ramp puts a gold dot on a gold iris,
+        // which is the same as having no dot.
+        let dot = (3 * 7 + 3) * 4;
+        assert_eq!(
+            recolored.pixels[dot..dot + 3],
+            image.image().pixels[dot..dot + 3],
+            "the catchlight should still be the white it was drawn"
+        );
+    }
+
+    #[test]
+    fn aiming_a_ramp_at_its_own_middle_leaves_it_where_it_was() {
+        let was = IDENTITY.marking;
+        let again = was.aimed_at(was.middle());
+        assert!((again.hue - was.hue).abs() < 2.0, "{again:?}");
+        assert!((again.light_low - was.light_low).abs() < 2.0, "{again:?}");
+        assert!((again.light_high - was.light_high).abs() < 2.0, "{again:?}");
+        assert!((again.chroma - was.chroma).abs() < 6.0, "{again:?}");
+    }
+
+    #[test]
+    fn a_ramp_aimed_at_a_colour_keeps_its_width_even_at_the_ends() {
+        let wide = PaletteTargets::new(22.0, 30.0, 90.0, 200.0);
+        // White. The middle cannot sit at lightness 100 and still leave room
+        // for the dark end, so the span slides rather than shrinking.
+        let aimed = wide.aimed_at([255, 255, 255]);
+        assert!((aimed.light_high - aimed.light_low - 60.0).abs() < 0.01, "{aimed:?}");
+        assert!(aimed.light_high <= 100.0, "{aimed:?}");
+        // And a sweep ends when one colour is asked for.
+        let rainbow = PaletteTargets::sweeping(0.0, 359.0, 36.0, 86.0, 175.0);
+        let aimed = rainbow.aimed_at([40, 80, 200]);
+        assert_eq!(aimed.hue, aimed.hue_end, "{aimed:?}");
+    }
+
+    #[test]
+    fn the_accent_darkens_with_the_body_but_keeps_its_own_colour() {
+        // A blush at L 72.5, warm and saturated.
+        let image = source(&[[251, 154, 119, 255], [254, 242, 220, 255]]);
+        let map = image.region_map((0, 0));
+        assert_eq!(map.accent_pixels(), 1);
+        let night = Palette {
+            // The black preset's body: from a mid of 90.5 down to 30.
+            body: PaletteTargets::new(349.0, 20.0, 40.0, 7.0),
+            ..IDENTITY
+        };
+        let recolored = image.recolored(&map, IDENTITY, night).expect("matching map");
+        let blush = [recolored.pixels[0], recolored.pixels[1], recolored.pixels[2]];
+        assert!(
+            lightness(blush) < 20.0,
+            "the blush should have gone dark with the body, not stayed a lamp: {blush:?}"
+        );
+        assert!(
+            blush[0] > blush[2],
+            "and it should still be warm rather than turned grey: {blush:?}"
+        );
+    }
+
+    #[test]
+    fn a_sweeping_hue_travels_with_the_shading() {
+        // Three marking pixels, dark to light, so the ranks are 0, 0.5 and 1.
+        let image = source(&[
+            [60, 30, 15, 255],
+            [115, 52, 27, 255],
+            [200, 110, 50, 255],
+        ]);
+        let map = image.region_map((0, 0));
+        assert_eq!(map.marking_pixels(), 3);
+        let rainbow = Palette {
+            marking: PaletteTargets::sweeping(0.0, 240.0, 40.0, 60.0, 120.0),
+            ..IDENTITY
+        };
+        let recolored = image
+            .recolored(&map, IDENTITY, rainbow)
+            .expect("matching map");
+        let at = |index: usize| {
+            let start = index * 4;
+            [
+                recolored.pixels[start],
+                recolored.pixels[start + 1],
+                recolored.pixels[start + 2],
+            ]
+        };
+        let (dark, light) = (at(0), at(2));
+        assert!(dark[0] > dark[2], "the dark end should leave from red");
+        assert!(light[2] > light[0], "the light end should arrive at blue");
     }
 
     #[test]

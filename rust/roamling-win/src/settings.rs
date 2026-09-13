@@ -28,6 +28,11 @@ pub const CURSOR_AWARENESS: &str = "roamling.cursorAwareness";
 pub const SCALE: &str = "roamling.scale";
 pub const PET_PACKAGE_PATH: &str = "roamling.petPackagePath";
 pub const AUTO_UPDATE: &str = "roamling.autoUpdate";
+/// The chosen colour, as the fifteen numbers of a `Palette`. Absent means the
+/// sheet as drawn, so picking the original clears the key rather than writing
+/// the defaults back -- the same rule the tuning panel follows, and for the
+/// same reason: a stored default freezes and stops following the code.
+pub const PALETTE: &str = "roamling.palette";
 pub const WORK_APPS: &str = "roamling.workApps";
 pub const DEFAULT_WORK_APPS: [&str; 6] = [
     "Hwp.exe",

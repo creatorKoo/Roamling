@@ -193,6 +193,104 @@ pub fn prepare_built_in_mochi_recolor() -> bool {
     built_in_source().is_some()
 }
 
+/// The colours the menu offers, in the order it shows them.
+///
+/// The hues come off the hand-drawn answer cats (`docs/palette.md` §0). The
+/// **lightness ends do not**, and that is the one place these were tuned by eye
+/// rather than measured: the answers' marking is bunched at one lightness while
+/// this ramp spreads evenly by rank, so reusing their p5 as the dark end left
+/// yellow reading as olive and red as washed salmon. Raising the dark end fixes
+/// both. The first entry is the sheet as drawn, so picking it restores the
+/// original bytes exactly.
+///
+/// **The body moves only for black and white** -- the answer key's black cat
+/// dropped the cream body from lightness 93 to 33, and no other colour touched
+/// it. When it does move the blush and the boundary shading follow it, or the
+/// cat ends up outlined in glowing cream.
+///
+/// **Eyes are paired to the fur** the way a cat's are: gold on black, blue on
+/// white, green on ginger. The dark end stays at 0 so the pupil is still black
+/// -- chroma cannot survive there and `from_hls` clamps it away -- and the
+/// light end keeps the catchlight bright, so the colour lands on the iris
+/// between them and nowhere else.
+const PRESETS: [(&str, Palette); 9] = [
+    ("palette.default", BUILT_IN_PALETTE),
+    (
+        // A cat that is black rather than Mochi seen at night: marking and
+        // body land on nearly the same darkness, so the calico patches stop
+        // showing through and only the outline and the eyes read.
+        "palette.black",
+        Palette::new(
+            PaletteTargets::new(40.0, 3.0, 18.0, 8.0),
+            PaletteTargets::new(40.0, 8.0, 20.0, 8.0),
+            PaletteTargets::new(48.0, 10.0, 96.0, 205.0),
+        ),
+    ),
+    (
+        "palette.white",
+        Palette::new(
+            PaletteTargets::new(26.0, 42.0, 92.0, 16.0),
+            PaletteTargets::new(38.0, 90.0, 98.0, 14.0),
+            PaletteTargets::new(210.0, 0.0, 84.0, 190.0),
+        ),
+    ),
+    (
+        "palette.red",
+        Palette::new(
+            PaletteTargets::new(8.0, 28.0, 80.0, 200.0),
+            BUILT_IN_PALETTE.body,
+            PaletteTargets::new(112.0, 0.0, 82.0, 180.0),
+        ),
+    ),
+    (
+        "palette.hotpink",
+        Palette::new(
+            PaletteTargets::new(332.0, 33.0, 84.0, 205.0),
+            BUILT_IN_PALETTE.body,
+            PaletteTargets::new(185.0, 0.0, 82.0, 190.0),
+        ),
+    ),
+    (
+        "palette.yellow",
+        Palette::new(
+            PaletteTargets::new(48.0, 30.0, 90.0, 200.0),
+            BUILT_IN_PALETTE.body,
+            PaletteTargets::new(100.0, 0.0, 82.0, 180.0),
+        ),
+    ),
+    (
+        "palette.blue",
+        Palette::new(
+            PaletteTargets::new(214.0, 22.0, 78.0, 195.0),
+            BUILT_IN_PALETTE.body,
+            PaletteTargets::new(35.0, 0.0, 82.0, 200.0),
+        ),
+    ),
+    (
+        "palette.purple",
+        Palette::new(
+            PaletteTargets::new(290.0, 20.0, 76.0, 185.0),
+            BUILT_IN_PALETTE.body,
+            PaletteTargets::new(45.0, 0.0, 82.0, 195.0),
+        ),
+    ),
+    (
+        // The one colour no answer cat could show: a hue that travels instead
+        // of holding still. It sweeps the long way round on purpose.
+        "palette.rainbow",
+        Palette::new(
+            PaletteTargets::sweeping(0.0, 359.0, 36.0, 86.0, 175.0),
+            BUILT_IN_PALETTE.body,
+            PaletteTargets::new(330.0, 0.0, 82.0, 195.0),
+        ),
+    ),
+];
+
+/// Name key and palette for each preset, in menu order.
+pub fn built_in_mochi_presets() -> &'static [(&'static str, Palette)] {
+    &PRESETS
+}
+
 /// Where marking, body and eyes already are. The debug controls open here, and
 /// coming back to it has to restore the original bytes.
 pub const fn built_in_mochi_palette() -> Palette {
@@ -387,12 +485,19 @@ mod tests {
     /// Marking and body were measured in `output/palette-answers/region_identity.py`
     /// over the drawn cells of the standard sheet: 242,663 and 228,117.
     ///
-    /// The eye figure is 30,529 -- 51 of 57 cells finding a pair at about 600px
+    /// The eye figure is 21,051 -- 51 of 57 cells finding a pair at about 400px
     /// each. It is worth a band in both directions. Far below and ring detection
     /// has broken. Far above and the false blobs are back: taking every ring at
     /// face value instead of the best pair put 514px of tail into the landing
     /// animation's last frame and 931px into the jump's, which is how this was
     /// found. Neither failure shows up in a render test.
+    ///
+    /// It was 30,529 until the growth was stopped from leaving the eye, in two
+    /// steps. First the eyelid and the socket shading round the eye, brown like
+    /// the iris, which is why lightness had let them in. Then the fur beside the
+    /// eye, which three steps of growth could reach by walking round the outside
+    /// of the rim. Nobody could see either while eyes stayed brown; a black cat
+    /// with gold eyes drew them on the cheek.
     #[test]
     fn the_shipped_sheet_splits_into_the_regions_that_were_measured() {
         let standard = PetImageSource::decode(STANDARD).expect("standard");
@@ -407,9 +512,75 @@ mod tests {
             "body pixels moved a long way from the measurement: {body}"
         );
         assert!(
-            (29_500..31_500).contains(&eye),
+            (20_000..22_500).contains(&eye),
             "eye pixels left the measured band: {eye}"
         );
+    }
+
+    /// Writes each preset's idle row as raw RGBA so it can be looked at.
+    ///
+    /// Numbers measured off an answer cat are not a promise that the preset
+    /// looks right: the operator sits between them and the screen. The same
+    /// reason `ROAMLING_WRITE_TRACE` exists -- some things are only true if you
+    /// go and check.
+    #[test]
+    fn write_presets_when_asked() {
+        let Some(directory) = std::env::var_os("ROAMLING_WRITE_PRESETS") else {
+            return;
+        };
+        let directory = std::path::PathBuf::from(directory);
+        std::fs::create_dir_all(&directory).expect("preset directory");
+        assert!(prepare_built_in_mochi_recolor());
+        // Three sizes, because three different questions get asked. The idle
+        // row is what the close-ups crop. The whole standard sheet is the only
+        // way to see a false eye out on a tail in row four, or to check that a
+        // catchlight survives in every frame and not just the one being looked
+        // at. The extension sheet carries sleeping, caught, sitting and
+        // stretching, and "the outline is thin when the mouse picks him up" is
+        // a claim about a row that lives only there.
+        for (name, palette) in built_in_mochi_presets() {
+            let asset = built_in_mochi_recolored(*palette).expect("recoloured");
+            let row = CELL_WIDTH * COLUMNS * 4 * CELL_HEIGHT;
+            std::fs::write(
+                directory.join(format!("{name}.rgba")),
+                &asset.atlas.pixels[..row],
+            )
+            .expect("write");
+            std::fs::write(
+                directory.join(format!("full.{name}.rgba")),
+                &asset.atlas.pixels,
+            )
+            .expect("write");
+            let extension = asset.extension_atlas.as_ref().expect("extension");
+            std::fs::write(directory.join(format!("ext.{name}.rgba")), &extension.pixels)
+                .expect("write");
+        }
+        let source = built_in_source().expect("source");
+        let regions = source.standard_map.regions();
+        let row = CELL_WIDTH * COLUMNS * CELL_HEIGHT;
+        std::fs::write(directory.join("regions.bin"), &regions[..row]).expect("write");
+        std::fs::write(directory.join("full.regions.bin"), regions).expect("write");
+        std::fs::write(
+            directory.join("ext.regions.bin"),
+            source.extension_map.regions(),
+        )
+        .expect("write");
+        let shape = |width: usize, pixels: usize| format!("{width} {}", pixels / width);
+        std::fs::write(
+            directory.join("size.txt"),
+            format!("{} {}", CELL_WIDTH * COLUMNS, CELL_HEIGHT),
+        )
+        .expect("write");
+        std::fs::write(
+            directory.join("full.size.txt"),
+            shape(CELL_WIDTH * COLUMNS, regions.len()),
+        )
+        .expect("write");
+        std::fs::write(
+            directory.join("ext.size.txt"),
+            shape(CELL_WIDTH * COLUMNS, source.extension_map.regions().len()),
+        )
+        .expect("write");
     }
 
     #[test]

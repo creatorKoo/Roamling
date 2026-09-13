@@ -1,25 +1,32 @@
 // SPDX-FileCopyrightText: 2026 GooBeom Jeoung
 // SPDX-License-Identifier: GPL-3.0-only
 
-#![cfg(debug_assertions)]
-
-//! A disposable palette laboratory for debug builds.
+//! Mixing a colour by hand.
 //!
 //! It deliberately follows `tuning.rs`: one Win32 class, common-controls
 //! trackbars, thread-local ownership, a pending value drained by the main tick,
 //! and a `create` seam that lets tests inspect a real hidden window.
+//!
+//! Reached from the tray menu only while Alt is held. The presets beside it
+//! are what most people want; this is for everyone else, so it can afford to
+//! be long as long as every row says what it does.
 
+use crate::strings::localized;
 use roamling_core::{Palette, PaletteTargets};
 use std::cell::RefCell;
 
 use windows::core::{w, PCWSTR};
 use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    CreateFontW, CreateSolidBrush, DeleteObject, FillRect, InvalidateRect, SetBkMode, SetTextColor,
-    UpdateWindow, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH,
-    FF_DONTCARE, FW_NORMAL, FW_SEMIBOLD, HBRUSH, HDC, HFONT, OUT_DEFAULT_PRECIS, TRANSPARENT,
+    BeginPaint, CreateFontW, CreateSolidBrush, DeleteObject, EndPaint, FillRect, FrameRect,
+    InvalidateRect, SetBkMode, SetTextColor, UpdateWindow, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS,
+    DEFAULT_CHARSET, DEFAULT_PITCH, FF_DONTCARE, FW_NORMAL, FW_SEMIBOLD, HBRUSH, HDC, HFONT,
+    OUT_DEFAULT_PRECIS, PAINTSTRUCT, TRANSPARENT,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::Controls::Dialogs::{
+    ChooseColorW, CC_ANYCOLOR, CC_FULLOPEN, CC_RGBINIT, CHOOSECOLORW,
+};
 use windows::Win32::UI::Controls::{
     InitCommonControlsEx, ICC_BAR_CLASSES, INITCOMMONCONTROLSEX, TBM_SETPOS, TBM_SETRANGE,
     TBS_HORZ, TBS_NOTICKS,
@@ -37,6 +44,8 @@ const ID_RESET: usize = 1;
 const ID_DONE: usize = 2;
 const ID_SLIDER: usize = 100;
 const ID_VALUE: usize = 200;
+/// One per group, so the button knows which of the three it speaks for.
+const ID_PICK: usize = 300;
 
 /// Which of the four numbers a slider drives.
 ///
@@ -47,6 +56,10 @@ const ID_VALUE: usize = 200;
 #[derive(Clone, Copy, PartialEq)]
 enum Axis {
     Hue,
+    /// Only the marking gets one. The answer cats all held a single hue, so
+    /// there is no evidence for a gradient on the body or the eyes, and the
+    /// window was asked to get simpler rather than longer.
+    HueEnd,
     LightLow,
     LightHigh,
     Chroma,
@@ -56,6 +69,7 @@ impl Axis {
     fn value(self, palette: PaletteTargets) -> f32 {
         match self {
             Self::Hue => palette.hue,
+            Self::HueEnd => palette.hue_end,
             Self::LightLow => palette.light_low,
             Self::LightHigh => palette.light_high,
             Self::Chroma => palette.chroma,
@@ -64,8 +78,19 @@ impl Axis {
 
     fn with_value(self, palette: PaletteTargets, value: f32) -> PaletteTargets {
         match self {
+            // Moving the start alone would leave a gradient nobody asked for,
+            // so a part without its own end slider keeps the two together.
             Self::Hue => PaletteTargets {
                 hue: value,
+                hue_end: if palette.hue_end == palette.hue {
+                    value
+                } else {
+                    palette.hue_end
+                },
+                ..palette
+            },
+            Self::HueEnd => PaletteTargets {
+                hue_end: value,
                 ..palette
             },
             // The ramp cannot cross itself: dragging one end past the other
@@ -130,40 +155,57 @@ struct Row {
     maximum: i32,
 }
 
-const fn group(part: Part) -> [Row; 4] {
-    [
-        Row {
+/// Title key, hint key, and which part the rows steer.
+const GROUPS: [(Part, &str, &str); 3] = [
+    (
+        Part::Marking,
+        "palette.section.marking",
+        "palette.hint.marking",
+    ),
+    (Part::Body, "palette.section.body", "palette.hint.body"),
+    (Part::Eye, "palette.section.eye", "palette.hint.eye"),
+];
+
+fn rows_for(part: Part) -> Vec<Row> {
+    let mut rows = vec![Row {
+        part,
+        axis: Axis::Hue,
+        label: "palette.hue",
+        maximum: 359,
+    }];
+    if part == Part::Marking {
+        rows.push(Row {
             part,
-            axis: Axis::Hue,
-            label: "Hue",
+            axis: Axis::HueEnd,
+            label: "palette.hueEnd",
             maximum: 359,
-        },
-        Row {
-            part,
-            axis: Axis::LightLow,
-            label: "Dark",
-            maximum: 100,
-        },
-        Row {
-            part,
-            axis: Axis::LightHigh,
-            label: "Light",
-            maximum: 100,
-        },
-        Row {
-            part,
-            axis: Axis::Chroma,
-            label: "Chroma",
-            maximum: 255,
-        },
-    ]
+        });
+    }
+    rows.push(Row {
+        part,
+        axis: Axis::LightLow,
+        label: "palette.dark",
+        maximum: 100,
+    });
+    rows.push(Row {
+        part,
+        axis: Axis::LightHigh,
+        label: "palette.light",
+        maximum: 100,
+    });
+    rows.push(Row {
+        part,
+        axis: Axis::Chroma,
+        label: "palette.chroma",
+        maximum: 255,
+    });
+    rows
 }
 
-const GROUPS: [(Part, &str, [Row; 4]); 3] = [
-    (Part::Marking, "Marking", group(Part::Marking)),
-    (Part::Body, "Body", group(Part::Body)),
-    (Part::Eye, "Eyes", group(Part::Eye)),
-];
+/// Every slider the window builds, across all three groups.
+fn total_rows() -> usize {
+    GROUPS.iter().map(|(part, _, _)| rows_for(*part).len()).sum()
+}
 
 struct Panel {
     window: HWND,
@@ -171,6 +213,11 @@ struct Panel {
     palette: Palette,
     original: Palette,
     sliders: Vec<(HWND, HWND, Row)>,
+    /// Where to paint each group's colour, and whose colour it is. Painted by
+    /// the window rather than made of child controls: the colour changes on
+    /// every slider drag, and a static control would mean a brush to rebuild
+    /// and free each time.
+    swatches: Vec<(RECT, Part)>,
     body: HFHandle,
     heading: HFHandle,
     background: HBHandle,
@@ -182,6 +229,10 @@ struct HBHandle(HBRUSH);
 thread_local! {
     static PANEL: RefCell<Option<Panel>> = const { RefCell::new(None) };
     static PENDING: RefCell<Option<Palette>> = const { RefCell::new(None) };
+    /// The sixteen slots down the left of the system dialog. Kept for the life
+    /// of the process so a colour mixed for the fur is still there when the
+    /// eyes are picked.
+    static CUSTOM: RefCell<[COLORREF; 16]> = const { RefCell::new([COLORREF(0x00FF_FFFF); 16]) };
 }
 
 pub fn take_pending() -> Option<Palette> {
@@ -265,7 +316,7 @@ fn create(
         };
         RegisterClassW(&registered);
 
-        let title = wide("Mochi Palette Lab (Debug)");
+        let title = wide(localized("palette.window.title"));
         let window = CreateWindowExW(
             WINDOW_EX_STYLE(0),
             class,
@@ -312,7 +363,7 @@ fn build(window: HWND, app_window: HWND, palette: Palette, original: Palette) {
         let body = font(12, FW_NORMAL.0 as i32);
         let heading = font(13, FW_SEMIBOLD.0 as i32);
         let margin = scaled(20);
-        let channel_width = scaled(54);
+        let channel_width = scaled(66);
         let track_width = scaled(270);
         let value_width = scaled(44);
         let gap = scaled(8);
@@ -320,7 +371,10 @@ fn build(window: HWND, app_window: HWND, palette: Palette, original: Palette) {
         let width = margin * 2 + channel_width + track_width + value_width + gap * 2;
         let instance = GetModuleHandleW(None).unwrap_or_default();
         let mut y = margin;
-        let mut sliders = Vec::with_capacity(GROUPS.len() * 4);
+        let mut sliders = Vec::with_capacity(total_rows());
+        let mut swatches = Vec::with_capacity(GROUPS.len());
+        let pick_width = scaled(96);
+        let swatch_width = scaled(40);
 
         let label = |text: &str, x: i32, y: i32, w: i32, h: i32, style: u32, which: HFONT| {
             let content = wide(text);
@@ -344,23 +398,82 @@ fn build(window: HWND, app_window: HWND, palette: Palette, original: Palette) {
         };
 
         label(
-            "Disposable debug controls. Changes apply to the on-screen Mochi immediately.",
+            localized("palette.header"),
             margin,
             y,
             width - margin * 2,
-            scaled(42),
+            row_height,
+            0,
+            heading,
+        );
+        y += row_height;
+        label(
+            localized("palette.footer"),
+            margin,
+            y,
+            width - margin * 2,
+            scaled(82),
             0,
             body,
         );
-        y += scaled(48);
+        y += scaled(88);
 
-        for (_, title, rows) in GROUPS {
-            label(title, margin, y, width - margin * 2, row_height, 0, heading);
+        for (index, (part, title, hint)) in GROUPS.into_iter().enumerate() {
+            // Title on the left, then the colour it is wearing, then the way to
+            // change it. The swatch sits beside the button so that what you are
+            // about to change and what it looks like now are the same glance.
+            let pick_x = width - margin - pick_width;
+            let swatch_x = pick_x - swatch_width - gap;
+            label(
+                localized(title),
+                margin,
+                y,
+                swatch_x - margin - gap,
+                row_height,
+                0,
+                heading,
+            );
+            swatches.push((
+                RECT {
+                    left: swatch_x,
+                    top: y + scaled(2),
+                    right: swatch_x + swatch_width,
+                    bottom: y + row_height - scaled(2),
+                },
+                part,
+            ));
+            let content = wide(localized("palette.pick"));
+            let pick = CreateWindowExW(
+                WINDOW_EX_STYLE(0),
+                w!("BUTTON"),
+                PCWSTR(content.as_ptr()),
+                WINDOW_STYLE(WS_CHILD.0 | WS_VISIBLE.0 | WS_TABSTOP.0 | BS_PUSHBUTTON as u32),
+                pick_x,
+                y,
+                pick_width,
+                row_height,
+                window,
+                HMENU((ID_PICK + index) as *mut std::ffi::c_void),
+                instance,
+                None,
+            )
+            .unwrap_or_default();
+            SendMessageW(pick, WM_SETFONT, WPARAM(body.0 as usize), LPARAM(1));
             y += row_height;
-            for row in rows {
+            label(
+                localized(hint),
+                margin,
+                y,
+                width - margin * 2,
+                scaled(36),
+                0,
+                body,
+            );
+            y += scaled(40);
+            for row in rows_for(part) {
                 let index = sliders.len();
                 label(
-                    row.label,
+                    localized(row.label),
                     margin,
                     y + scaled(4),
                     channel_width,
@@ -399,6 +512,26 @@ fn build(window: HWND, app_window: HWND, palette: Palette, original: Palette) {
             y += gap;
         }
 
+        // What each kind of row does, once, rather than beside all thirteen.
+        for key in [
+            "palette.hint.pick",
+            "palette.hint.hueEnd",
+            "palette.hint.range",
+            "palette.hint.chroma",
+        ] {
+            label(
+                localized(key),
+                margin,
+                y,
+                width - margin * 2,
+                scaled(36),
+                0,
+                body,
+            );
+            y += scaled(38);
+        }
+        y += gap;
+
         let button_width = scaled(120);
         let button_height = scaled(28);
         let button = |text: &str, x: i32, id: usize| {
@@ -420,8 +553,12 @@ fn build(window: HWND, app_window: HWND, palette: Palette, original: Palette) {
             .unwrap_or_default();
             SendMessageW(control, WM_SETFONT, WPARAM(body.0 as usize), LPARAM(1));
         };
-        button("Reset anchors", margin, ID_RESET);
-        button("Done", width - margin - button_width, ID_DONE);
+        button(localized("palette.reset"), margin, ID_RESET);
+        button(
+            localized("palette.done"),
+            width - margin - button_width,
+            ID_DONE,
+        );
         y += button_height + margin;
 
         let mut frame = RECT {
@@ -450,6 +587,7 @@ fn build(window: HWND, app_window: HWND, palette: Palette, original: Palette) {
                 palette,
                 original,
                 sliders,
+                swatches,
                 body: HFHandle(body),
                 heading: HFHandle(heading),
                 background: HBHandle(CreateSolidBrush(COLORREF(0x00F0_F0F0))),
@@ -498,7 +636,78 @@ fn refresh() {
                 let _ = InvalidateRect(*readout, None, true);
             }
         }
+        // The swatches follow the sliders, so dragging one shows its colour
+        // without the pet having to redraw first.
+        for (frame, _) in &panel.swatches {
+            unsafe {
+                let _ = InvalidateRect(panel.window, Some(frame), false);
+            }
+        }
     });
+}
+
+/// What the system dialog and the swatch both mean by a group's colour.
+fn swatch_colour(part: Part, palette: Palette) -> COLORREF {
+    let [red, green, blue] = part.targets(palette).middle();
+    COLORREF(u32::from(red) | (u32::from(green) << 8) | (u32::from(blue) << 16))
+}
+
+fn paint_swatches(window: HWND) {
+    unsafe {
+        let mut paint = PAINTSTRUCT::default();
+        let dc = BeginPaint(window, &mut paint);
+        PANEL.with(|slot| {
+            let panel = slot.borrow();
+            let Some(panel) = panel.as_ref() else { return };
+            let edge = CreateSolidBrush(COLORREF(0x0090_9090));
+            for (frame, part) in &panel.swatches {
+                let fill = CreateSolidBrush(swatch_colour(*part, panel.palette));
+                FillRect(dc, frame, fill);
+                FrameRect(dc, frame, edge);
+                let _ = DeleteObject(fill);
+            }
+            let _ = DeleteObject(edge);
+        });
+        let _ = EndPaint(window, &paint);
+    }
+}
+
+/// The system's colour dialog, aimed at one group.
+///
+/// A group is five numbers and this gives back one colour, so `aimed_at` says
+/// which of the five it is -- the middle of the shading, keeping the width of
+/// the ramp (user decision 2026-09-13). The sliders are left in place and move
+/// to match, because the ramp's width and the rainbow's sweep can only be made
+/// there, and they are what the presets were built from.
+fn pick(window: HWND, part: Part) {
+    let Some(palette) = PANEL.with(|slot| slot.borrow().as_ref().map(|panel| panel.palette)) else {
+        return;
+    };
+    let chosen = CUSTOM.with(|slot| {
+        let mut custom = slot.borrow_mut();
+        let mut chooser = CHOOSECOLORW {
+            lStructSize: std::mem::size_of::<CHOOSECOLORW>() as u32,
+            hwndOwner: window,
+            rgbResult: swatch_colour(part, palette),
+            lpCustColors: custom.as_mut_ptr(),
+            // Opened on the mixing side rather than the sixteen basic colours:
+            // a cat's colour is hardly ever one of those.
+            Flags: CC_RGBINIT | CC_FULLOPEN | CC_ANYCOLOR,
+            ..Default::default()
+        };
+        let picked = unsafe { ChooseColorW(&mut chooser) }.as_bool();
+        picked.then_some(chooser.rgbResult)
+    });
+    let Some(COLORREF(packed)) = chosen else {
+        return;
+    };
+    let colour = [
+        (packed & 0xFF) as u8,
+        ((packed >> 8) & 0xFF) as u8,
+        ((packed >> 16) & 0xFF) as u8,
+    ];
+    let aim = part.targets(palette).aimed_at(colour);
+    replace(part.with_targets(palette, aim), true);
 }
 
 fn replace(palette: Palette, notify: bool) {
@@ -575,8 +784,15 @@ extern "system" fn wndproc(window: HWND, message: u32, wp: WPARAM, lp: LPARAM) -
                     ID_DONE => {
                         let _ = ShowWindow(window, SW_HIDE);
                     }
+                    command if command >= ID_PICK && command < ID_PICK + GROUPS.len() => {
+                        pick(window, GROUPS[command - ID_PICK].0);
+                    }
                     _ => {}
                 }
+                LRESULT(0)
+            }
+            WM_PAINT => {
+                paint_swatches(window);
                 LRESULT(0)
             }
             WM_CTLCOLORSTATIC => {
@@ -654,8 +870,35 @@ mod tests {
                     .all(|(track, readout, _)| !track.is_invalid() && !readout.is_invalid()),
             )
         });
-        assert_eq!(count, GROUPS.len() * 4);
+        assert_eq!(count, total_rows());
         assert!(intact, "a trackbar or readout failed to create");
+
+        // And a swatch per group, showing the same colour the recolour would
+        // put on the cat. A swatch built from different arithmetic would be a
+        // picture of a cat that does not exist.
+        let swatches = PANEL.with(|slot| slot.borrow().as_ref().unwrap().swatches.clone());
+        assert_eq!(swatches.len(), GROUPS.len());
+        assert_eq!(
+            swatch_colour(Part::Body, palette()),
+            COLORREF(
+                u32::from(palette().body.middle()[0])
+                    | (u32::from(palette().body.middle()[1]) << 8)
+                    | (u32::from(palette().body.middle()[2]) << 16)
+            )
+        );
+        let mut client = RECT::default();
+        let _ = unsafe { GetClientRect(window, &mut client) };
+        for (index, (frame, _)) in swatches.iter().enumerate() {
+            assert!(frame.right > frame.left && frame.bottom > frame.top, "{frame:?}");
+            assert!(frame.right <= client.right, "{frame:?} vs {client:?}");
+            // The button has to carry the id the command routing reads, or
+            // pressing it does nothing and the window looks broken.
+            let button = unsafe { GetDlgItem(window, (ID_PICK + index) as i32) };
+            let button = button.expect("the pick button failed to create");
+            let mut bounds = RECT::default();
+            let _ = unsafe { GetWindowRect(button, &mut bounds) };
+            assert!(bounds.right > bounds.left, "{bounds:?}");
+        }
 
         let track = PANEL.with(|slot| slot.borrow().as_ref().unwrap().sliders[0].0);
         unsafe {

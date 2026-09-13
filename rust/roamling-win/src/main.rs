@@ -21,7 +21,6 @@ mod capture;
 mod diagnostics;
 mod duplication;
 mod focus;
-#[cfg(debug_assertions)]
 mod palette_debug;
 mod platform;
 mod settings;
@@ -84,8 +83,8 @@ fn persist_work_app_label(settings: &mut Settings, work_apps: &[String], exe: &s
 struct App {
     pet: PetRuntime,
     asset: PetAsset,
-    /// Session-only targets for the disposable debug palette laboratory.
-    #[cfg(debug_assertions)]
+    /// The colour being worn. Remembered in settings, so this is the loaded
+    /// value at startup rather than the sheet's own.
     palette: roamling_core::Palette,
     /// Packages found on disk, and which one is showing. `None` is the
     /// built-in mascot, which is always available and never fails to load.
@@ -191,8 +190,6 @@ fn main() -> Result<()> {
         eprintln!("the built-in mascot did not decode");
         return Ok(());
     };
-    #[cfg(debug_assertions)]
-    let palette = roamling_pet::built_in_mochi_palette();
     let displays = platform::displays();
     if displays.is_empty() {
         eprintln!("no displays; nothing to roam");
@@ -212,6 +209,11 @@ fn main() -> Result<()> {
     }
 
     let mut stored = Settings::load();
+    // A colour chosen in an earlier run. Absent means the sheet as drawn.
+    let palette = stored
+        .text(settings::PALETTE)
+        .and_then(|text| palette_from_text(&text))
+        .unwrap_or_else(roamling_pet::built_in_mochi_palette);
     let work_apps = stored.work_apps();
     stored.clear_work_app_labels_except(&work_apps);
     let work_app_labels = stored.work_app_labels();
@@ -340,7 +342,6 @@ fn main() -> Result<()> {
         *slot.borrow_mut() = Some(App {
             pet,
             asset,
-            #[cfg(debug_assertions)]
             palette,
             resolver,
             player,
@@ -395,11 +396,19 @@ fn main() -> Result<()> {
         }
         SetTimer(hwnd, 1, 16, None);
     }
-    #[cfg(debug_assertions)]
-    if std::env::var_os("ROAMLING_OPEN_PALETTE_DEBUG").is_some() {
-        if roamling_pet::prepare_built_in_mochi_recolor() {
-            palette_debug::show(hwnd, palette, palette);
-        }
+    // Applied here rather than while the asset is being built, so a remembered
+    // colour goes down exactly the path a menu pick does.
+    if palette != roamling_pet::built_in_mochi_palette()
+        && roamling_pet::prepare_built_in_mochi_recolor()
+    {
+        APP.with(|slot| {
+            if let Some(app) = slot.borrow_mut().as_mut() {
+                if let Some(asset) = roamling_pet::built_in_mochi_recolored(palette) {
+                    app.asset = asset;
+                    app.drawn = None;
+                }
+            }
+        });
     }
     println!("\ntray icon registered: {tray_ok}   (Windows 11 files new ones behind the chevron)");
     println!("roaming. right-click the tray icon for the menu.");
@@ -610,17 +619,8 @@ fn tick(hwnd: HWND, app: &mut App) {
         app.pet.apply_tuning(tuning, now);
         remember_tuning(app, tuning);
     }
-    #[cfg(debug_assertions)]
     if let Some(palette) = palette_debug::take_pending() {
-        app.palette = palette;
-        // Stage 0 is deliberately scoped to the built-in Mochi. Installed pet
-        // packages remain the artist's colours.
-        if app.current_package.is_none() {
-            if let Some(asset) = roamling_pet::built_in_mochi_recolored(palette) {
-                app.asset = asset;
-                app.drawn = None;
-            }
-        }
+        apply_palette(app, palette);
     }
 
     let wants_focus = app.pet.begin_tick(now) && app.cursor_aware;
@@ -1003,6 +1003,69 @@ fn work_app_items(app: &App) -> Vec<(String, String, bool)> {
 ///
 /// Split out from the message handler because showing the menu has to happen
 /// with the app back in its cell -- see the note on `wndproc`.
+/// A palette as fifteen numbers, for the settings file.
+///
+/// Text because settings is one flat key/value file and a colour is not worth
+/// a second format. Semicolons between the three regions, commas inside.
+fn palette_to_text(palette: roamling_core::Palette) -> String {
+    let part = |aim: roamling_core::PaletteTargets| {
+        format!(
+            "{},{},{},{},{}",
+            aim.hue, aim.hue_end, aim.light_low, aim.light_high, aim.chroma
+        )
+    };
+    format!(
+        "{};{};{}",
+        part(palette.marking),
+        part(palette.body),
+        part(palette.eye)
+    )
+}
+
+fn palette_from_text(text: &str) -> Option<roamling_core::Palette> {
+    let mut parts = text.split(';');
+    let mut next = || -> Option<roamling_core::PaletteTargets> {
+        let numbers: Option<Vec<f32>> = parts
+            .next()?
+            .split(',')
+            .map(|number| number.trim().parse::<f32>().ok())
+            .collect();
+        let [hue, hue_end, low, high, chroma] = numbers?[..] else {
+            return None;
+        };
+        Some(roamling_core::PaletteTargets::sweeping(
+            hue, hue_end, low, high, chroma,
+        ))
+    };
+    let marking = next()?;
+    let body = next()?;
+    let eye = next()?;
+    Some(roamling_core::Palette::new(marking, body, eye))
+}
+
+/// Wear a colour and remember it.
+///
+/// Clearing rather than storing the original is the same rule the tuning panel
+/// follows: a stored default freezes, and then a later change to the code
+/// never reaches the machine that stored it.
+fn apply_palette(app: &mut App, palette: roamling_core::Palette) {
+    app.palette = palette;
+    if palette == roamling_pet::built_in_mochi_palette() {
+        app.settings.clear(settings::PALETTE);
+    } else {
+        app.settings
+            .set(settings::PALETTE, palette_to_text(palette));
+    }
+    // Scoped to the built-in Mochi. An installed package keeps its artist's
+    // colours.
+    if app.current_package.is_none() {
+        if let Some(asset) = roamling_pet::built_in_mochi_recolored(palette) {
+            app.asset = asset;
+            app.drawn = None;
+        }
+    }
+}
+
 fn menu_state(app: &App) -> tray::MenuState {
     let coverage = app.resolver.coverage();
     let names = |set: &[roamling_core::PetCapability]| {
@@ -1020,6 +1083,10 @@ fn menu_state(app: &App) -> tray::MenuState {
         substituted: names(&coverage.substituted),
         placeholder: names(&coverage.placeholder),
         scale: app.scale,
+        palette: roamling_pet::built_in_mochi_presets()
+            .iter()
+            .position(|(_, preset)| *preset == app.palette),
+        palette_custom: platform::shift_is_down(),
         pets: app
             .catalog
             .iter()
@@ -1103,9 +1170,21 @@ unsafe fn perform(hwnd: HWND, chosen: usize, app: &mut App, now: f64) {
             app.settings
                 .set(settings::CURSOR_AWARENESS, app.cursor_aware);
         }
+        // The colour presets, in the order the menu shows them.
+        picked
+            if (tray::CMD_PALETTE_BASE
+                ..tray::CMD_PALETTE_BASE + roamling_pet::built_in_mochi_presets().len())
+                .contains(&picked) =>
+        {
+            let index = picked - tray::CMD_PALETTE_BASE;
+            if let Some((_, chosen)) = roamling_pet::built_in_mochi_presets().get(index) {
+                if roamling_pet::prepare_built_in_mochi_recolor() {
+                    apply_palette(app, *chosen);
+                }
+            }
+        }
         tray::CMD_TUNING => tuning::show(app.pet.tuning()),
-        #[cfg(debug_assertions)]
-        tray::CMD_PALETTE_DEBUG => {
+        tray::CMD_PALETTE_CUSTOM => {
             // Opening this Mochi-only experiment while another package is
             // selected makes the scope explicit by putting Mochi on screen.
             if !roamling_pet::prepare_built_in_mochi_recolor() {
@@ -1146,10 +1225,11 @@ unsafe fn perform(hwnd: HWND, chosen: usize, app: &mut App, now: f64) {
             println!("{} pet package(s) found", app.catalog.len());
         }
         tray::CMD_PET_BUILT_IN => {
-            #[cfg(debug_assertions)]
-            let asset = roamling_pet::built_in_mochi_recolored(app.palette);
-            #[cfg(not(debug_assertions))]
-            let asset = roamling_pet::built_in_mochi();
+            let asset = if roamling_pet::prepare_built_in_mochi_recolor() {
+                roamling_pet::built_in_mochi_recolored(app.palette)
+            } else {
+                roamling_pet::built_in_mochi()
+            };
             if let Some(asset) = asset {
                 adopt(app, asset, None);
             }

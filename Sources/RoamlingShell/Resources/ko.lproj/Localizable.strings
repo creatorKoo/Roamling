@@ -111,3 +111,37 @@
 "result.update.ready.detail" = "다음에 Roamling을 켜면 새 버전으로 실행됩니다. 따로 할 일은 없습니다.";
 "error.update.failed" = "업데이트를 확인하지 못했습니다";
 "alert.launchAtLogin.failed" = "로그인 항목을 바꾸지 못했습니다";
+
+"menu.palette" = "색";
+"menu.palette.custom" = "색 직접 고르기…";
+"palette.default" = "기본";
+"palette.black" = "검정";
+"palette.white" = "하양";
+"palette.red" = "빨강";
+"palette.hotpink" = "핫핑크";
+"palette.yellow" = "노랑";
+"palette.blue" = "파랑";
+"palette.purple" = "보라";
+"palette.rainbow" = "무지개";
+
+"palette.window.title" = "Roamling 색 고르기";
+"palette.header" = "모찌 색 만들기";
+"palette.footer" = "슬라이더를 움직이면 화면의 모찌가 바로 따라 바뀌고, 그대로 기억됩니다. 손대지 않은 묶음은 원래 그림 그대로 남습니다 — 몸통을 바꿔도 무늬가 흐려지지 않습니다. 되돌리려면 '처음으로'를 누르거나 메뉴에서 색 › 기본을 고르세요.";
+"palette.section.marking" = "무늬";
+"palette.section.body" = "몸통";
+"palette.section.eye" = "눈";
+"palette.hint.marking" = "머리·등·꼬리의 얼룩입니다. 여기만 바꿔도 다른 고양이가 됩니다.";
+"palette.hint.body" = "크림색 몸통입니다. 검은 고양이나 흰 고양이를 만들 때만 건드리면 됩니다.";
+"palette.hint.eye" = "눈 전체 — 검은 테두리와 홍채, 흰 반사점입니다. 어두운 쪽을 많이 올리고 진하기를 낮추면 하얀 눈이 됩니다.";
+"palette.hue" = "색상";
+"palette.hueEnd" = "색상 끝";
+"palette.hint.hueEnd" = "색상과 다르게 두면 어두운 쪽에서 밝은 쪽으로 색이 흘러갑니다. 무지개는 이렇게 만듭니다. 같게 두면 한 가지 색입니다.";
+"palette.dark" = "어두운 쪽";
+"palette.light" = "밝은 쪽";
+"palette.hint.range" = "음영의 양 끝입니다. 벌리면 입체감이 깊어지고 붙이면 납작해집니다. 서로 넘어가지는 않습니다.";
+"palette.chroma" = "진하기";
+"palette.hint.chroma" = "0이면 회색, 올릴수록 색이 또렷해집니다.";
+"palette.pick" = "색 고르기…";
+"palette.hint.pick" = "‘색 고르기…’를 누르면 Windows 색 선택창이 열립니다. 고른 색은 그 부분 음영의 가운데가 되고, 어두운 쪽과 밝은 쪽은 지금 간격을 지킨 채 따라옵니다.";
+"palette.reset" = "처음으로";
+"palette.done" = "닫기";

@@ -40,6 +40,9 @@ features = [
     "Win32_Storage_FileSystem",
     "Win32_Security",
     "Win32_UI_Controls",
+    # comdlg32's colour dialog. The spectrum, the custom colours and their
+    # translations are all the system's, which is the point.
+    "Win32_UI_Controls_Dialogs",
     "Win32_Networking_WinHttp",
 ]
 
