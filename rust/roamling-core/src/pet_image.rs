@@ -244,12 +244,19 @@ impl PetImageSource {
         // with a broken rim is still caught by its twin. Falls back to every
         // ring when no pair exists, which is what the frames showing a single
         // eye need.
-        let lone = match self.best_pair(&rims, &plain, origin_x, origin_y, cell) {
-            Some((index, partner)) => {
-                seeds = vec![seeds.swap_remove(index), partner];
-                false
+        let lone = if rims.is_empty() {
+            // Nothing ringed at all means every eye in this frame is shut or
+            // lidded, and only then is it safe to go looking for strokes.
+            seeds = self.lidded_pair(&plain, origin_x, origin_y, cell);
+            false
+        } else {
+            match self.best_pair(&rims, &plain, origin_x, origin_y, cell) {
+                Some((index, partner)) => {
+                    seeds = vec![seeds.swap_remove(index), partner];
+                    false
+                }
+                None => true,
             }
-            None => true,
         };
 
         seeds
@@ -366,6 +373,75 @@ impl PetImageSource {
             }
         }
         best.map(|(_, index, component)| (index, component.clone()))
+    }
+
+    /// The two lid strokes of a half-lidded eye.
+    ///
+    /// A lidded eye is a stroke, not a ring: it encloses nothing, so the ring
+    /// test never sees it and the iris showing under the lid follows the fur.
+    /// Measured on the sitting frames the lids are 22-83px, 17-23 wide by 4-7
+    /// tall, islands, and drawn as a pair whose rows match to within half a
+    /// pixel. The mouth is just as flat but has no partner and sits about 12px
+    /// lower; whiskers reach the silhouette so they are not islands.
+    ///
+    /// The mask itself needs nothing new -- growing off the lid picks the iris
+    /// up, the same way it picks up the crescent beside a pupil.
+    fn lidded_pair(
+        &self,
+        candidates: &[Vec<usize>],
+        origin_x: usize,
+        origin_y: usize,
+        cell: (usize, usize),
+    ) -> Vec<Vec<usize>> {
+        let (cell_width, cell_height) = cell;
+        let strokes: Vec<&Vec<usize>> = candidates
+            .iter()
+            .filter(|component| {
+                if !(LID_SIZE_LOW..=LID_SIZE_HIGH).contains(&component.len()) {
+                    return false;
+                }
+                let (x0, x1, y0, y1) = bounds(component, cell_width);
+                let width = (x1 - x0 + 1) as f32;
+                let height = (y1 - y0 + 1) as f32;
+                if width / height < LID_FLATNESS {
+                    return false;
+                }
+                if !enclosed(component, cell_width, cell_height).is_empty() {
+                    return false;
+                }
+                !self.touches_air(component, origin_x, origin_y, cell, cell_width, cell_height)
+            })
+            .collect();
+
+        let mut best: Option<(f32, usize, usize)> = None;
+        for first in 0..strokes.len() {
+            let (lx0, lx1, ly0, ly1) = bounds(strokes[first], cell_width);
+            for second in (first + 1)..strokes.len() {
+                let (rx0, rx1, ry0, ry1) = bounds(strokes[second], cell_width);
+                if ((ly0 + ly1) as isize - (ry0 + ry1) as isize).abs() > 2 * LID_ROW_SLACK {
+                    continue;
+                }
+                if ((lx1 - lx0) as isize - (rx1 - rx0) as isize).abs() > LID_WIDTH_SLACK {
+                    continue;
+                }
+                let ratio = strokes[second].len() as f32 / strokes[first].len() as f32;
+                if !(PARTNER_SIZE_LOW..=PARTNER_SIZE_HIGH).contains(&ratio) {
+                    continue;
+                }
+                let beside = rx0 > lx1 + PARTNER_SIDE_GAP || rx1 + PARTNER_SIDE_GAP < lx0;
+                if !beside {
+                    continue;
+                }
+                let score = (ratio - 1.0).abs();
+                if best.is_none() || score < best.as_ref().expect("checked").0 {
+                    best = Some((score, first, second));
+                }
+            }
+        }
+        match best {
+            Some((_, first, second)) => vec![strokes[first].clone(), strokes[second].clone()],
+            None => Vec::new(),
+        }
     }
 
     fn touches_air(
@@ -549,6 +625,12 @@ const PARTNER_ROW_SLACK: usize = 6;
 const PARTNER_SIDE_GAP: usize = 4;
 /// Largest grown mask a ring may produce when nothing vouches for it as a pair.
 const EYE_MASK_MAX: usize = 400;
+/// A half-lidded eye's stroke: small, flat, and one of a matched pair.
+const LID_SIZE_LOW: usize = 15;
+const LID_SIZE_HIGH: usize = 150;
+const LID_FLATNESS: f32 = 2.5;
+const LID_ROW_SLACK: isize = 3;
+const LID_WIDTH_SLACK: isize = 6;
 const NEIGHBOURS: [(isize, isize); 8] = [
     (-1, -1),
     (0, -1),
@@ -1029,6 +1111,41 @@ mod tests {
         };
         let map = image.region_map((7, 7));
         assert_eq!(map.eye_pixels(), 25, "rim plus the hole it wraps");
+    }
+
+    /// Two flat strokes side by side on the same row, the way a half-lidded
+    /// eye is drawn. Neither encloses anything, so nothing but the pairing
+    /// makes them eyes -- and without this the iris showing under the lid
+    /// follows the fur, which is what the sitting animation was doing.
+    fn lidded(strokes: &[(usize, usize)]) -> PetImageSource {
+        let (width, height) = (40usize, 20usize);
+        let mut pixels = vec![[254, 242, 220, 255]; width * height];
+        for (from, to) in strokes {
+            for x in *from..*to {
+                pixels[9 * width + x] = [5, 4, 4, 255];
+                pixels[10 * width + x] = [5, 4, 4, 255];
+            }
+        }
+        PetImageSource {
+            width,
+            height,
+            pixels: pixels.iter().flatten().copied().collect(),
+        }
+    }
+
+    #[test]
+    fn a_matched_pair_of_lid_strokes_is_a_shut_eye() {
+        let image = lidded(&[(6, 18), (24, 36)]);
+        let map = image.region_map((40, 20));
+        assert_eq!(map.eye_pixels(), 48, "both lids and nothing else");
+    }
+
+    #[test]
+    fn one_lid_stroke_on_its_own_is_not_an_eye() {
+        // The mouth is drawn just as flat. What it does not have is a partner.
+        let image = lidded(&[(6, 18)]);
+        let map = image.region_map((40, 20));
+        assert_eq!(map.eye_pixels(), 0);
     }
 
     #[test]
