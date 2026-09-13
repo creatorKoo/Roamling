@@ -28,8 +28,8 @@ use windows::Win32::UI::Controls::Dialogs::{
     ChooseColorW, CC_ANYCOLOR, CC_FULLOPEN, CC_RGBINIT, CHOOSECOLORW,
 };
 use windows::Win32::UI::Controls::{
-    InitCommonControlsEx, ICC_BAR_CLASSES, INITCOMMONCONTROLSEX, TBM_SETPOS, TBM_SETRANGE,
-    TBS_HORZ, TBS_NOTICKS,
+    InitCommonControlsEx, SetScrollInfo, ICC_BAR_CLASSES, INITCOMMONCONTROLSEX, TBM_SETPOS,
+    TBM_SETRANGE, TBS_HORZ, TBS_NOTICKS,
 };
 use windows::Win32::UI::HiDpi::GetDpiForWindow;
 use windows::Win32::UI::WindowsAndMessaging::*;
@@ -216,8 +216,15 @@ struct Panel {
     /// Where to paint each group's colour, and whose colour it is. Painted by
     /// the window rather than made of child controls: the colour changes on
     /// every slider drag, and a static control would mean a brush to rebuild
-    /// and free each time.
+    /// and free each time. Held in content coordinates, which is what the
+    /// scroll offset is measured against.
     swatches: Vec<(RECT, Part)>,
+    /// How far down the content has been scrolled, and how tall the content is.
+    /// Thirteen sliders with their explanations is a long window, and it is
+    /// taller than a laptop screen -- so it opens as tall as the screen allows
+    /// and the rest is scrolled to.
+    scroll: i32,
+    content: i32,
     body: HFHandle,
     heading: HFHandle,
     background: HBHandle,
@@ -321,7 +328,7 @@ fn create(
             WINDOW_EX_STYLE(0),
             class,
             PCWSTR(title.as_ptr()),
-            WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU,
+            WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_VSCROLL,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
             430,
@@ -561,11 +568,27 @@ fn build(window: HWND, app_window: HWND, palette: Palette, original: Palette) {
         );
         y += button_height + margin;
 
+        // As tall as the content, unless the screen says otherwise. The scroll
+        // bar takes its own width, so the content keeps all of it.
+        let content = y;
+        let mut work = RECT::default();
+        let room = if SystemParametersInfoW(
+            SPI_GETWORKAREA,
+            0,
+            Some(&mut work as *mut RECT as *mut std::ffi::c_void),
+            SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0),
+        )
+        .is_ok()
+        {
+            work.bottom - work.top
+        } else {
+            GetSystemMetrics(SM_CYSCREEN)
+        };
         let mut frame = RECT {
             left: 0,
             top: 0,
-            right: width,
-            bottom: y,
+            right: width + GetSystemMetrics(SM_CXVSCROLL),
+            bottom: content.min(room * 85 / 100),
         };
         let style = WINDOW_STYLE(GetWindowLongPtrW(window, GWL_STYLE) as u32);
         let _ = AdjustWindowRect(&mut frame, style, false);
@@ -588,13 +611,81 @@ fn build(window: HWND, app_window: HWND, palette: Palette, original: Palette) {
                 original,
                 sliders,
                 swatches,
+                scroll: 0,
+                content,
                 body: HFHandle(body),
                 heading: HFHandle(heading),
                 background: HBHandle(CreateSolidBrush(COLORREF(0x00F0_F0F0))),
             });
         });
+        update_scrollbar(window);
         refresh();
     }
+}
+
+/// Tell the bar how much there is and how much of it shows.
+fn update_scrollbar(window: HWND) {
+    let Some((content, scroll)) = PANEL.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .map(|panel| (panel.content, panel.scroll))
+    }) else {
+        return;
+    };
+    unsafe {
+        let mut client = RECT::default();
+        let _ = GetClientRect(window, &mut client);
+        let info = SCROLLINFO {
+            cbSize: std::mem::size_of::<SCROLLINFO>() as u32,
+            fMask: SCROLLINFO_MASK(SIF_RANGE.0 | SIF_PAGE.0 | SIF_POS.0),
+            nMin: 0,
+            nMax: (content - 1).max(0),
+            nPage: (client.bottom - client.top).max(1) as u32,
+            nPos: scroll,
+            nTrackPos: 0,
+        };
+        SetScrollInfo(window, SB_VERT, &info, true);
+    }
+}
+
+/// Move the content to an offset, taking the children and the swatches with it.
+fn scroll_to(window: HWND, wanted: i32) {
+    let moved = PANEL.with(|slot| {
+        let mut panel = slot.borrow_mut();
+        let Some(panel) = panel.as_mut() else { return 0 };
+        let mut client = RECT::default();
+        unsafe {
+            let _ = GetClientRect(window, &mut client);
+        }
+        let furthest = (panel.content - (client.bottom - client.top)).max(0);
+        let wanted = wanted.clamp(0, furthest);
+        let moved = panel.scroll - wanted;
+        panel.scroll = wanted;
+        moved
+    });
+    if moved == 0 {
+        return;
+    }
+    unsafe {
+        // The swatches are painted by the window, so scrolling the pixels is
+        // not enough on its own -- `paint_swatches` subtracts the offset too.
+        ScrollWindowEx(
+            window,
+            0,
+            moved,
+            None,
+            None,
+            None,
+            None,
+            SW_SCROLLCHILDREN | SW_INVALIDATE,
+        );
+    }
+    update_scrollbar(window);
+}
+
+fn scrolled_by(window: HWND, steps: i32) {
+    let at = PANEL.with(|slot| slot.borrow().as_ref().map_or(0, |panel| panel.scroll));
+    scroll_to(window, at + steps);
 }
 
 fn centre(window: HWND) {
@@ -639,8 +730,13 @@ fn refresh() {
         // The swatches follow the sliders, so dragging one shows its colour
         // without the pet having to redraw first.
         for (frame, _) in &panel.swatches {
+            let shown = RECT {
+                top: frame.top - panel.scroll,
+                bottom: frame.bottom - panel.scroll,
+                ..*frame
+            };
             unsafe {
-                let _ = InvalidateRect(panel.window, Some(frame), false);
+                let _ = InvalidateRect(panel.window, Some(&shown), false);
             }
         }
     });
@@ -661,9 +757,14 @@ fn paint_swatches(window: HWND) {
             let Some(panel) = panel.as_ref() else { return };
             let edge = CreateSolidBrush(COLORREF(0x0090_9090));
             for (frame, part) in &panel.swatches {
+                let shown = RECT {
+                    top: frame.top - panel.scroll,
+                    bottom: frame.bottom - panel.scroll,
+                    ..*frame
+                };
                 let fill = CreateSolidBrush(swatch_colour(*part, panel.palette));
-                FillRect(dc, frame, fill);
-                FrameRect(dc, frame, edge);
+                FillRect(dc, &shown, fill);
+                FrameRect(dc, &shown, edge);
                 let _ = DeleteObject(fill);
             }
             let _ = DeleteObject(edge);
@@ -795,6 +896,52 @@ extern "system" fn wndproc(window: HWND, message: u32, wp: WPARAM, lp: LPARAM) -
                 paint_swatches(window);
                 LRESULT(0)
             }
+            WM_VSCROLL => {
+                let line = GetSystemMetrics(SM_CYVSCROLL) * 2;
+                let mut client = RECT::default();
+                let _ = GetClientRect(window, &mut client);
+                let page = client.bottom - client.top;
+                let at = PANEL.with(|slot| slot.borrow().as_ref().map_or(0, |panel| panel.scroll));
+                let wanted = match SCROLLBAR_COMMAND((wp.0 & 0xFFFF) as i32) {
+                    SB_LINEUP => at - line,
+                    SB_LINEDOWN => at + line,
+                    SB_PAGEUP => at - page,
+                    SB_PAGEDOWN => at + page,
+                    SB_TOP => 0,
+                    SB_BOTTOM => i32::MAX,
+                    // The thumb reports where it is being dragged to, and the
+                    // sixteen bits of the message cannot carry it -- a window
+                    // this tall overflows them. Ask the bar instead.
+                    SB_THUMBTRACK | SB_THUMBPOSITION => {
+                        let mut info = SCROLLINFO {
+                            cbSize: std::mem::size_of::<SCROLLINFO>() as u32,
+                            fMask: SIF_TRACKPOS,
+                            ..Default::default()
+                        };
+                        if GetScrollInfo(window, SB_VERT, &mut info).is_ok() {
+                            info.nTrackPos
+                        } else {
+                            at
+                        }
+                    }
+                    _ => at,
+                };
+                scroll_to(window, wanted);
+                LRESULT(0)
+            }
+            WM_MOUSEWHEEL => {
+                let notches = (((wp.0 >> 16) & 0xFFFF) as i16) as i32 / WHEEL_DELTA as i32;
+                scrolled_by(window, -notches * GetSystemMetrics(SM_CYVSCROLL) * 3);
+                LRESULT(0)
+            }
+            WM_SIZE => {
+                // Growing the window can leave the content scrolled past its
+                // own end, which shows as a band of nothing under the buttons.
+                let at = PANEL.with(|slot| slot.borrow().as_ref().map_or(0, |panel| panel.scroll));
+                scroll_to(window, at);
+                update_scrollbar(window);
+                LRESULT(0)
+            }
             WM_CTLCOLORSTATIC => {
                 let dc = HDC(wp.0 as *mut std::ffi::c_void);
                 SetBkMode(dc, TRANSPARENT);
@@ -918,6 +1065,43 @@ mod tests {
             let _ = DestroyWindow(window);
         }
         assert_eq!(take_pending(), Some(palette()));
+    }
+
+    /// Thirteen sliders and their explanations are taller than a laptop screen,
+    /// so the window stops at the screen and scrolls. The numbers here are
+    /// whatever this machine's screen allows, so what is asserted is the
+    /// relation between them rather than any one of them.
+    #[test]
+    fn the_window_scrolls_to_its_end_and_back() {
+        let window = create(HWND(std::ptr::null_mut()), palette(), palette())
+            .expect("the palette lab did not build");
+        let content = PANEL.with(|slot| slot.borrow().as_ref().unwrap().content);
+        assert!(content > 0, "the content has no height");
+        let mut client = RECT::default();
+        let _ = unsafe { GetClientRect(window, &mut client) };
+        let page = client.bottom - client.top;
+        assert!(page > 0 && page <= content, "{page} against {content}");
+
+        let at = |_: ()| PANEL.with(|slot| slot.borrow().as_ref().unwrap().scroll);
+        assert_eq!(at(()), 0, "it should open at the top");
+        wndproc(window, WM_VSCROLL, WPARAM(SB_BOTTOM.0 as usize), LPARAM(0));
+        assert_eq!(at(()), content - page, "the end is the last page, no further");
+        wndproc(window, WM_VSCROLL, WPARAM(SB_TOP.0 as usize), LPARAM(0));
+        assert_eq!(at(()), 0, "the top is the top");
+
+        // And the swatches move with it, or they would be painted where the
+        // heading no longer is.
+        wndproc(window, WM_VSCROLL, WPARAM(SB_BOTTOM.0 as usize), LPARAM(0));
+        let (frame, scroll) = PANEL.with(|slot| {
+            let panel = slot.borrow();
+            let panel = panel.as_ref().unwrap();
+            (panel.swatches[0].0, panel.scroll)
+        });
+        assert_eq!(frame.top - scroll, frame.top - (content - page));
+
+        unsafe {
+            let _ = DestroyWindow(window);
+        }
     }
 
     #[test]
