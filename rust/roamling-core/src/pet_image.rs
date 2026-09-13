@@ -380,9 +380,26 @@ impl PetImageSource {
             }
         };
 
+        // Which cream blob each pixel belongs to, and how far each blob reaches.
+        // The growth needs this to tell the face from a catchlight: both are
+        // cream, and it refuses to step anywhere that can see cream.
+        let mut cream = vec![false; cell_width * cell_height];
+        for (spot, flag) in cream.iter_mut().enumerate() {
+            let pixel = self.cell_pixel(spot, origin_x, origin_y, cell);
+            *flag = pixel[3] > OPAQUE && lightness([pixel[0], pixel[1], pixel[2]]) >= CREAM_LOW;
+        }
+        let mut blob = vec![usize::MAX; cell_width * cell_height];
+        let mut reach = Vec::new();
+        for patch in components(&cream, cell_width, cell_height) {
+            for spot in &patch {
+                blob[*spot] = reach.len();
+            }
+            reach.push(bounds(&patch, cell_width));
+        }
+
         let masks: Vec<Vec<usize>> = seeds
             .into_iter()
-            .map(|seed| self.grown_eye(&seed, origin_x, origin_y, cell))
+            .map(|seed| self.grown_eye(&seed, &blob, &reach, origin_x, origin_y, cell))
             // With no partner to vouch for it a ring is on its own, and the
             // sizes separate cleanly. Re-measured every time the growth changes,
             // by turning the pair rule and this filter off and growing every
@@ -434,9 +451,12 @@ impl PetImageSource {
     /// of the rim they are on, and that is what `sees_out` asks. Shortening the
     /// growth instead does not work: at one step the crescent is left behind
     /// and comes out painted as fur, which on a blue cat is a blue eye bottom.
+    #[allow(clippy::too_many_arguments)]
     fn grown_eye(
         &self,
         seed: &[usize],
+        blob: &[usize],
+        reach: &[(usize, usize, usize, usize)],
         origin_x: usize,
         origin_y: usize,
         cell: (usize, usize),
@@ -447,7 +467,6 @@ impl PetImageSource {
         for spot in seed {
             inside[*spot] = true;
         }
-        let seeded = inside.clone();
         // The rim draws the eye's extent, so growth stays inside the box the
         // rim spans. Three steps is enough to walk round the outside of the
         // rim and out into the fur beside it, and there the fur is the same
@@ -473,7 +492,14 @@ impl PetImageSource {
                     {
                         continue;
                     }
-                    if self.sees_out(neighbour, &seeded, origin_x, origin_y, cell) {
+                    if sees_out(
+                        neighbour,
+                        blob,
+                        reach,
+                        (left, right, top, bottom),
+                        cell_width,
+                        cell_height,
+                    ) {
                         continue;
                     }
                     inside[neighbour] = true;
@@ -497,27 +523,6 @@ impl PetImageSource {
         let holes = enclosed(&mask, cell_width, cell_height);
         mask.extend(holes);
         mask
-    }
-
-    /// Can this pixel see the face without crossing the rim?
-    ///
-    /// The cream body is the outside world here. The sclera is cream as well,
-    /// but the rim encloses it, so it arrived in the seed and is not outside.
-    fn sees_out(
-        &self,
-        spot: usize,
-        seeded: &[bool],
-        origin_x: usize,
-        origin_y: usize,
-        cell: (usize, usize),
-    ) -> bool {
-        around(spot, cell.0, cell.1).into_iter().any(|neighbour| {
-            if seeded[neighbour] {
-                return false;
-            }
-            let pixel = self.cell_pixel(neighbour, origin_x, origin_y, cell);
-            pixel[3] > OPAQUE && lightness([pixel[0], pixel[1], pixel[2]]) >= CREAM_LOW
-        })
     }
 
     /// The best pair: a ring we trust, and the blob that looks like its twin --
@@ -1151,6 +1156,39 @@ fn around(spot: usize, width: usize, height: usize) -> Vec<usize> {
         }
     }
     found
+}
+
+/// Can this pixel see out of the eye without crossing the rim?
+///
+/// Cream is the outside world -- the face and the belly are cream, and an eye
+/// that grows into them has escaped. But **the catchlight is cream too**, and
+/// that was the whole trouble: a gap in the rim is drawn in marking rather than
+/// ink, and the marking pixel that would close the gap was refused for seeing
+/// the very thing the eye is supposed to close around. So the rim stayed open,
+/// the flood walked out through it, and the white was left on the face -- dark,
+/// on a black cat.
+///
+/// Size does not separate the two: measured over both sheets, a cell's cream
+/// runs to 2,221 for a face and 1,999 for the same cat's belly, and the biggest
+/// blob that is not the largest in its cell is 2,889. **Reach does.** The face
+/// and the belly run far past the eye; a catchlight is drawn inside it. So a
+/// cream neighbour is the outside world only when its blob leaves the box the
+/// rim draws.
+fn sees_out(
+    spot: usize,
+    blob: &[usize],
+    reach: &[(usize, usize, usize, usize)],
+    eye: (usize, usize, usize, usize),
+    width: usize,
+    height: usize,
+) -> bool {
+    around(spot, width, height).into_iter().any(|neighbour| {
+        let Some((left, right, top, bottom)) = blob.get(neighbour).and_then(|id| reach.get(*id))
+        else {
+            return false;
+        };
+        *left < eye.0 || *right > eye.1 || *top < eye.2 || *bottom > eye.3
+    })
 }
 
 fn bounds(component: &[usize], width: usize) -> (usize, usize, usize, usize) {
