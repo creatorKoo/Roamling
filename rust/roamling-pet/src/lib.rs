@@ -13,8 +13,8 @@
 pub mod package;
 
 use roamling_core::{
-    standard_tracks, PaletteAnchors, PaletteMap, PaletteTargets, PetAnimationFrame,
-    PetAnimationTrack, PetImageSource,
+    standard_tracks, Palette, PaletteMap, PaletteTargets, PetAnimationFrame, PetAnimationTrack,
+    PetImageSource,
 };
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
@@ -113,8 +113,19 @@ const CELL_HEIGHT: usize = 208;
 const COLUMNS: usize = 8;
 const STANDARD_ROWS: usize = 9;
 const EXTENSION_ROWS: usize = 3;
-const BUILT_IN_PALETTE: PaletteTargets =
-    PaletteTargets::new([115, 52, 27], [235, 118, 27], [254, 242, 220]);
+/// Where Mochi already is, measured over every drawn cell of the shipped
+/// sheets rather than chosen (`docs/palette.md` §0). Handing these back as
+/// targets has to return the original bytes -- the frame hashes compare
+/// exactly, so these have to be integers a slider can land on.
+///
+/// The eye's chroma looks low because half that region is the near-black pupil
+/// and the white catchlight. Only the brown iris carries colour, and rank
+/// keeps all three in their places when the eye is moved.
+const BUILT_IN_PALETTE: Palette = Palette::new(
+    PaletteTargets::new(22.0, 17.0, 53.0, 90.0),
+    PaletteTargets::new(38.0, 86.0, 95.0, 33.0),
+    PaletteTargets::new(21.0, 0.0, 78.0, 17.0),
+);
 
 // The shipped `mochi-v3` package, byte for byte the same files as
 // `~/.codex/pets/mochi-v3`. Compiled in rather than read from disk: the
@@ -127,7 +138,6 @@ pub(crate) const EXTENSION: &[u8] =
 struct BuiltInSource {
     standard: PetImageSource,
     extension: PetImageSource,
-    anchors: PaletteAnchors,
     standard_map: PaletteMap,
     extension_map: PaletteMap,
 }
@@ -143,33 +153,30 @@ impl BuiltInSource {
         {
             return None;
         }
-        // Measured from these two sheets together and pinned above. Re-measuring
-        // belongs in the test: shipped bytes do not need a runtime census.
-        let anchors = PaletteAnchors {
-            dark: Some(BUILT_IN_PALETTE.dark),
-            orange: Some(BUILT_IN_PALETTE.orange),
-            cream: Some(BUILT_IN_PALETTE.cream),
-        };
-        let standard_map = standard.palette_map(anchors);
-        let extension_map = extension.palette_map(anchors);
+        // Which pixels are fur and which are eye, decided once. The eye pass
+        // walks cell by cell because it looks for rings of outline, and a ring
+        // detector run over the whole atlas would have to separate 57 cats'
+        // worth of outline at the same time.
+        let cell = (CELL_WIDTH, CELL_HEIGHT);
+        let standard_map = standard.region_map(cell);
+        let extension_map = extension.region_map(cell);
         Some(Self {
             standard,
             extension,
-            anchors,
             standard_map,
             extension_map,
         })
     }
 
-    fn images(&self, targets: PaletteTargets) -> Option<(PetImage, PetImage)> {
+    fn images(&self, targets: Palette) -> Option<(PetImage, PetImage)> {
         std::thread::scope(|scope| {
             let extension = scope.spawn(|| {
                 self.extension
-                    .recolored(&self.extension_map, self.anchors, targets)
+                    .recolored(&self.extension_map, BUILT_IN_PALETTE, targets)
             });
-            let standard = self
-                .standard
-                .recolored(&self.standard_map, self.anchors, targets)?;
+            let standard =
+                self.standard
+                    .recolored(&self.standard_map, BUILT_IN_PALETTE, targets)?;
             Some((standard, extension.join().ok()??))
         })
     }
@@ -186,9 +193,9 @@ pub fn prepare_built_in_mochi_recolor() -> bool {
     built_in_source().is_some()
 }
 
-/// The shared standard-and-extension anchors. These are the identity positions
-/// for the debug palette controls.
-pub const fn built_in_mochi_palette() -> PaletteTargets {
+/// Where marking, body and eyes already are. The debug controls open here, and
+/// coming back to it has to restore the original bytes.
+pub const fn built_in_mochi_palette() -> Palette {
     BUILT_IN_PALETTE
 }
 
@@ -221,7 +228,7 @@ pub fn built_in_mochi() -> Option<PetAsset> {
 
 /// Build Mochi at caller-selected family targets. The cached inputs are still
 /// straight alpha here; premultiplication only happens inside `recolored`.
-pub fn built_in_mochi_recolored(targets: PaletteTargets) -> Option<PetAsset> {
+pub fn built_in_mochi_recolored(targets: Palette) -> Option<PetAsset> {
     let source = built_in_source()?;
     let (atlas, extension_sheet) = source.images(targets)?;
     Some(built_in_mochi_from_images(atlas, extension_sheet))
@@ -354,13 +361,14 @@ mod tests {
         assert_eq!(extension.height, 3 * 208);
     }
 
-    #[test]
-    fn the_pinned_palette_matches_both_shipped_sheets_together() {
-        let standard = PetImageSource::decode(STANDARD).expect("standard");
-        let extension = PetImageSource::decode(EXTENSION).expect("extension");
-        let measured = PetImageSource::palette_anchors(&[&standard, &extension]);
-        assert_eq!(measured.targets(), Some(built_in_mochi_palette()));
-    }
+    // There used to be a test here asserting the pinned palette equalled a
+    // runtime census of the two sheets. Both the census and the anchors it
+    // measured are gone: anchors were the wrong description of what the answer
+    // cats do, and measuring one on an answer cat returned lightness 11 for a
+    // marking that actually sits at 58 (`docs/palette.md` §0). The pinned
+    // values are now a marking measurement, taken in `output/palette-answers/`
+    // with the region masks, and `the_default_palette_is_a_byte_identity`
+    // below is what keeps them honest.
 
     /// The controls open at the measured anchors. Going through the palette
     /// path there must be byte-for-byte the same as the ordinary decoder.
@@ -374,14 +382,45 @@ mod tests {
         );
     }
 
+    /// The region split is the whole argument, so it gets a number to defend.
+    ///
+    /// Marking and body were measured in `output/palette-answers/region_identity.py`
+    /// over the drawn cells of the standard sheet: 242,663 and 228,117.
+    ///
+    /// The eye figure is 30,529 -- 51 of 57 cells finding a pair at about 600px
+    /// each. It is worth a band in both directions. Far below and ring detection
+    /// has broken. Far above and the false blobs are back: taking every ring at
+    /// face value instead of the best pair put 514px of tail into the landing
+    /// animation's last frame and 931px into the jump's, which is how this was
+    /// found. Neither failure shows up in a render test.
+    #[test]
+    fn the_shipped_sheet_splits_into_the_regions_that_were_measured() {
+        let standard = PetImageSource::decode(STANDARD).expect("standard");
+        let map = standard.region_map((CELL_WIDTH, CELL_HEIGHT));
+        let (marking, body, eye) = (map.marking_pixels(), map.body_pixels(), map.eye_pixels());
+        assert!(
+            (230_000..250_000).contains(&marking),
+            "marking pixels moved a long way from the measurement: {marking}"
+        );
+        assert!(
+            (215_000..240_000).contains(&body),
+            "body pixels moved a long way from the measurement: {body}"
+        );
+        assert!(
+            (29_500..31_500).contains(&eye),
+            "eye pixels left the measured band: {eye}"
+        );
+    }
+
     #[test]
     fn recoloring_the_shipped_sheets_preserves_every_alpha_byte() {
         let original = built_in_mochi().expect("original");
         assert!(prepare_built_in_mochi_recolor());
-        let recolored = built_in_mochi_recolored(PaletteTargets::new(
-            [180, 40, 160],
-            [20, 210, 100],
-            [170, 210, 255],
+        // Every region moved at once: the alpha plane has to survive all three.
+        let recolored = built_in_mochi_recolored(Palette::new(
+            PaletteTargets::new(214.0, 30.0, 95.0, 120.0),
+            PaletteTargets::new(210.0, 80.0, 96.0, 40.0),
+            PaletteTargets::new(140.0, 5.0, 90.0, 120.0),
         ))
         .expect("recolored");
         for (before, after) in [

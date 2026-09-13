@@ -9,7 +9,7 @@
 //! trackbars, thread-local ownership, a pending value drained by the main tick,
 //! and a `create` seam that lets tests inspect a real hidden window.
 
-use roamling_core::PaletteTargets;
+use roamling_core::{Palette, PaletteTargets};
 use std::cell::RefCell;
 
 use windows::core::{w, PCWSTR};
@@ -38,100 +38,138 @@ const ID_DONE: usize = 2;
 const ID_SLIDER: usize = 100;
 const ID_VALUE: usize = 200;
 
-#[derive(Clone, Copy)]
-enum Family {
-    Dark,
-    Orange,
-    Cream,
+/// Which of the four numbers a slider drives.
+///
+/// This used to be nine: three colour families times R, G and B. The answer
+/// cats say a palette is not three colours -- it is one hue, a lightness ramp
+/// and a chroma, applied to the marking alone (`docs/palette.md` §0). Fewer
+/// sliders and each one means something you can see.
+#[derive(Clone, Copy, PartialEq)]
+enum Axis {
+    Hue,
+    LightLow,
+    LightHigh,
+    Chroma,
 }
 
-impl Family {
-    fn colour(self, palette: PaletteTargets) -> [u8; 3] {
+impl Axis {
+    fn value(self, palette: PaletteTargets) -> f32 {
         match self {
-            Self::Dark => palette.dark,
-            Self::Orange => palette.orange,
-            Self::Cream => palette.cream,
+            Self::Hue => palette.hue,
+            Self::LightLow => palette.light_low,
+            Self::LightHigh => palette.light_high,
+            Self::Chroma => palette.chroma,
         }
     }
 
-    fn with_colour(self, palette: PaletteTargets, colour: [u8; 3]) -> PaletteTargets {
+    fn with_value(self, palette: PaletteTargets, value: f32) -> PaletteTargets {
         match self {
-            Self::Dark => PaletteTargets {
-                dark: colour,
+            Self::Hue => PaletteTargets {
+                hue: value,
                 ..palette
             },
-            Self::Orange => PaletteTargets {
-                orange: colour,
+            // The ramp cannot cross itself: dragging one end past the other
+            // would invert the shading, which reads as a different cat rather
+            // than a differently coloured one.
+            Self::LightLow => PaletteTargets {
+                light_low: value.min(palette.light_high),
                 ..palette
             },
-            Self::Cream => PaletteTargets {
-                cream: colour,
+            Self::LightHigh => PaletteTargets {
+                light_high: value.max(palette.light_low),
                 ..palette
             },
+            Self::Chroma => PaletteTargets {
+                chroma: value,
+                ..palette
+            },
+        }
+    }
+}
+
+/// Which of the three things a slider steers.
+///
+/// Separate because the answer cats treat them separately: `blue` tinted the
+/// body with the fur and `sky` left it cream, and twelve of thirteen kept brown
+/// eyes while `sky` alone went blue.
+#[derive(Clone, Copy, PartialEq)]
+enum Part {
+    Marking,
+    Body,
+    Eye,
+}
+
+impl Part {
+    fn targets(self, palette: Palette) -> PaletteTargets {
+        match self {
+            Self::Marking => palette.marking,
+            Self::Body => palette.body,
+            Self::Eye => palette.eye,
+        }
+    }
+
+    fn with_targets(self, palette: Palette, aim: PaletteTargets) -> Palette {
+        match self {
+            Self::Marking => Palette {
+                marking: aim,
+                ..palette
+            },
+            Self::Body => Palette { body: aim, ..palette },
+            Self::Eye => Palette { eye: aim, ..palette },
         }
     }
 }
 
 #[derive(Clone, Copy)]
 struct Row {
-    family: Family,
-    channel: usize,
+    part: Part,
+    axis: Axis,
     label: &'static str,
+    /// Each axis has its own units, so the trackbar range is per row rather
+    /// than the 0-255 every channel shared.
+    maximum: i32,
 }
 
-const ROWS: [Row; 9] = [
-    Row {
-        family: Family::Dark,
-        channel: 0,
-        label: "R",
-    },
-    Row {
-        family: Family::Dark,
-        channel: 1,
-        label: "G",
-    },
-    Row {
-        family: Family::Dark,
-        channel: 2,
-        label: "B",
-    },
-    Row {
-        family: Family::Orange,
-        channel: 0,
-        label: "R",
-    },
-    Row {
-        family: Family::Orange,
-        channel: 1,
-        label: "G",
-    },
-    Row {
-        family: Family::Orange,
-        channel: 2,
-        label: "B",
-    },
-    Row {
-        family: Family::Cream,
-        channel: 0,
-        label: "R",
-    },
-    Row {
-        family: Family::Cream,
-        channel: 1,
-        label: "G",
-    },
-    Row {
-        family: Family::Cream,
-        channel: 2,
-        label: "B",
-    },
+const fn group(part: Part) -> [Row; 4] {
+    [
+        Row {
+            part,
+            axis: Axis::Hue,
+            label: "Hue",
+            maximum: 359,
+        },
+        Row {
+            part,
+            axis: Axis::LightLow,
+            label: "Dark",
+            maximum: 100,
+        },
+        Row {
+            part,
+            axis: Axis::LightHigh,
+            label: "Light",
+            maximum: 100,
+        },
+        Row {
+            part,
+            axis: Axis::Chroma,
+            label: "Chroma",
+            maximum: 255,
+        },
+    ]
+}
+
+const GROUPS: [(Part, &str, [Row; 4]); 3] = [
+    (Part::Marking, "Marking", group(Part::Marking)),
+    (Part::Body, "Body", group(Part::Body)),
+    (Part::Eye, "Eyes", group(Part::Eye)),
 ];
 
 struct Panel {
     window: HWND,
     app_window: HWND,
-    palette: PaletteTargets,
-    original: PaletteTargets,
+    palette: Palette,
+    original: Palette,
     sliders: Vec<(HWND, HWND, Row)>,
     body: HFHandle,
     heading: HFHandle,
@@ -143,10 +181,10 @@ struct HBHandle(HBRUSH);
 
 thread_local! {
     static PANEL: RefCell<Option<Panel>> = const { RefCell::new(None) };
-    static PENDING: RefCell<Option<PaletteTargets>> = const { RefCell::new(None) };
+    static PENDING: RefCell<Option<Palette>> = const { RefCell::new(None) };
 }
 
-pub fn take_pending() -> Option<PaletteTargets> {
+pub fn take_pending() -> Option<Palette> {
     PENDING.with(|slot| slot.borrow_mut().take())
 }
 
@@ -174,7 +212,7 @@ fn set_icon(window: HWND, instance: windows::Win32::Foundation::HMODULE) {
 }
 
 /// Opens the lab, or brings the existing hidden instance back.
-pub fn show(app_window: HWND, current: PaletteTargets, original: PaletteTargets) {
+pub fn show(app_window: HWND, current: Palette, original: Palette) {
     let existing = PANEL.with(|slot| slot.borrow().as_ref().map(|panel| panel.window));
     if let Some(window) = existing {
         PANEL.with(|slot| {
@@ -204,8 +242,8 @@ pub fn show(app_window: HWND, current: PaletteTargets, original: PaletteTargets)
 /// without flashing a panel on the desktop.
 fn create(
     app_window: HWND,
-    current: PaletteTargets,
-    original: PaletteTargets,
+    current: Palette,
+    original: Palette,
 ) -> windows::core::Result<HWND> {
     unsafe {
         // Trackbars are registered by comctl32 only after this call.
@@ -248,7 +286,7 @@ fn create(
     }
 }
 
-fn build(window: HWND, app_window: HWND, palette: PaletteTargets, original: PaletteTargets) {
+fn build(window: HWND, app_window: HWND, palette: Palette, original: Palette) {
     unsafe {
         let dpi = GetDpiForWindow(window).max(96);
         let scaled = |value: i32| value * dpi as i32 / 96;
@@ -274,7 +312,7 @@ fn build(window: HWND, app_window: HWND, palette: PaletteTargets, original: Pale
         let body = font(12, FW_NORMAL.0 as i32);
         let heading = font(13, FW_SEMIBOLD.0 as i32);
         let margin = scaled(20);
-        let channel_width = scaled(22);
+        let channel_width = scaled(54);
         let track_width = scaled(270);
         let value_width = scaled(44);
         let gap = scaled(8);
@@ -282,7 +320,7 @@ fn build(window: HWND, app_window: HWND, palette: PaletteTargets, original: Pale
         let width = margin * 2 + channel_width + track_width + value_width + gap * 2;
         let instance = GetModuleHandleW(None).unwrap_or_default();
         let mut y = margin;
-        let mut sliders = Vec::with_capacity(ROWS.len());
+        let mut sliders = Vec::with_capacity(GROUPS.len() * 4);
 
         let label = |text: &str, x: i32, y: i32, w: i32, h: i32, style: u32, which: HFONT| {
             let content = wide(text);
@@ -316,23 +354,10 @@ fn build(window: HWND, app_window: HWND, palette: PaletteTargets, original: Pale
         );
         y += scaled(48);
 
-        for (family_index, (family, title)) in [
-            (Family::Dark, "Dark family"),
-            (Family::Orange, "Orange family"),
-            (Family::Cream, "Cream family"),
-        ]
-        .into_iter()
-        .enumerate()
-        {
+        for (_, title, rows) in GROUPS {
             label(title, margin, y, width - margin * 2, row_height, 0, heading);
             y += row_height;
-            for row in ROWS.iter().copied().skip(family_index * 3).take(3) {
-                debug_assert!(matches!(
-                    (family, row.family),
-                    (Family::Dark, Family::Dark)
-                        | (Family::Orange, Family::Orange)
-                        | (Family::Cream, Family::Cream)
-                ));
+            for row in rows {
                 let index = sliders.len();
                 label(
                     row.label,
@@ -459,9 +484,14 @@ fn refresh() {
         let panel = slot.borrow();
         let Some(panel) = panel.as_ref() else { return };
         for (track, readout, row) in &panel.sliders {
-            let value = row.family.colour(panel.palette)[row.channel];
+            let value = row.axis.value(row.part.targets(panel.palette)).round() as i32;
             unsafe {
-                SendMessageW(*track, TBM_SETRANGE, WPARAM(1), LPARAM((255_isize) << 16));
+                SendMessageW(
+                    *track,
+                    TBM_SETRANGE,
+                    WPARAM(1),
+                    LPARAM((row.maximum as isize) << 16),
+                );
                 SendMessageW(*track, TBM_SETPOS, WPARAM(1), LPARAM(value as isize));
                 let text = wide(&value.to_string());
                 let _ = SetWindowTextW(*readout, PCWSTR(text.as_ptr()));
@@ -471,7 +501,7 @@ fn refresh() {
     });
 }
 
-fn replace(palette: PaletteTargets, notify: bool) {
+fn replace(palette: Palette, notify: bool) {
     let changed = PANEL.with(|slot| {
         let mut panel = slot.borrow_mut();
         let Some(panel) = panel.as_mut() else {
@@ -524,9 +554,9 @@ extern "system" fn wndproc(window: HWND, message: u32, wp: WPARAM, lp: LPARAM) -
                         .iter()
                         .find(|(handle, _, _)| *handle == track)?;
                     let position = SendMessageW(track, TBM_GETPOS, WPARAM(0), LPARAM(0)).0 as i32;
-                    let mut colour = row.family.colour(panel.palette);
-                    colour[row.channel] = position.clamp(0, 255) as u8;
-                    Some(row.family.with_colour(panel.palette, colour))
+                    let value = position.clamp(0, row.maximum) as f32;
+                    let aim = row.axis.with_value(row.part.targets(panel.palette), value);
+                    Some(row.part.with_targets(panel.palette, aim))
                 });
                 if let Some(updated) = updated {
                     replace(updated, true);
@@ -599,12 +629,16 @@ extern "system" fn wndproc(window: HWND, message: u32, wp: WPARAM, lp: LPARAM) -
 mod tests {
     use super::*;
 
-    fn palette() -> PaletteTargets {
-        PaletteTargets::new([91, 45, 22], [223, 127, 42], [250, 238, 220])
+    fn palette() -> Palette {
+        Palette::new(
+            PaletteTargets::new(22.0, 17.0, 53.0, 90.0),
+            PaletteTargets::new(38.0, 86.0, 95.0, 33.0),
+            PaletteTargets::new(21.0, 0.0, 78.0, 17.0),
+        )
     }
 
     #[test]
-    fn the_hidden_window_builds_all_nine_trackbars() {
+    fn the_hidden_window_builds_a_trackbar_for_every_axis() {
         PENDING.with(|slot| *slot.borrow_mut() = None);
         let window = create(HWND(std::ptr::null_mut()), palette(), palette())
             .expect("the palette lab did not build");
@@ -620,7 +654,7 @@ mod tests {
                     .all(|(track, readout, _)| !track.is_invalid() && !readout.is_invalid()),
             )
         });
-        assert_eq!(count, ROWS.len());
+        assert_eq!(count, GROUPS.len() * 4);
         assert!(intact, "a trackbar or readout failed to create");
 
         let track = PANEL.with(|slot| slot.borrow().as_ref().unwrap().sliders[0].0);
@@ -629,8 +663,11 @@ mod tests {
             wndproc(window, WM_HSCROLL, WPARAM(0), LPARAM(track.0 as isize));
         }
         assert_eq!(
-            take_pending().expect("the slider reported nothing").dark[0],
-            0
+            take_pending()
+                .expect("the slider reported nothing")
+                .marking
+                .hue,
+            0.0
         );
 
         unsafe {

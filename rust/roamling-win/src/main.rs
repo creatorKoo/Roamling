@@ -86,7 +86,7 @@ struct App {
     asset: PetAsset,
     /// Session-only targets for the disposable debug palette laboratory.
     #[cfg(debug_assertions)]
-    palette: roamling_core::PaletteTargets,
+    palette: roamling_core::Palette,
     /// Packages found on disk, and which one is showing. `None` is the
     /// built-in mascot, which is always available and never fails to load.
     catalog: Vec<package::PetDescriptor>,
