@@ -10,8 +10,6 @@
 | 묻는 것 | 문서 | 줄 |
 |---|---|---|
 | 사용자가 원한다고 말했는데 아직 없는 것 | [`requests.md`](requests.md) | ~100 |
-| 잠깐 숨기기와 끄기 발견성 (R2·R3) | [`hiding.md`](hiding.md) | ~90 |
-| 색 팔레트 (R1) — 설계, 코드 없음 | [`palette.md`](palette.md) | ~110 |
 | 모듈이 어떻게 갈리고 의존이 어디로 흐르나 | [`architecture.md`](architecture.md) | ~630 |
 | 어떤 상황에 펫이 어떤 그림을 입나, 얼마나 오래 | [`behavior-flow.md`](behavior-flow.md) | ~560 |
 | 펫이 **어디에 설지**를 어떻게 정하나 | [`placement.md`](placement.md) | ~510 |
