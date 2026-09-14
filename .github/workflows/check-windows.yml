@@ -130,15 +130,18 @@ jobs:
             Sort-Object -Unique
           $imports | ForEach-Object { "  $_" }
 
-          # Everything a Windows machine already has. Anything else means a
-          # dependency started shipping a library the installer does not carry.
+          # What the exe imported when this was first measured (2026-09-14),
+          # every one of them shipped with Windows. Measured rather than
+          # guessed: the first guess left out bcryptprimitives.dll, which is
+          # where Rust's standard library gets the seed for its hash maps, and
+          # the check failed on a binary that was fine. A name not on this list
+          # is a new question, not automatically a fault -- but it is a
+          # question this step exists to ask, so it stops here.
           $osOwned = @(
-            'kernel32.dll','user32.dll','gdi32.dll','shell32.dll','shlwapi.dll',
-            'advapi32.dll','ole32.dll','oleaut32.dll','comdlg32.dll','comctl32.dll',
-            'msvcrt.dll','ntdll.dll','ws2_32.dll','userenv.dll','bcrypt.dll',
-            'crypt32.dll','secur32.dll','winhttp.dll','dwmapi.dll','d3d11.dll',
-            'dxgi.dll','shcore.dll','powrprof.dll','propsys.dll','uxtheme.dll',
-            'imm32.dll','version.dll','psapi.dll','api-ms-win-core-synch-l1-2-0.dll'
+            'advapi32.dll','bcryptprimitives.dll','comctl32.dll','comdlg32.dll',
+            'd3d11.dll','dwmapi.dll','dxgi.dll','gdi32.dll','kernel32.dll',
+            'ntdll.dll','oleaut32.dll','shell32.dll','user32.dll','version.dll',
+            'winhttp.dll','ws2_32.dll'
           )
           $strays = $imports | Where-Object {
             $_ -notin $osOwned -and $_ -notlike 'api-ms-win-*'
