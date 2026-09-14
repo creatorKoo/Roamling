@@ -1415,7 +1415,11 @@ unsafe fn dispatch(hwnd: HWND, msg: u32, app: &mut App) -> bool {
                 tick(hwnd, app);
                 true
             }
-            #[cfg(debug_assertions)]
+            // Not debug-only. The mixer was a laboratory once and this gate
+            // stayed behind when it shipped, which left the release build
+            // applying a colour on the next ordinary timer tick instead -- half
+            // a second of it when the pet is asleep, so the sliders looked
+            // dead while the pet dozed.
             palette_debug::WM_PALETTE_CHANGED => {
                 tick(hwnd, app);
                 true
