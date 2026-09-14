@@ -20,7 +20,7 @@
 | 프레임을 새로 그릴 때의 불변식 | [`art/mochi-animation-handoff.md`](art/mochi-animation-handoff.md) | ~140 |
 | 도구 없이 손으로 프레임을 만들 때의 프롬프트 | [`art/mochi-animation-prompts-ko.md`](art/mochi-animation-prompts-ko.md) | ~150 |
 | Windows에서 지금 유효한 것, 남은 게이트(W8) | [`windows.md`](windows.md) | ~300 |
-| Android 첫 프로젝트를 어디까지 만들면 좋은가 | [`android.md`](android.md) | ~45 |
+| Android를 어떻게 붙이고 어떤 순서로 만드나 | [`android.md`](android.md) | ~300 |
 | 서명·dmg·배포를 어떻게 하나 | [`release.md`](release.md) | ~90 |
 | 고양이 색을 어떻게 바꾸나 | [`palette.md`](palette.md) | ~400 |
 | 숨기기와 메뉴가 왜 그 모양인가 | [`hiding.md`](hiding.md) | ~150 |
