@@ -11,7 +11,7 @@
 //! That was measured against thirteen hand-drawn answer cats and it was the
 //! wrong operator, not merely badly tuned: given the blue answer's own anchors
 //! as targets it still put the dark marking at lightness 11 where the answer
-//! has 58, and turned the blush blue. The whole argument is in `docs/palette.md`
+//! has 58, and turned the blush blue. The whole argument is in `docs/history/palette-making.md`
 //! §0. What the answers actually do:
 //!
 //! * only the marking moves -- 2,662 of 12,292 opaque pixels in a cell. The
@@ -164,7 +164,7 @@ impl Palette {
     }
 }
 
-/// sheets rather than chosen (`docs/palette.md` §0). Handing these back as
+/// sheets rather than chosen (`docs/history/palette-making.md` §0). Handing these back as
 /// targets has to return the original bytes -- the frame hashes compare
 /// exactly, so these have to be integers a slider can land on.
 ///
@@ -179,7 +179,7 @@ pub const BUILT_IN_PALETTE: Palette = Palette::new(
 
 /// The colours the menu offers, in the order it shows them.
 ///
-/// The hues come off the hand-drawn answer cats (`docs/palette.md` §0). The
+/// The hues come off the hand-drawn answer cats (`docs/history/palette-making.md` §0). The
 /// **lightness ends do not**, and that is the one place these were tuned by eye
 /// rather than measured: the answers' marking is bunched at one lightness while
 /// this ramp spreads evenly by rank, so reusing their p5 as the dark end left
@@ -470,7 +470,7 @@ impl PetImageSource {
     ///
     /// Measured over the standard sheet's 57 drawn cells: 51 give both eyes,
     /// 4 are frames cropped by the cell edge where only one eye is drawn, and 2
-    /// are shut-eyed smiles with no ring to find. `docs/palette.md` §6.
+    /// are shut-eyed smiles with no ring to find. `docs/history/palette-making.md` §6.
     fn eyes_in_cell(&self, origin_x: usize, origin_y: usize, cell: (usize, usize)) -> Vec<usize> {
         let (cell_width, cell_height) = cell;
         let mut ink = vec![false; cell_width * cell_height];
@@ -1101,7 +1101,7 @@ const REGION_EYE: u8 = 2;
 const REGION_BODY: u8 = 3;
 /// The blush, the nose, the inner ears -- and the shading that runs between
 /// marking and body, which lives in the same lightness band and cannot be told
-/// apart from them by colour (`docs/palette.md` §0).
+/// apart from them by colour (`docs/history/palette-making.md` §0).
 ///
 /// It keeps its own hue and depth but follows the body's lightness, because
 /// that is what it is: a highlight lying on the body. Leaving it still while

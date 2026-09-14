@@ -361,7 +361,7 @@ mod tests {
     // runtime census of the two sheets. Both the census and the anchors it
     // measured are gone: anchors were the wrong description of what the answer
     // cats do, and measuring one on an answer cat returned lightness 11 for a
-    // marking that actually sits at 58 (`docs/palette.md` §0). The pinned
+    // marking that actually sits at 58 (`docs/history/palette-making.md` §0). The pinned
     // values are now a marking measurement, taken in `output/palette-answers/`
     // with the region masks, and `the_default_palette_is_a_byte_identity`
     // below is what keeps them honest.

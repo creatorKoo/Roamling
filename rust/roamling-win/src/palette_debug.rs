@@ -51,7 +51,7 @@ const ID_PICK: usize = 300;
 ///
 /// This used to be nine: three colour families times R, G and B. The answer
 /// cats say a palette is not three colours -- it is one hue, a lightness ramp
-/// and a chroma, applied to the marking alone (`docs/palette.md` §0). Fewer
+/// and a chroma, applied to the marking alone (`docs/history/palette-making.md` §0). Fewer
 /// sliders and each one means something you can see.
 #[derive(Clone, Copy, PartialEq)]
 enum Axis {
