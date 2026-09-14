@@ -24,6 +24,8 @@
 | Windows에서 지금 유효한 것, 남은 게이트(W8) | [`windows.md`](windows.md) | ~300 |
 | Android 첫 프로젝트를 어디까지 만들면 좋은가 | [`android.md`](android.md) | ~45 |
 | 서명·dmg·배포를 어떻게 하나 | [`release.md`](release.md) | ~90 |
+| 고양이 색을 어떻게 바꾸나 | [`palette.md`](palette.md) | ~400 |
+| 숨기기와 메뉴가 왜 그 모양인가 | [`hiding.md`](hiding.md) | ~150 |
 | 무엇이 실제로 배터리를 먹나 | [`battery.md`](battery.md) | ~90 |
 
 ## 닫힌 기록 — [`history/`](history/)
@@ -39,6 +41,7 @@
 | Mochi v3를 만들기 전의 진단과 계획 | [`history/mochi-v3-plan.md`](history/mochi-v3-plan.md) | ~500 |
 | upstream 조사 (Petdex · Codex · macOS API) | [`history/research.md`](history/research.md) | ~470 |
 | 맥 수정 A~F — 전부 닫힘 | [`history/mac-fixes.md`](history/mac-fixes.md) | ~80 |
+| 팔레트를 어떻게 만들었나 — 정답지 측정과 뒤집힌 계획 | [`history/palette-making.md`](history/palette-making.md) | ~600 |
 | v2 시트의 기록 | [`history/mochi-v2-animation-spec.md`](history/mochi-v2-animation-spec.md) | ~280 |
 
 ## 이 지도의 규칙

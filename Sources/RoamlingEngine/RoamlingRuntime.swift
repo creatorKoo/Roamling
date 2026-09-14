@@ -555,7 +555,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     ///
     /// Decoding and region-mapping is the expensive half and does not depend
     /// on the palette, so the source is kept between changes. A whole recolour
-    /// was measured at 38 ms (`docs/palette.md` §4.5).
+    /// was measured at 38 ms (`docs/palette.md`의 "값" 절).
     private func mochiSheets() -> MochiSheets? {
         if let recoloredSheets { return recoloredSheets }
         guard !isPaletteDefault else { return nil }

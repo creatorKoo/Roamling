@@ -88,6 +88,19 @@ fn table() -> &'static HashMap<String, String> {
     })
 }
 
+/// Which table the machine's language chose, for the packaging check to print.
+///
+/// The macOS twin prints the same thing, and for the same reason: a table that
+/// failed to load still answers every lookup -- with the key -- so the only way
+/// to see it is to say out loud what resolved.
+pub fn language() -> &'static str {
+    if (unsafe { GetUserDefaultUILanguage() } & 0x3ff) == 0x12 {
+        "ko"
+    } else {
+        "en"
+    }
+}
+
 /// The key itself when nothing has that key, which is what `NSLocalizedString`
 /// does and is loud enough to notice in a menu.
 pub fn localized(key: &'static str) -> &'static str {

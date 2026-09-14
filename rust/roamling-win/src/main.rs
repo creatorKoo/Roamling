@@ -62,6 +62,9 @@ use windows::Win32::UI::WindowsAndMessaging::*;
 const BASE_WIDTH: f64 = 96.0;
 const BASE_HEIGHT: f64 = 104.0;
 const FOCUS_SAMPLE_INTERVAL: f64 = 0.5;
+/// The packaging check's "you have seen enough" timer. Not 1: that one is the
+/// tick, and re-arming it here would change the frame rate instead.
+const SMOKE_TIMER: usize = 2;
 
 fn is_work_app(work_apps: &[String], application: &str) -> bool {
     work_apps
@@ -395,6 +398,28 @@ fn main() -> Result<()> {
             let _ = SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
         }
         SetTimer(hwnd, 1, 16, None);
+
+        // Everything is real by here: the tray icon, the layered window, the
+        // decoded mascot, the strings the machine's language chose. A packaging
+        // check can start the app and be told so, then have it leave.
+        //
+        // The macOS twin exists because v0.3.0 passed every check of the
+        // bundle's *shape* and trapped on launch. Nothing about this shell can
+        // fail that way -- one static exe, no resource lookup -- but "nobody
+        // ever started it" is the same hole whatever digs it.
+        if std::env::var("ROAMLING_SMOKE_TEST").as_deref() == Ok("1") {
+            // The language the string table picked, and one string out of it.
+            // A table that failed to parse still answers, with the key itself,
+            // so printing the answer is what catches that.
+            println!(
+                "smoke.localization={} sample={}",
+                strings::language(),
+                strings::localized("menu.quit")
+            );
+            // Long enough for one timer tick to have drawn a frame, then out
+            // through the ordinary quit path so the teardown below still runs.
+            SetTimer(hwnd, SMOKE_TIMER, 400, None);
+        }
     }
     // Applied here rather than while the asset is being built, so a remembered
     // colour goes down exactly the path a menu pick does.
@@ -1364,7 +1389,7 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
     let Some(mut app) = taken else {
         return DefWindowProcW(hwnd, msg, wp, lp);
     };
-    let handled = dispatch(hwnd, msg, &mut app);
+    let handled = dispatch(hwnd, msg, wp, &mut app);
     APP.with(|slot| *slot.borrow_mut() = Some(app));
     if handled {
         LRESULT(0)
@@ -1373,11 +1398,17 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wp: WPARAM, lp: LPARAM) 
     }
 }
 
-unsafe fn dispatch(hwnd: HWND, msg: u32, app: &mut App) -> bool {
+unsafe fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, app: &mut App) -> bool {
     {
         let now = app.started.elapsed().as_secs_f64();
         match msg {
             WM_TIMER => {
+                if wp.0 == SMOKE_TIMER {
+                    KillTimer(hwnd, SMOKE_TIMER).ok();
+                    println!("smoke.done");
+                    PostQuitMessage(0);
+                    return true;
+                }
                 tick(hwnd, app);
                 true
             }

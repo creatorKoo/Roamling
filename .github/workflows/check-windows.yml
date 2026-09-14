@@ -76,19 +76,77 @@ jobs:
           }
           Write-Host "the exe and the installer were both produced"
 
-      # Two things this deliberately does not check, so that nobody reads a
-      # green run as more than it is.
+      # Everything above says the exe was produced. v0.3.0 was produced too,
+      # and trapped before it finished launching. That fault was SwiftPM's and
+      # cannot happen here, but "nobody started it" is the same hole whoever
+      # dug it -- so start it.
+      - name: Start it
+        shell: pwsh
+        env:
+          ROAMLING_SMOKE_TEST: "1"
+        run: |
+          $exe = "rust\target\release\roamling.exe"
+          $out = "$env:RUNNER_TEMP\smoke.log"
+          # A GUI subsystem binary detaches, so its output has to be redirected
+          # and waited on rather than read from this shell.
+          $p = Start-Process -FilePath $exe -PassThru -NoNewWindow `
+            -RedirectStandardOutput $out -RedirectStandardError "$env:RUNNER_TEMP\smoke.err"
+          if (-not $p.WaitForExit(30000)) {
+            $p.Kill()
+            Write-Host "it did not leave on its own within thirty seconds"
+            exit 1
+          }
+          Get-Content $out, "$env:RUNNER_TEMP\smoke.err" -ErrorAction SilentlyContinue
+          $log = Get-Content $out -Raw -ErrorAction SilentlyContinue
+          if ($log -notmatch 'smoke\.localization=') {
+            Write-Host "it never reported its strings; the window did not come up"
+            exit 1
+          }
+          if ($log -notmatch 'smoke\.done') { Write-Host "it did not finish"; exit 1 }
+          if ($p.ExitCode -ne 0) { Write-Host "it left with $($p.ExitCode)"; exit 1 }
+          Write-Host "it started, drew a frame and shut down cleanly"
+
+      # `+crt-static` in rust/.cargo/config.toml is what makes this one file
+      # with no DLLs of ours beside it, which is why W6 needed no staging step
+      # and why the installer lists a single binary. A dependency that pulled a
+      # DLL in would still build, still package, and fail on the first machine
+      # that does not happen to have it.
       #
-      # It does not start the app. The macOS twin does, because v0.3.0 passed
-      # every shape check and trapped on launch -- but that fault was SwiftPM
-      # compiling an absolute build path into its resource lookup, and this
-      # shell has no bundle lookup to get wrong. When `roamling-win` grows a
-      # `ROAMLING_SMOKE_TEST` path of its own, that step belongs here.
-      #
-      # It does not verify the single-file claim (`+crt-static`, no DLLs of
-      # ours beside the exe). Scanning `target/release` for DLLs looks like it
-      # would, and does not: `roamling-core` declares `cdylib` for the macOS
-      # binding, so `roamling_core.dll` is built there on purpose and a scan
-      # reports it every time. The honest check is `dumpbin /dependents` on the
-      # exe, which means locating the Visual Studio tools first -- worth doing,
-      # not worth guessing at from a machine that cannot run it.
+      # Asked of the exe's import table, not of the build directory: scanning
+      # for DLLs there reports `roamling_core.dll` every time, because the core
+      # declares a cdylib for the macOS binding and that is built on purpose.
+      - name: One file, and only the OS beside it
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $root = & $vswhere -latest -products * -property installationPath
+          $dumpbin = Get-ChildItem "$root\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" |
+            Select-Object -First 1
+          if (-not $dumpbin) { Write-Host "no dumpbin; cannot check"; exit 1 }
+
+          $imports = & $dumpbin.FullName /dependents "rust\target\release\roamling.exe" |
+            Select-String -Pattern '^\s+(\S+\.dll)$' |
+            ForEach-Object { $_.Matches[0].Groups[1].Value.ToLower() } |
+            Sort-Object -Unique
+          $imports | ForEach-Object { "  $_" }
+
+          # Everything a Windows machine already has. Anything else means a
+          # dependency started shipping a library the installer does not carry.
+          $osOwned = @(
+            'kernel32.dll','user32.dll','gdi32.dll','shell32.dll','shlwapi.dll',
+            'advapi32.dll','ole32.dll','oleaut32.dll','comdlg32.dll','comctl32.dll',
+            'msvcrt.dll','ntdll.dll','ws2_32.dll','userenv.dll','bcrypt.dll',
+            'crypt32.dll','secur32.dll','winhttp.dll','dwmapi.dll','d3d11.dll',
+            'dxgi.dll','shcore.dll','powrprof.dll','propsys.dll','uxtheme.dll',
+            'imm32.dll','version.dll','psapi.dll','api-ms-win-core-synch-l1-2-0.dll'
+          )
+          $strays = $imports | Where-Object {
+            $_ -notin $osOwned -and $_ -notlike 'api-ms-win-*'
+          }
+          if ($strays) {
+            Write-Host "the exe needs libraries the installer does not ship:"
+            $strays | ForEach-Object { Write-Host "  $_" }
+            Write-Host "either bundle them or drop the dependency that pulled them in."
+            exit 1
+          }
+          Write-Host "one static exe, and every import is the OS"
