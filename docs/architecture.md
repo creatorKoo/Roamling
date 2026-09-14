@@ -586,8 +586,8 @@ Petdex loader는 사용자 package와 fixtures로 계속 검증한다.
 ## 플랫폼 seam — 양쪽이 다 채워져 있다
 
 **이 절은 한때 "Windows 쪽에서 채울 자리"였다. 2026-09-04에 W7까지 닫히면서 양 플랫폼이
-같은 seam을 실제로 채웠다.** 남은 것은 W8(지정 앱 source의 Windows 배선) 하나다 —
-`docs/windows.md`.
+같은 seam을 실제로 채웠고, 마지막 게이트 W8(지정 앱 source의 Windows 배선)도 2026-09-12에
+닫혀 v0.5.0으로 나갔다.** 게이트는 전부 끝났다 — 지금 유효한 것은 `docs/windows.md`.
 
 런타임이 기계에 닿는 통로는 `PlatformServices` 하나다. macOS 쪽 조립은
 `MacPlatform.makeServices()`에, Windows 쪽은 `rust/roamling-win/src/platform.rs`에 모여
