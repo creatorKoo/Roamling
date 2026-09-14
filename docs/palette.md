@@ -534,77 +534,76 @@ p5를 그대로 어두운 끝에 쓰면 무늬의 절반이 너무 어두워지�
 시험했는데, 다섯 중 둘만 고치면서 r4c0에 1x8짜리 크림 부스러기를 집어넣었다 — 검정 위에서는
 흰 선이다. **잘못된 판단이 내려지는 자리에서 고쳐야 했다.**
 
-### macOS — 프리셋과 색 고르기 (사용자 결정 2026-09-14, 앞의 결정을 뒤집음)
+### macOS — 실렸다 (2026-09-14)
 
-**결정**: 프리셋 아홉 줄도, **색 직접 고르기도 양쪽 다.** "최대한 윈도우 비슷하게."
+**양쪽이 같은 것을 한다.** 프리셋 아홉 줄, 시스템 색 피커, 그리고 축마다 슬라이더가 있는 창.
 
-~~2026-09-13 결정: 프리셋 아홉 줄은 양쪽 다, 색 직접 고르는 창은 Windows만.~~ 그 결정의
-근거는 *"창은 Win32 트랙바와 comdlg32 대화상자로 짜여 있어 옮길 것이 아니라 다시 지을 것"*
-이었다. **창에 대해서는 지금도 맞고, 색 고르기에 대해서는 틀렸다.**
+~~2026-09-13: 프리셋 아홉 줄은 양쪽 다, 색 직접 고르는 창은 Windows만.~~
+~~2026-09-14: 색 고르기까지 양쪽, 슬라이더 창은 Windows만.~~
+**둘 다 좁았다.** 창까지 만들고 보니 SwiftUI를 `NSHostingView`에 얹는 기존 관용구
+(`RuntimeTuningWindowController`)가 이미 있어서, Win32 트랙바를 손으로 짜는 것과 값이 전혀
+달랐다 — 약 200줄이다.
 
-**Windows에서 색을 고르는 것은 그 창이 아니다.** `palette_debug.rs`가 부르는 `ChooseColorW`는
-comdlg32의 **OS 대화상자**이고, 우리가 그린 것이 아니다. 돌아오는 것은 RGB 세 바이트뿐이며,
-그것을 팔레트로 바꾸는 `PaletteTargets::aimed_at`은 **이미 공유 Rust에 있다.** macOS에는
-`NSColorPanel`이라는 같은 자리의 시스템 패널이 있으므로, 갈아 끼울 것은 대화상자 한 줄이다.
+| | Windows | macOS |
+|---|---|---|
+| 프리셋 아홉 개 | 트레이 `색 ▸` | 펫 ▸ **Mochi 줄의 하위 메뉴** |
+| 색 고르기 | `ChooseColorW` (OS 대화상자) | `NSColorPanel` (OS 패널) |
+| 슬라이더 창 | Win32 트랙바, Shift로 열림 | SwiftUI, **Option**으로 열림 |
+| 리컬러 · 프리셋 값 · 설정 형식 | 공유 Rust | 같은 것 |
 
-그래서 macOS는 **우리 창을 하나도 만들지 않고** 색 고르기를 얻는다 — `색 ▸` 서브메뉴에
-"직접 고르기…" 줄을 부위마다 하나씩 두고 `NSColorPanel`을 띄우면 된다. Windows가 창 안에
-넣은 것은 **트랙바가 창을 필요로 해서**이지 고르기가 필요로 해서가 아니다.
+#### 맥에서 갈린 자리 넷
 
-**남는 차이는 슬라이더 다섯 줄이다** (hue · hue-end · dark · light · chroma). 그 중 제품이
-실제로 요구한 것은 무지개인데(`"막 무지개색 고양이?"`), 그건 `hue_end`가 `hue`와 달라야 하고
-**한 번의 색 고르기로는 표현되지 않는다** — `aimed_at`이 sweep을 끝내기 때문이다. 그래서
-무지개는 프리셋으로 들어가 있다(`palette.rainbow`). **프리셋 + 색 고르기로 원문의 요구가 다
-덮이므로, 슬라이더 창은 나중에 원하면 하는 다듬기다.**
+1. **색은 Mochi 줄의 하위 메뉴다** (사용자 결정 2026-09-14). 별도 `색 ▸` 줄이 아니다 —
+   최상위는 R3 때문에 여덟 줄로 고정돼 있고, 색을 입는 것은 Mochi뿐이라 그 줄에 다는 것이
+   무엇의 색인지도 같이 말한다. **대가: macOS에서 서브메뉴가 달린 줄은 클릭이 안 된다.**
+   그래서 **색을 고르는 것이 그 펫을 고르는 것**이고, 그 줄은 서브메뉴이면서 체크도 든다
+   (`MenuItem.Content.submenu(_, isOn:)`).
+2. **부위별 "색 고르기" 세 줄은 메뉴에 없다.** 창 안에만 있다 — "하나의 화면"이 요구였다.
+3. **Option은 메뉴를 열 때 읽는다.** `NSMenuItem.isAlternate`는 *앞 줄을 대체하는* 관용구라
+   맨 아래 한 줄에는 맞지 않는다. `menuNeedsUpdate`가 열 때마다 메뉴를 다시 만드므로
+   거기서 한 번 읽는다 — Windows가 Shift를 읽는 것과 같은 자리다. **따라서 메뉴바 아이콘을
+   누를 때 눌러야 하고, 서브메뉴에 도착해서 누르면 늦다.**
+4. **기본 내장 펫이 Mochi가 됐다** (사용자 결정 2026-09-14, "FatMochi는 나중에 개비할 것").
+   전에는 FatMochi였는데 그건 손으로 그린 7행 시트라 region map이 없어 색이 안 닿는다 —
+   기본값이 색을 못 바꾸는 펫이면 이 기능이 처음부터 안 보인다. 펫을 직접 고른 적이 있는
+   사용자는 그 선택이 그대로 남는다.
 
-**현재 상태 (2026-09-13 확인): macOS에는 아무것도 들어가 있지 않다.**
+#### FFI — 이번에 연 것
 
-| | Windows | macOS | 하기로 한 것 |
-|---|---|---|---|
-| 프리셋 아홉 개 | 있다 | **없다** | 넣는다 |
-| 색 직접 고르기 | `ChooseColorW` (OS 대화상자) | **없다** | `NSColorPanel`로 넣는다 |
-| 슬라이더 다섯 줄 | Shift로 여는 자체 창 | 없다 | **안 만든다** (나중에 원하면) |
-| 리컬러 연산자 | 쓴다 | 코드는 공유하지만 **부르는 곳이 없다** | FFI로 연다 |
-| 한/영 문구 | 쓴다 | 파일에는 있지만 읽는 코드가 없다 | 읽는다 |
+macOS는 `roamling-core`만 링크하므로 팔레트가 uniffi를 건너야 했다. 건넌 것은 넷이다:
+프리셋 표, `aimed_at`, `middle`, 그리고 `PaletteSheets`(디코드된 시트 + region map을 들고
+있는 객체)와 그 `recolored`.
 
-`Sources/` 전체에서 `palette`가 나오는 것은 `Localizable.strings` 두 개와 README뿐이다 —
-**Swift 코드에는 한 줄도 없다.** 그 문자열 파일은 Windows 셸이 `include_str!`로 같이 읽기
-때문에 문구만 먼저 들어가 있는 것이고, 맥에서는 아무도 보지 않는다.
+- **`PRESETS`와 `BUILT_IN_PALETTE`가 `roamling-pet`에서 `roamling-core`로 내려왔다.**
+  `roamling-pet`은 그것을 다시 내보내기만 한다. 디코더를 core에 둔 것과 같은 이유이고
+  (`roamling-core/Cargo.toml`에 그 문장이 이미 있다), 그래야 검은 고양이의 색이 한 벌이다.
+- **설정 텍스트 왕복도 core로 올라갔다.** `palette_to_text`/`palette_from_text`를
+  Windows 셸에서 옮겨 왔고 그쪽은 이제 core 것을 부른다. 같은 파일이 양 플랫폼에서 같은 뜻이다.
+- **시트 바이트는 호출자가 준다.** 셸이 이미 갖고 있고(맥은 번들 리소스), 인자 하나를 아끼려고
+  2 MB를 라이브러리에 또 넣을 이유가 없다.
+- **FFI는 완성된 펫이 아니라 "다시 칠한 시트 두 장"을 준다.** 맥은 마스코트를 Swift가
+  조립하고(`MascotPetFactory`) Rust 조립기는 아직 포팅 중이라, 통째로 건네면 끝나지 않은
+  포팅을 경계 너머로 끌고 가게 된다. W2b가 디코딩에 낸 것과 같은 seam이다.
+- **Rust 타입은 `RoamlingEngine`을 안 나간다.** `RoamlingShell`은 `PaletteOption`·
+  `PaletteRGB`·`PalettePart` 같은 평범한 Swift만 본다.
 
-#### 맥에서 할 일
-
-1. **`rust/roamling-core/src/ffi.rs`에 팔레트를 내보낸다.** 지금 uniffi 표면에 있는 것은
-   `decode_pet_image` 하나뿐이라 Swift에서 부를 방법 자체가 없다. 필요한 것은 프리셋 이름
-   목록과 "이 팔레트로 다시 칠한 시트" 둘이다. 프리셋 표와 값은 `roamling-pet`의
-   `PRESETS`가 정본이고, 그것을 그대로 읽어 내보낸다 — **값을 Swift 쪽에 옮겨 적지 않는다.**
-2. **`ShellMenu.swift`의 `petItems`에 `색 ▸` 서브메뉴.** 문구 키는 이미 양쪽 표에 다 있다
-   (`menu.palette`, `palette.default` 외 여덟).
-3. **저장.** Windows는 `roamling.palette` 키에 15개 숫자를 `;`와 `,`로 적는다
-   (`roamling-win/src/main.rs`의 `palette_to_text`). 같은 형식을 쓰면 나중에 설정을 옮겨도
-   맞는다. 기본값과 같을 때는 키를 지운다.
-4. **`MascotPetFactory`가 다시 칠한 시트를 쓰도록 배선.** 여기서 조심할 것 — macOS는 내장
-   마스코트를 **Swift가** 조립한다(`MascotPetFactory.makeStandardMochi`). Windows처럼
-   `roamling_pet::built_in_mochi_recolored`가 통째로 만든 `PetAsset`을 받는 길로 가면
-   포팅이 안 끝난 조립기를 uniffi로 통째 건너게 해야 한다. **이번 범위가 아니다** — FFI는
-   "이 팔레트로 다시 칠한 시트 두 장"만 돌려주고, 트랙 조립은 Swift가 하던 대로 한다.
-   W2b가 디코딩에 낸 것과 같은 seam이다.
-5. **`색 ▸` 서브메뉴에 부위별 "직접 고르기…" 세 줄과 `NSColorPanel`.** AppKit이므로
-   `RoamlingMac`에 산다 — `RoamlingShell`은 메뉴 **트리**만 들고 있고 AppKit을 import하지
-   않는다(모듈 경계). 고른 색은 `aimed_at`으로 넘긴다. **Swift에서 RGB→HLS를 다시 쓰지
-   않는다** — 그러면 같은 변환이 두 벌이 되고, 그게 §2가 경고하는 바로 그 함정이다.
-
-**Win32 쪽을 보고 싶으면 `roamling-win/src/tray.rs`의 `색 ▸` 서브메뉴와 `main.rs`의
-`apply_palette`가 짧은 참고가 된다.** 창(`palette_debug.rs`)은 참고할 것이 없다.
 
 #### 검증
 
-이 기계에서 Swift가 돌지 않으므로 `gh workflow run check-macos.yml`이 유일한 통로다.
-**Swift for Windows를 깔아도 여기까지다** — AppKit · SwiftUI · CoreGraphics ·
+맥 쪽은 맥에서 만들었고 하네스가 잡았다. 붙어 있는 테스트는
+`colours hang off Mochi, and the sliders only appear with the modifier`이고, 고정하는 것은
+셋이다 — 색이 Mochi 줄에 달려 있다는 것, 수식자 없이는 프리셋만이고 누르면 한 줄이 더 는다는
+것, 그리고 **색을 고르면 그 펫이 선택된다**는 것. 마지막이 없으면 서브메뉴가 된 Mochi 줄은
+고를 방법이 사라진다.
+
+**그 작업 중에 기존 테스트가 두 번 막았고 둘 다 옳았다.** 색을 최상위에 뒀을 때는
+"Quit이 여덟 번째"가 걸렸고(R3 결정), Mochi를 서브메뉴로 바꿨을 때는 "정확히 한 펫이
+표시된다"가 걸렸다 — 서브메뉴 줄에 체크가 안 붙어서다. 뒤엣것이 `submenu(_, isOn:)`을 낳았다.
+
+Windows 기계에서 맥 쪽을 만들 때는 `gh workflow run check-macos.yml`이 유일한 통로다.
+**Swift for Windows를 깔아도 마찬가지다** — AppKit · SwiftUI · CoreGraphics ·
 ScreenCaptureKit는 Windows에 없으므로 `RoamlingMac`과 `RoamlingApp`은 영원히 안 된다.
-OS 비의존 다섯(Core · Pet · Sources · Engine · Shell)과 하네스는 원리상 되지만
-`build-rust-core.sh`가 zsh에 `.a`/`.dylib` 이름을 박아 두고 `Package.swift`가
-`-lroamling_core`를 `unsafeFlags`로 박아 둬서 이식이 먼저다. **서명과 공증은 어느 쪽이든
-macOS 러너에서만 된다.**
+**서명과 공증은 어느 쪽이든 macOS 러너에서만 된다.**
 
 그리고 하네스는 메뉴에 줄이 생겼는지와 문구 키가 양쪽에 다 있는지는 잡지만 **고양이가 예쁜지는
 못 잡는다.** 실물 확인이 exit rule이다.

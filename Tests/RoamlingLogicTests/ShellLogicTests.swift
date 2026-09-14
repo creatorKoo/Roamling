@@ -204,34 +204,40 @@ func shellLogicTests() -> [LogicTest] {
                 defer { harness.tearDown() }
                 let runtime = harness.runtime
 
+                // Mochi reports itself through a submenu rather than a plain
+                // check -- its colours hang there -- so both shapes count. What
+                // has to stay true is that exactly one pet is marked.
+                func marked(_ items: [MenuItem]) -> [String] {
+                    items.compactMap { item in
+                        switch item.content {
+                        case let .check(_, isOn): isOn ? item.title : nil
+                        case let .submenu(_, isOn): isOn ? item.title : nil
+                        default: nil
+                        }
+                    }
+                }
                 let pets = try require(submenu(named: localized("menu.pet"), in: ShellMenu.items(for: runtime)))
-                let checked = pets.compactMap { item -> String? in
-                    if case let .check(_, isOn) = item.content, isOn { return item.title }
-                    return nil
-                }
-                try expect(checked.count == 1, "expected exactly one pet checked, got \(checked)")
+                try expect(marked(pets).count == 1, "expected exactly one pet marked, got \(marked(pets))")
 
-                // Every built-in is offered, and picking one moves the check.
-                let offered = pets.compactMap { item -> MenuAction? in
-                    if case let .check(action, _) = item.content { return action }
-                    return nil
-                }
+                // Every built-in is offered. Mochi is picked by choosing one of
+                // its colours, which the palette test covers; here it is enough
+                // that its row is present and the others can be clicked.
+                let titles = pets.map(\.title)
                 for kind in BuiltInPetKind.allCases {
                     try expect(
-                        offered.contains(.selectBuiltInPet(kind)),
-                        "\(kind) is not in the menu"
+                        titles.contains(localizedFormat("menu.pet.builtin", kind.displayName)),
+                        "\(kind) is not in the menu: \(titles)"
                     )
                 }
-                let other = try require(BuiltInPetKind.allCases.first { $0 != runtime.selectedBuiltInPet })
+                let other = try require(
+                    BuiltInPetKind.allCases.first { $0 != runtime.selectedBuiltInPet && $0 != .mochi }
+                )
                 _ = ShellController.perform(.selectBuiltInPet(other), runtime: runtime, version: "1.2.3")
                 let after = try require(submenu(named: localized("menu.pet"), in: ShellMenu.items(for: runtime)))
-                let nowChecked = after.first { item in
-                    if case let .check(action, isOn) = item.content {
-                        return isOn && action == .selectBuiltInPet(other)
-                    }
-                    return false
-                }
-                try expect(nowChecked != nil, "picking a pet did not move the checkmark")
+                try expect(
+                    marked(after) == [localizedFormat("menu.pet.builtin", other.displayName)],
+                    "picking a pet did not move the mark: \(marked(after))"
+                )
             }
         },
         LogicTest(name: "the size menu offers exactly the scales the runtime accepts") {
@@ -453,7 +459,7 @@ func shellLogicTests() -> [LogicTest] {
                         switch item.content {
                         case .separator:
                             try expect(item.title.isEmpty, "a separator carries a title")
-                        case let .submenu(children):
+                        case let .submenu(children, _):
                             try expect(!item.title.isEmpty)
                             try walk(children)
                         case .caption, .command, .check:
@@ -472,13 +478,85 @@ func shellLogicTests() -> [LogicTest] {
                 try walk(ShellMenu.items(for: harness.runtime))
                 try expect(checked > 20, "only \(checked) items -- the menu lost most of itself")
             }
+        },
+        LogicTest(name: "colours hang off Mochi, and the sliders only appear with the modifier") {
+            try MainActor.assumeIsolated {
+                let harness = try RuntimeHarness()
+                defer { harness.tearDown() }
+
+                // Mochi out of the box, on both platforms. It is the only
+                // built-in with a region map, which is why the colours are its
+                // submenu rather than a row of their own.
+                try expect(
+                    harness.runtime.selectedBuiltInPet == .mochi,
+                    "the default built-in is \(String(describing: harness.runtime.selectedBuiltInPet))"
+                )
+
+                @MainActor func colours(alternateHeld: Bool) throws -> [MenuItem] {
+                    let pet = try require(
+                        submenu(
+                            named: localized("menu.pet"),
+                            in: ShellMenu.items(for: harness.runtime, alternateHeld: alternateHeld)
+                        ),
+                        "the Pet submenu is gone"
+                    )
+                    return try require(
+                        submenu(
+                            named: localizedFormat("menu.pet.builtin", BuiltInPetKind.mochi.displayName),
+                            in: pet
+                        ),
+                        "Mochi carries no colours: \(pet.map(\.title))"
+                    )
+                }
+
+                let presets = harness.runtime.paletteOptions
+                try expect(presets.count >= 2, "only \(presets.count) colours offered")
+                try expect(
+                    presets.filter(\.isSelected).count == 1,
+                    "a fresh runtime should be wearing exactly one of the offered colours"
+                )
+
+                // Without the modifier the submenu is the colours and nothing
+                // else -- no separator left dangling where a row used to be.
+                let plain = try colours(alternateHeld: false)
+                try expect(
+                    plain.count == presets.count,
+                    "\(plain.count) rows for \(presets.count) colours: \(plain.map(\.title))"
+                )
+
+                // With it, one more row, and it opens the window.
+                let held = try colours(alternateHeld: true)
+                let mixer = try require(held.last, "the held-modifier submenu is empty")
+                guard case .command(.openPaletteMixer) = mixer.content else {
+                    throw LogicTestFailure(
+                        message: "the last row with the modifier held is \(mixer.content)",
+                        file: #filePath, line: #line
+                    )
+                }
+
+                // A colour is also how Mochi gets chosen, because a row with a
+                // submenu has no click of its own.
+                harness.runtime.useBuiltInPet(.fatMochi)
+                guard case let .check(action, _) = plain[1].content else {
+                    throw LogicTestFailure(
+                        message: "the second colour is not a checkable row",
+                        file: #filePath, line: #line
+                    )
+                }
+                _ = ShellController.perform(action, runtime: harness.runtime, version: "test")
+                try expect(
+                    harness.runtime.selectedBuiltInPet == .mochi,
+                    "picking a colour left the pet as \(String(describing: harness.runtime.selectedBuiltInPet))"
+                )
+                try expect(!harness.runtime.isPaletteDefault, "the colour did not take")
+            }
         }
     ]
 }
 
 func submenu(named title: String, in items: [MenuItem]) -> [MenuItem]? {
     for item in items {
-        if item.title == title, case let .submenu(children) = item.content { return children }
+        if item.title == title, case let .submenu(children, _) = item.content { return children }
     }
     return nil
 }

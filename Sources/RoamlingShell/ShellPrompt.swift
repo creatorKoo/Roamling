@@ -31,6 +31,8 @@ public enum ShellEffect: Sendable {
     case present(AlertModel)
     case presentThenRebuild(AlertModel)
     case openTuningPanel
+    /// Open the sliders. One window per platform, not shared: this is widgets.
+    case openPaletteMixer
     case reveal(URL)
     case openLink(URL)
     case copyToClipboard(String)
@@ -239,6 +241,11 @@ public enum ShellController {
         case let .setScale(value):
             runtime.setScale(value)
             return .rebuildMenu
+        case let .selectPalettePreset(index):
+            runtime.selectPalettePreset(at: index)
+            return .rebuildMenu
+        case .openPaletteMixer:
+            return .openPaletteMixer
         case .toggleHidden:
             runtime.isHidden.toggle()
             return .rebuildMenu

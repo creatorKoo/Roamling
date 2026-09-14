@@ -450,7 +450,7 @@ func focusActivityLogicTests() -> [LogicTest] {
                         awareness.first { $0.title == localized("menu.workApps") },
                         "no work-app submenu in the menu"
                     )
-                    guard case let .submenu(children) = row.content else {
+                    guard case let .submenu(children, _) = row.content else {
                         throw LogicTestFailure(
                             message: "the work-app row is not a submenu: \(row.content)",
                             file: #filePath, line: #line

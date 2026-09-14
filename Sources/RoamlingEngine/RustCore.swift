@@ -1256,6 +1256,55 @@ public final class RustPetLoop {
     }
 }
 
+// ---------------------------------------------------------------- palette
+//
+// Thin on purpose. Every judgement -- what the presets are, what a picked
+// colour becomes, how a palette is written to a settings line -- is in the
+// core, because Windows answers the same questions from the same code.
+
+extension RustCore {
+    static func palettePresets() -> [FfiPalettePreset] {
+        RoamlingCoreRs.palettePresets()
+    }
+
+    static func builtInPalette() -> FfiPalette {
+        RoamlingCoreRs.builtInPalette()
+    }
+
+    static func paletteAimedAt(_ targets: FfiPaletteTargets, _ colour: FfiColour) -> FfiPaletteTargets {
+        RoamlingCoreRs.paletteAimedAt(targets: targets, colour: colour)
+    }
+
+    static func paletteMiddle(_ targets: FfiPaletteTargets) -> FfiColour {
+        RoamlingCoreRs.paletteMiddle(targets: targets)
+    }
+
+    static func paletteToText(_ palette: FfiPalette) -> String {
+        RoamlingCoreRs.paletteToText(palette: palette)
+    }
+
+    static func paletteFromText(_ text: String) -> FfiPalette? {
+        RoamlingCoreRs.paletteFromText(text: text)
+    }
+
+    static func decodePaletteSheets(standard: Data, extensionSheet: Data) -> PaletteSheets? {
+        RoamlingCoreRs.decodePaletteSheets(
+            standard: standard,
+            extension: extensionSheet,
+            cellWidth: 192,
+            cellHeight: 208
+        )
+    }
+
+    static func petImage(_ image: FfiPetImage) -> PetImage {
+        PetImage(
+            width: Int(image.width),
+            height: Int(image.height),
+            pixels: [UInt8](image.pixels)
+        )
+    }
+}
+
 /// The wire order for `PetCapability`, pinned by a test against `allCases`.
 let petCapabilityOrder: [PetCapability] = [
     .idle, .moveLeft, .moveRight, .sit, .sleep, .work, .observe, .gaze,

@@ -11,6 +11,11 @@ import RoamlingPet
 public enum MenuAction: Equatable, Sendable {
     case selectBuiltInPet(BuiltInPetKind)
     case selectInstalledPet(path: String)
+    /// One of the shipped colour sets, by its index in the core's table.
+    case selectPalettePreset(index: Int)
+    /// Open the window with a slider per axis. Hidden behind a modifier: it is
+    /// for someone who wants a colour the nine presets do not have.
+    case openPaletteMixer
     case setScale(Double)
     case toggleHidden
     case toggleRoaming
@@ -41,7 +46,10 @@ public struct MenuItem: Sendable {
         /// Drawn with a checkmark when on. The pet and size lists are pick-one
         /// but AppKit draws them the same way, so they are not split here.
         case check(MenuAction, isOn: Bool)
-        case submenu([MenuItem])
+        /// `isOn` for a row that both opens a submenu and reports a choice.
+        /// macOS draws the checkmark and the arrow together; a shell that
+        /// cannot may ignore it, but then nothing says which pet is in use.
+        case submenu([MenuItem], isOn: Bool = false)
         case separator
     }
 
@@ -99,13 +107,21 @@ public enum ShellMenu {
         return MenuItem(localizedFormat("status.update.ready", version), .caption)
     }
 
-    public static func items(for runtime: RoamlingRuntime) -> [MenuItem] {
+    /// `alternateHeld` is read once when the menu opens, the way the Windows
+    /// tray reads Shift -- macOS's own `NSMenuItem.isAlternate` needs a row to
+    /// stand in front of it, and the row this hides behind is the last one.
+    /// So the modifier is the one held when the menu bar item is clicked, not
+    /// when the submenu is reached.
+    public static func items(
+        for runtime: RoamlingRuntime,
+        alternateHeld: Bool = false
+    ) -> [MenuItem] {
         var items: [MenuItem] = [
             MenuItem(localizedFormat("menu.title", runtime.petDisplayName), .caption),
             .separator,
             MenuItem(localized("menu.hide"), .check(.toggleHidden, isOn: runtime.isHidden)),
             .separator,
-            MenuItem(localized("menu.pet"), .submenu(petItems(for: runtime))),
+            MenuItem(localized("menu.pet"), .submenu(petItems(for: runtime, alternateHeld: alternateHeld))),
             MenuItem(localized("menu.size"), .submenu(sizeItems(for: runtime))),
             .separator,
             MenuItem(localized("menu.movement"), .submenu(movementItems(for: runtime))),
@@ -179,11 +195,57 @@ public enum ShellMenu {
         return items
     }
 
-    private static func petItems(for runtime: RoamlingRuntime) -> [MenuItem] {
-        var items = BuiltInPetKind.allCases.map { kind in
+    /// The colour submenu: the shipped sets, then one picker per part.
+    ///
+    /// Only the built-in Mochi carries the region map the recolour needs, so
+    /// the rows say so rather than doing nothing when another pet is showing.
+    /// The colours, as the submenu of the pet that wears them.
+    ///
+    /// Only the built-in Mochi carries the region map the recolour needs, so
+    /// hanging the colours off its row is also what says which pet they belong
+    /// to -- and picking one selects that pet, since a row with a submenu has
+    /// no click of its own on macOS.
+    ///
+    /// One extra row while the modifier is held: the window with a slider per
+    /// axis. Nine presets and a colour picker cover what was asked for, and
+    /// this is for going further than that.
+    private static func paletteItems(
+        for runtime: RoamlingRuntime,
+        alternateHeld: Bool
+    ) -> [MenuItem] {
+        var items = runtime.paletteOptions.enumerated().map { index, option in
             MenuItem(
+                localized(option.key),
+                .check(.selectPalettePreset(index: index), isOn: option.isSelected)
+            )
+        }
+        guard alternateHeld else { return items }
+        items.append(.separator)
+        items.append(MenuItem(localized("menu.palette.custom"), .command(.openPaletteMixer)))
+        return items
+    }
+
+    private static func petItems(
+        for runtime: RoamlingRuntime,
+        alternateHeld: Bool
+    ) -> [MenuItem] {
+        var items = BuiltInPetKind.allCases.map { kind in
+            // Mochi opens its colours rather than being clicked. macOS gives a
+            // row with a submenu no action of its own, so choosing a colour is
+            // what selects this pet -- which is the same gesture either way,
+            // because the colours are only Mochi's.
+            guard kind == .mochi else {
+                return MenuItem(
+                    localizedFormat("menu.pet.builtin", kind.displayName),
+                    .check(.selectBuiltInPet(kind), isOn: runtime.selectedBuiltInPet == kind)
+                )
+            }
+            return MenuItem(
                 localizedFormat("menu.pet.builtin", kind.displayName),
-                .check(.selectBuiltInPet(kind), isOn: runtime.selectedBuiltInPet == kind)
+                .submenu(
+                    paletteItems(for: runtime, alternateHeld: alternateHeld),
+                    isOn: runtime.selectedBuiltInPet == kind
+                )
             )
         }
         if !runtime.installedPets.isEmpty { items.append(.separator) }

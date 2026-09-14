@@ -25,6 +25,10 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         /// watch nothing.
         static let workApps = "roamling.workApps"
         static let workAppLabelPrefix = "roamling.workAppLabel."
+        /// Fifteen numbers, five per region. Same key and same text on
+        /// Windows, written by the core so a settings file means one thing on
+        /// either platform. Absent means the sheet as drawn.
+        static let palette = "roamling.palette"
     }
 
     private static let defaultWorkApps = [
@@ -68,6 +72,12 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     /// The apps the user has called work. The pet greets, sits beside and
     /// waves goodbye to these and no others.
     public private(set) var workApps: [String]
+    /// What the pet is wearing. The shipped colours until a line says otherwise.
+    private var palette: FfiPalette = RustCore.builtInPalette()
+    /// Decoded sheets and their region maps, kept across colour changes.
+    private var paletteSource: PaletteSheets?
+    /// The last recolour, so redrawing the same colours costs nothing.
+    private var recoloredSheets: MochiSheets?
 
     public private(set) var asset: PetAsset
     public private(set) var installedPets: [PetDescriptor]
@@ -172,7 +182,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             DefaultsKey.avoidPointer: true,
             DefaultsKey.interactions: true,
             DefaultsKey.scale: 1.0,
-            DefaultsKey.builtInPet: BuiltInPetKind.fatMochi.rawValue
+            DefaultsKey.builtInPet: BuiltInPetKind.mochi.rawValue
         ])
         let runtimeTuning = Self.loadRuntimeTuning(defaults: defaults)
         let configuredWorkApps = Self.loadWorkApps(defaults: defaults)
@@ -181,7 +191,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         let descriptors = catalog.discover()
         let selectedPath = defaults.string(forKey: DefaultsKey.petPackagePath)
         let selectedBuiltInPet = defaults.string(forKey: DefaultsKey.builtInPet)
-            .flatMap(BuiltInPetKind.init(rawValue:)) ?? .fatMochi
+            .flatMap(BuiltInPetKind.init(rawValue:)) ?? .mochi
         let initialAsset = Self.loadInitialAsset(
             descriptors: descriptors,
             selectedPath: selectedPath,
@@ -220,6 +230,10 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             seed: randomSeed
         )
         workApps = configuredWorkApps
+        if let line = defaults.string(forKey: DefaultsKey.palette),
+           let stored = RustCore.paletteFromText(line) {
+            palette = stored
+        }
         isRoamingEnabled = defaults.bool(forKey: DefaultsKey.roaming)
         isPointerAvoidanceEnabled = defaults.bool(forKey: DefaultsKey.avoidPointer)
         areInteractionsEnabled = defaults.bool(forKey: DefaultsKey.interactions)
@@ -328,10 +342,240 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     }
 
     public func useBuiltInPet(_ kind: BuiltInPetKind) {
-        install(asset: MascotPetFactory.make(kind, images: services.images))
+        install(asset: MascotPetFactory.make(kind, images: services.images, sheets: mochiSheets()))
         selectedBuiltInPet = kind
         defaults.set(kind.rawValue, forKey: DefaultsKey.builtInPet)
         defaults.removeObject(forKey: DefaultsKey.petPackagePath)
+    }
+
+    // ------------------------------------------------------------- palette
+    //
+    // The Rust types stay behind this wall. `RoamlingShell` renders the menu
+    // and depends on this module, not on the generated bindings, so what it
+    // sees is plain Swift -- the same reason `RustCore` exists at all.
+
+    /// One row of the colour submenu.
+    public struct PaletteOption {
+        /// The `Localizable.strings` key, so the words stay in the two files.
+        public let key: String
+        /// What the row's dot should be painted, built from the same
+        /// arithmetic the recolour uses -- otherwise the dot shows a colour
+        /// the cat is not wearing.
+        public let swatch: PaletteRGB
+        public let isSelected: Bool
+    }
+
+    public struct PaletteRGB: Equatable, Sendable {
+        public let red: UInt8
+        public let green: UInt8
+        public let blue: UInt8
+
+        public init(red: UInt8, green: UInt8, blue: UInt8) {
+            self.red = red
+            self.green = green
+            self.blue = blue
+        }
+
+        fileprivate init(_ colour: FfiColour) {
+            self.init(red: colour.red, green: colour.green, blue: colour.blue)
+        }
+
+        fileprivate var ffi: FfiColour {
+            FfiColour(red: red, green: green, blue: blue)
+        }
+    }
+
+    /// The three things a cat is made of, each steerable on its own.
+    public enum PalettePart: CaseIterable, Sendable {
+        case marking
+        case body
+        case eye
+
+        fileprivate func targets(of palette: FfiPalette) -> FfiPaletteTargets {
+            switch self {
+            case .marking: return palette.marking
+            case .body: return palette.body
+            case .eye: return palette.eye
+            }
+        }
+
+        /// The string key naming this part in the menu.
+        public var menuKey: String {
+            switch self {
+            case .marking: return "palette.section.marking"
+            case .body: return "palette.section.body"
+            case .eye: return "palette.section.eye"
+            }
+        }
+    }
+
+    public var paletteOptions: [PaletteOption] {
+        RustCore.palettePresets().map { preset in
+            PaletteOption(
+                key: preset.key,
+                swatch: PaletteRGB(RustCore.paletteMiddle(preset.palette.marking)),
+                isSelected: preset.palette == palette
+            )
+        }
+    }
+
+    /// Whether the current colours are the ones the sheet was drawn in.
+    public var isPaletteDefault: Bool { palette == RustCore.builtInPalette() }
+
+    public func selectPalettePreset(at index: Int) {
+        let presets = RustCore.palettePresets()
+        guard presets.indices.contains(index) else { return }
+        apply(palette: presets[index].palette)
+        // The colours are the built-in Mochi's submenu, and a row with a
+        // submenu has no click of its own, so choosing a colour is also how
+        // that pet is chosen. `apply` skipped the reinstall while another pet
+        // was showing; this does it once, with the new colours already set.
+        if selectedBuiltInPet != .mochi || currentPetPackagePath != nil {
+            useBuiltInPet(.mochi)
+        }
+    }
+
+    /// Point one region at a picked colour, keeping the width of its shading.
+    ///
+    /// The arithmetic is the core's: a picker gives one colour and a region is
+    /// five numbers, and which of the five it becomes is decided and measured
+    /// there. Doing it here would be a second answer to the same question.
+    public func aimPalette(_ part: PalettePart, at colour: PaletteRGB) {
+        var updated = palette
+        let aimed = RustCore.paletteAimedAt(part.targets(of: palette), colour.ffi)
+        switch part {
+        case .marking: updated.marking = aimed
+        case .body: updated.body = aimed
+        case .eye: updated.eye = aimed
+        }
+        apply(palette: updated)
+    }
+
+    /// What a part is wearing now, so a picker can open on it.
+    public func paletteSwatch(_ part: PalettePart) -> PaletteRGB {
+        PaletteRGB(RustCore.paletteMiddle(part.targets(of: palette)))
+    }
+
+    /// The five numbers a region is, as a window's sliders see them.
+    ///
+    /// Ranges match the Windows window so the same drag lands in the same
+    /// place. `hueEnd` is the marking's alone -- it is what makes a rainbow,
+    /// and a travelling hue on the body or the eyes reads as a mistake.
+    public enum PaletteAxis: CaseIterable, Sendable {
+        case hue
+        case hueEnd
+        case dark
+        case light
+        case chroma
+
+        public var labelKey: String {
+            switch self {
+            case .hue: return "palette.hue"
+            case .hueEnd: return "palette.hueEnd"
+            case .dark: return "palette.dark"
+            case .light: return "palette.light"
+            case .chroma: return "palette.chroma"
+            }
+        }
+
+        public var range: ClosedRange<Double> {
+            switch self {
+            case .hue, .hueEnd: return 0...359
+            case .dark, .light: return 0...100
+            case .chroma: return 0...255
+            }
+        }
+
+        public func applies(to part: PalettePart) -> Bool {
+            self != .hueEnd || part == .marking
+        }
+    }
+
+    public func paletteValue(_ part: PalettePart, _ axis: PaletteAxis) -> Double {
+        let targets = part.targets(of: palette)
+        switch axis {
+        case .hue: return Double(targets.hue)
+        case .hueEnd: return Double(targets.hueEnd)
+        case .dark: return Double(targets.lightLow)
+        case .light: return Double(targets.lightHigh)
+        case .chroma: return Double(targets.chroma)
+        }
+    }
+
+    public func setPaletteValue(_ part: PalettePart, _ axis: PaletteAxis, _ value: Double) {
+        var targets = part.targets(of: palette)
+        let clamped = Float(min(max(value, axis.range.lowerBound), axis.range.upperBound))
+        switch axis {
+        case .hue:
+            targets.hue = clamped
+            // A hue that does not travel keeps its end with it, or moving the
+            // colour of a plain cat would quietly start a sweep.
+            if part != .marking || targets.hueEnd == targets.hue { targets.hueEnd = clamped }
+        case .hueEnd: targets.hueEnd = clamped
+        case .dark: targets.lightLow = clamped
+        case .light: targets.lightHigh = clamped
+        case .chroma: targets.chroma = clamped
+        }
+        var updated = palette
+        switch part {
+        case .marking: updated.marking = targets
+        case .body: updated.body = targets
+        case .eye: updated.eye = targets
+        }
+        apply(palette: updated)
+    }
+
+    public func resetPalette() {
+        apply(palette: RustCore.builtInPalette())
+    }
+
+    private func apply(palette newPalette: FfiPalette) {
+        guard newPalette != palette else { return }
+        palette = newPalette
+        recoloredSheets = nil
+        // Same rule as the tuning panel: a value equal to the default does not
+        // earn a line in the file, or the file freezes today's default.
+        if isPaletteDefault {
+            defaults.removeObject(forKey: DefaultsKey.palette)
+        } else {
+            defaults.set(RustCore.paletteToText(newPalette), forKey: DefaultsKey.palette)
+        }
+        reinstallBuiltInPetForPalette()
+    }
+
+    private func reinstallBuiltInPetForPalette() {
+        // Only the built-in Mochi has a region map. A loaded package or the
+        // authored seven-row built-in is left alone rather than half-painted.
+        guard defaults.string(forKey: DefaultsKey.petPackagePath) == nil,
+              selectedBuiltInPet == .mochi else { return }
+        install(asset: MascotPetFactory.make(.mochi, images: services.images, sheets: mochiSheets()))
+    }
+
+    /// The recoloured sheets, or nil to let the factory read the bundle.
+    ///
+    /// Decoding and region-mapping is the expensive half and does not depend
+    /// on the palette, so the source is kept between changes. A whole recolour
+    /// was measured at 38 ms (`docs/palette.md` §4.5).
+    private func mochiSheets() -> MochiSheets? {
+        if let recoloredSheets { return recoloredSheets }
+        guard !isPaletteDefault else { return nil }
+        guard let source = paletteSource ?? loadPaletteSource(),
+              let recoloured = source.recolored(palette: palette) else { return nil }
+        let made = MochiSheets(
+            standard: RustCore.petImage(recoloured.standard),
+            extensionSheet: RustCore.petImage(recoloured.extension)
+        )
+        recoloredSheets = made
+        return made
+    }
+
+    private func loadPaletteSource() -> PaletteSheets? {
+        guard let data = MascotPetFactory.builtInMochiSheetData() else { return nil }
+        paletteSource = RustCore.decodePaletteSheets(
+            standard: data.standard,
+            extensionSheet: data.extensionSheet
+        )
+        return paletteSource
     }
 
     public func setScale(_ newScale: Double) {

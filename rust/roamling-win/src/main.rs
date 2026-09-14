@@ -1007,41 +1007,7 @@ fn work_app_items(app: &App) -> Vec<(String, String, bool)> {
 ///
 /// Text because settings is one flat key/value file and a colour is not worth
 /// a second format. Semicolons between the three regions, commas inside.
-fn palette_to_text(palette: roamling_core::Palette) -> String {
-    let part = |aim: roamling_core::PaletteTargets| {
-        format!(
-            "{},{},{},{},{}",
-            aim.hue, aim.hue_end, aim.light_low, aim.light_high, aim.chroma
-        )
-    };
-    format!(
-        "{};{};{}",
-        part(palette.marking),
-        part(palette.body),
-        part(palette.eye)
-    )
-}
-
-fn palette_from_text(text: &str) -> Option<roamling_core::Palette> {
-    let mut parts = text.split(';');
-    let mut next = || -> Option<roamling_core::PaletteTargets> {
-        let numbers: Option<Vec<f32>> = parts
-            .next()?
-            .split(',')
-            .map(|number| number.trim().parse::<f32>().ok())
-            .collect();
-        let [hue, hue_end, low, high, chroma] = numbers?[..] else {
-            return None;
-        };
-        Some(roamling_core::PaletteTargets::sweeping(
-            hue, hue_end, low, high, chroma,
-        ))
-    };
-    let marking = next()?;
-    let body = next()?;
-    let eye = next()?;
-    Some(roamling_core::Palette::new(marking, body, eye))
-}
+use roamling_core::pet_image::{palette_from_text, palette_to_text};
 
 /// Wear a colour and remember it.
 ///

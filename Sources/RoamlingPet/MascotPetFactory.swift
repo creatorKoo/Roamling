@@ -26,6 +26,21 @@ public enum BuiltInPetKind: String, CaseIterable, Codable, Sendable {
 
 /// Loads an authored built-in runtime atlas, or derives a lightweight evaluation atlas
 /// from a mascot's four approved key poses when no authored atlas is available.
+/// Mochi's two sheets, already decoded, for a caller that has recoloured them.
+///
+/// The recolour itself is Rust behind uniffi, and `RoamlingPet` does not link
+/// those bindings -- it depends on `RoamlingCore` alone. So the colours arrive
+/// as finished pixels and this module stays the assembler it already is.
+public struct MochiSheets {
+    public let standard: PetImage
+    public let extensionSheet: PetImage
+
+    public init(standard: PetImage, extensionSheet: PetImage) {
+        self.standard = standard
+        self.extensionSheet = extensionSheet
+    }
+}
+
 public enum MascotPetFactory {
     private static let cellWidth = 192
     private static let cellHeight = 208
@@ -56,16 +71,20 @@ public enum MascotPetFactory {
         let scale: Double
     }
 
+    /// `sheets` replaces what would be read from the bundle. Only Mochi has a
+    /// recoloured form; the other built-in is an authored seven-row sheet with
+    /// no region map, so a palette does not reach it.
     public static func make(
         _ kind: BuiltInPetKind = .fatMochi,
-        images: any PetImageSourcing
+        images: any PetImageSourcing,
+        sheets: MochiSheets? = nil
     ) -> PetAsset {
         switch kind {
         case .mochi:
-            if let atlas = loadSheet(named: "mochi-standard-atlas", images: images),
+            if let atlas = sheets?.standard ?? loadSheet(named: "mochi-standard-atlas", images: images),
                atlas.width == cellWidth * columns,
                atlas.height == cellHeight * standardRows {
-                return makeStandardMochi(atlas: atlas, images: images)
+                return makeStandardMochi(atlas: atlas, images: images, sheets: sheets)
             }
         case .fatMochi:
             if let atlas = loadSheet(named: "fat-mochi-runtime-atlas", images: images),
@@ -93,7 +112,11 @@ public enum MascotPetFactory {
     /// `idle` overrides the standard 1.10s. Its six frames are one long hold
     /// and a blink, so the standard timing blinks the cat continuously; the
     /// package holds frame zero for 1.2s and spends 0.5s on the blink.
-    private static func makeStandardMochi(atlas: PetImage, images: any PetImageSourcing) -> PetAsset {
+    private static func makeStandardMochi(
+        atlas: PetImage,
+        images: any PetImageSourcing,
+        sheets: MochiSheets? = nil
+    ) -> PetAsset {
         let manifest = PetManifest(
             id: BuiltInPetKind.mochi.manifestID,
             displayName: BuiltInPetKind.mochi.displayName,
@@ -127,7 +150,7 @@ public enum MascotPetFactory {
         var extensionAtlas: PetImage?
         var extensionColumns = 0
         var extensionRows = 0
-        if let sheet = loadSheet(named: "mochi-extension-atlas", images: images),
+        if let sheet = sheets?.extensionSheet ?? loadSheet(named: "mochi-extension-atlas", images: images),
            sheet.width == cellWidth * columns,
            sheet.height == cellHeight * extensionSheetRows {
             extensionAtlas = sheet
@@ -458,6 +481,27 @@ public enum MascotPetFactory {
             rows: poseDerivedRows,
             tracks: tracks
         )
+    }
+
+    /// The two Mochi sheets as they sit on disk, for a caller that wants to
+    /// recolour them rather than draw them.
+    ///
+    /// Encoded bytes, not pixels: the recolour decodes to straight alpha and
+    /// maps regions itself, and handing it an already-premultiplied image would
+    /// make it undo work that was never needed.
+    public static func builtInMochiSheetData() -> (standard: Data, extensionSheet: Data)? {
+        guard let standard = sheetData(named: "mochi-standard-atlas"),
+              let extensionSheet = sheetData(named: "mochi-extension-atlas") else { return nil }
+        return (standard, extensionSheet)
+    }
+
+    private static func sheetData(named name: String) -> Data? {
+        let resourceURL = ["png", "webp"].lazy.compactMap { ext in
+            petResourceBundle.url(forResource: name, withExtension: ext, subdirectory: "BuiltInPets")
+                ?? petResourceBundle.url(forResource: name, withExtension: ext)
+        }.first
+        guard let resourceURL else { return nil }
+        return try? Data(contentsOf: resourceURL)
     }
 
     private static func loadSheet(named name: String, images: any PetImageSourcing) -> PetImage? {

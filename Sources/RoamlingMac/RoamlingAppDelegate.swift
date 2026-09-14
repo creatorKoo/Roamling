@@ -11,6 +11,7 @@ import ServiceManagement
 @MainActor
 public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var runtime: RoamlingRuntime?
+    private var paletteWindowController: PaletteWindowController?
     private var statusItem: NSStatusItem?
     private var tuningWindowController: RuntimeTuningWindowController?
 
@@ -71,7 +72,11 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         // behind our back, and a stale checkmark is a lie.
         ShellMenu.launchAtLogin = SMAppService.mainApp.status == .enabled
         menu.removeAllItems()
-        render(ShellMenu.items(for: runtime), into: menu)
+        // Read once, here, because the menu is rebuilt on every open. The
+        // alternative -- `NSMenuItem.isAlternate` -- needs a row to stand in
+        // front of, and the row it hides is the last one in its submenu.
+        let alternateHeld = NSEvent.modifierFlags.contains(.option)
+        render(ShellMenu.items(for: runtime, alternateHeld: alternateHeld), into: menu)
     }
 
     /// Turns the shell's tree into AppKit widgets. This is the whole of what
@@ -86,11 +91,13 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
                 let widget = NSMenuItem(title: item.title, action: nil, keyEquivalent: "")
                 widget.isEnabled = false
                 menu.addItem(widget)
-            case let .submenu(children):
+            case let .submenu(children, isOn):
                 let widget = NSMenuItem(title: item.title, action: nil, keyEquivalent: "")
                 let submenu = NSMenu(title: item.title)
                 render(children, into: submenu)
                 widget.submenu = submenu
+                // A row can open a submenu and still say it is the one in use.
+                widget.state = isOn ? .on : .off
                 menu.addItem(widget)
             case let .command(action):
                 menu.addItem(widget(item, action: action, isOn: false))
@@ -247,6 +254,13 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         }
     }
 
+    private func showPaletteMixer() {
+        guard let runtime else { return }
+        let controller = paletteWindowController ?? PaletteWindowController(runtime: runtime)
+        paletteWindowController = controller
+        controller.present()
+    }
+
     private func apply(_ effect: ShellEffect) {
         switch effect {
         case .none:
@@ -260,6 +274,8 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
             rebuildMenu()
         case .openTuningPanel:
             showBehaviorTuning()
+        case .openPaletteMixer:
+            showPaletteMixer()
         case let .reveal(folder):
             do {
                 try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

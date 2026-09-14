@@ -12,8 +12,9 @@
 
 pub mod package;
 
+use roamling_core::pet_image::BUILT_IN_PALETTE;
 use roamling_core::{
-    standard_tracks, Palette, PaletteMap, PaletteTargets, PetAnimationFrame, PetAnimationTrack,
+    standard_tracks, Palette, PaletteMap, PetAnimationFrame, PetAnimationTrack,
     PetImageSource,
 };
 use std::collections::BTreeMap;
@@ -114,18 +115,6 @@ const COLUMNS: usize = 8;
 const STANDARD_ROWS: usize = 9;
 const EXTENSION_ROWS: usize = 3;
 /// Where Mochi already is, measured over every drawn cell of the shipped
-/// sheets rather than chosen (`docs/palette.md` §0). Handing these back as
-/// targets has to return the original bytes -- the frame hashes compare
-/// exactly, so these have to be integers a slider can land on.
-///
-/// The eye's chroma looks low because half that region is the near-black pupil
-/// and the white catchlight. Only the brown iris carries colour, and rank
-/// keeps all three in their places when the eye is moved.
-const BUILT_IN_PALETTE: Palette = Palette::new(
-    PaletteTargets::new(22.0, 17.0, 53.0, 90.0),
-    PaletteTargets::new(38.0, 86.0, 95.0, 33.0),
-    PaletteTargets::new(21.0, 0.0, 78.0, 17.0),
-);
 
 // The shipped `mochi-v3` package, byte for byte the same files as
 // `~/.codex/pets/mochi-v3`. Compiled in rather than read from disk: the
@@ -193,102 +182,10 @@ pub fn prepare_built_in_mochi_recolor() -> bool {
     built_in_source().is_some()
 }
 
-/// The colours the menu offers, in the order it shows them.
-///
-/// The hues come off the hand-drawn answer cats (`docs/palette.md` §0). The
-/// **lightness ends do not**, and that is the one place these were tuned by eye
-/// rather than measured: the answers' marking is bunched at one lightness while
-/// this ramp spreads evenly by rank, so reusing their p5 as the dark end left
-/// yellow reading as olive and red as washed salmon. Raising the dark end fixes
-/// both. The first entry is the sheet as drawn, so picking it restores the
-/// original bytes exactly.
-///
-/// **The body moves only for black and white** -- the answer key's black cat
-/// dropped the cream body from lightness 93 to 33, and no other colour touched
-/// it. When it does move the blush and the boundary shading follow it, or the
-/// cat ends up outlined in glowing cream.
-///
-/// **Eyes are paired to the fur** the way a cat's are: gold on black, blue on
-/// white, green on ginger. The dark end stays at 0 so the pupil is still black
-/// -- chroma cannot survive there and `from_hls` clamps it away -- and the
-/// light end keeps the catchlight bright, so the colour lands on the iris
-/// between them and nowhere else.
-const PRESETS: [(&str, Palette); 9] = [
-    ("palette.default", BUILT_IN_PALETTE),
-    (
-        // A cat that is black rather than Mochi seen at night: marking and
-        // body land on nearly the same darkness, so the calico patches stop
-        // showing through and only the outline and the eyes read.
-        "palette.black",
-        Palette::new(
-            PaletteTargets::new(40.0, 3.0, 18.0, 8.0),
-            PaletteTargets::new(40.0, 8.0, 20.0, 8.0),
-            PaletteTargets::new(48.0, 10.0, 96.0, 205.0),
-        ),
-    ),
-    (
-        "palette.white",
-        Palette::new(
-            PaletteTargets::new(26.0, 42.0, 92.0, 16.0),
-            PaletteTargets::new(38.0, 90.0, 98.0, 14.0),
-            PaletteTargets::new(210.0, 0.0, 84.0, 190.0),
-        ),
-    ),
-    (
-        "palette.red",
-        Palette::new(
-            PaletteTargets::new(8.0, 28.0, 80.0, 200.0),
-            BUILT_IN_PALETTE.body,
-            PaletteTargets::new(112.0, 0.0, 82.0, 180.0),
-        ),
-    ),
-    (
-        "palette.hotpink",
-        Palette::new(
-            PaletteTargets::new(332.0, 33.0, 84.0, 205.0),
-            BUILT_IN_PALETTE.body,
-            PaletteTargets::new(185.0, 0.0, 82.0, 190.0),
-        ),
-    ),
-    (
-        "palette.yellow",
-        Palette::new(
-            PaletteTargets::new(48.0, 30.0, 90.0, 200.0),
-            BUILT_IN_PALETTE.body,
-            PaletteTargets::new(100.0, 0.0, 82.0, 180.0),
-        ),
-    ),
-    (
-        "palette.blue",
-        Palette::new(
-            PaletteTargets::new(214.0, 22.0, 78.0, 195.0),
-            BUILT_IN_PALETTE.body,
-            PaletteTargets::new(35.0, 0.0, 82.0, 200.0),
-        ),
-    ),
-    (
-        "palette.purple",
-        Palette::new(
-            PaletteTargets::new(290.0, 20.0, 76.0, 185.0),
-            BUILT_IN_PALETTE.body,
-            PaletteTargets::new(45.0, 0.0, 82.0, 195.0),
-        ),
-    ),
-    (
-        // The one colour no answer cat could show: a hue that travels instead
-        // of holding still. It sweeps the long way round on purpose.
-        "palette.rainbow",
-        Palette::new(
-            PaletteTargets::sweeping(0.0, 359.0, 36.0, 86.0, 175.0),
-            BUILT_IN_PALETTE.body,
-            PaletteTargets::new(330.0, 0.0, 82.0, 195.0),
-        ),
-    ),
-];
 
 /// Name key and palette for each preset, in menu order.
 pub fn built_in_mochi_presets() -> &'static [(&'static str, Palette)] {
-    &PRESETS
+    roamling_core::pet_image::palette_presets()
 }
 
 /// Where marking, body and eyes already are. The debug controls open here, and
@@ -443,6 +340,7 @@ fn built_in_mochi_from_images(atlas: PetImage, extension_sheet: PetImage) -> Pet
 #[cfg(test)]
 mod tests {
     use super::*;
+    use roamling_core::PaletteTargets;
 
     /// The sheets are a contract, not just data: `docs/history/windows.md` and
     /// `CLAUDE.md` both pin 8 columns by 9 and 3 rows at 192x208.
