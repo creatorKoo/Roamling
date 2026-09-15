@@ -15,7 +15,7 @@ import WinSDK
 @main
 struct RoamlingLogicTestMain {
     static func main() {
-        let tests = coreLogicTests() + petLogicTests() + sourceLogicTests() + runtimeLogicTests() + tuningPersistenceLogicTests() + shellLogicTests() + focusActivityLogicTests() + stuckTravelLogicTests() + runtimeTraceTests()
+        let tests = coreLogicTests() + petLogicTests() + sourceLogicTests() + runtimeLogicTests() + tuningPersistenceLogicTests() + shellLogicTests() + focusActivityLogicTests() + stuckTravelLogicTests() + captureLogicTests() + runtimeTraceTests()
         var failures = 0
 
         for test in tests {

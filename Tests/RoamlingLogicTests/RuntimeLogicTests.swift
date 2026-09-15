@@ -398,16 +398,40 @@ final class FakeUserIdleProvider: UserIdleProviding {
 @MainActor
 final class FakeCaptureProvider: CaptureProviding {
     var isAuthorized = false
+    /// What an immediate capture returns. Nil reads as a failed capture, the
+    /// way the old `LuminanceField?` contract did.
     var field: LuminanceField?
+    /// What a failed immediate capture is blamed on.
+    var failure: CaptureFailure = .noContent
+    /// When set, captures do not return until `resume(with:)` is called --
+    /// a call the OS never answers, which is the case the deadline exists for.
+    var hangs = false
+    var inFlightStage: String? { hangs && !pending.isEmpty ? "content" : nil }
     private(set) var requestCount = 0
+    private var pending: [CheckedContinuation<CaptureOutcome, Never>] = []
 
     @discardableResult
     func requestAuthorization() -> Bool { isAuthorized }
 
-    func captureLuminanceField(for display: DisplaySnapshot) async -> LuminanceField? {
+    func captureLuminanceField(for display: DisplaySnapshot) async -> CaptureOutcome {
         requestCount += 1
-        return field
+        if hangs {
+            return await withCheckedContinuation { pending.append($0) }
+        }
+        if let field { return .field(field) }
+        return .failed(failure)
     }
+
+    /// Lets every hung capture return, oldest first, with one outcome. The
+    /// late-completion test resumes a request the runtime has already given
+    /// up on, and checks it changes nothing.
+    func resumeHung(with outcome: CaptureOutcome) {
+        let waiting = pending
+        pending.removeAll()
+        waiting.forEach { $0.resume(returning: outcome) }
+    }
+
+    var hungCount: Int { pending.count }
 }
 
 @MainActor
@@ -926,4 +950,195 @@ func fieldBusy(
         }
     }
     return LuminanceField(bounds: bounds, columns: columns, rows: rows, samples: samples)
+}
+
+// MARK: - Capture
+
+/// The capture path after 2026-09-15 (`docs/capture.md` §3, verified per §5).
+///
+/// The fake capture used to return at once, and the recorded session runs with
+/// capture off, so nothing here was ever exercised by a green run. Each test
+/// is one of the four shapes that document names.
+func captureLogicTests() -> [LogicTest] {
+    [
+        LogicTest(name: "a capture that never returns is given up on, and the next one is sent") {
+            try MainActor.assumeIsolated {
+                let scene = try CaptureScene()
+                defer { scene.tearDown() }
+                scene.platform.capture.hangs = true
+
+                // One request goes out and hangs. Five seconds later it is
+                // abandoned; the backoff doubles the roaming cadence, so the
+                // second request lands inside the next twelve.
+                scene.run(seconds: 20)
+                try expect(
+                    scene.platform.capture.requestCount >= 2,
+                    "only \(scene.platform.capture.requestCount) request(s); the hung one still owns the slot"
+                )
+                try expect(
+                    scene.requestLog.contains { $0.hasPrefix("timed out") },
+                    "nothing said the capture was given up on: \(scene.requestLog)"
+                )
+            }
+        },
+        LogicTest(name: "a late answer from an abandoned capture changes nothing") {
+            try MainActor.assumeIsolated {
+                let scene = try CaptureScene()
+                defer { scene.tearDown() }
+                let capture = scene.platform.capture
+
+                // A hangs and is abandoned.
+                capture.hangs = true
+                scene.run(seconds: 7)
+                try expect(capture.hungCount == 1, "expected one hung request, got \(capture.hungCount)")
+
+                // B is answered at once with a field.
+                capture.hangs = false
+                capture.field = scene.field
+                scene.run(seconds: 14)
+                try expect(
+                    scene.requestLog.last == "ok",
+                    "the second request did not land: \(scene.requestLog)"
+                )
+                let requestsBeforeLate = capture.requestCount
+
+                // Now A comes back. It must not touch the slot or the field.
+                capture.resumeHung(with: .failed(.noContent))
+                drainActivityEvents()
+                scene.run(seconds: 1)
+                try expect(
+                    scene.requestLog.contains("late completion ignored"),
+                    "the late answer was not recognised as late: \(scene.requestLog)"
+                )
+                try expect(
+                    scene.requestLog.last != "failed: noContent",
+                    "the abandoned request's failure overwrote the live one's result"
+                )
+                try expect(
+                    scene.coreCapture == "available",
+                    "the core lost its field to a late failure: \(scene.coreCapture)"
+                )
+                // And the slot is still usable afterwards.
+                scene.run(seconds: 8)
+                try expect(
+                    capture.requestCount > requestsBeforeLate,
+                    "no request after the late completion; the slot is stuck"
+                )
+            }
+        },
+        LogicTest(name: "a failed capture keeps the last good field, but not for long") {
+            try MainActor.assumeIsolated {
+                let scene = try CaptureScene()
+                defer { scene.tearDown() }
+                let capture = scene.platform.capture
+
+                capture.field = scene.field
+                scene.run(seconds: 2)
+                try expect(scene.coreCapture == "available", "the first capture never arrived")
+
+                // From here every capture fails. The field the core judges by
+                // must survive the first failure and die of age, not of the
+                // failure itself.
+                capture.field = nil
+                scene.run(seconds: 6)
+                try expect(
+                    scene.coreCapture == "available",
+                    "one failed capture blinded the pet: \(scene.coreCapture)"
+                )
+                scene.run(seconds: 10)
+                try expect(
+                    scene.coreCapture == "authorised, none yet",
+                    "a field older than its lifetime was still trusted: \(scene.coreCapture)"
+                )
+            }
+        },
+        LogicTest(name: "the same failure is written once, not once per attempt") {
+            try MainActor.assumeIsolated {
+                let scene = try CaptureScene()
+                defer { scene.tearDown() }
+                scene.platform.capture.field = nil
+                scene.platform.capture.failure = .displayNotFound
+                scene.run(seconds: 40)
+                let failures = scene.requestLog.filter { $0 == "failed: displayNotFound" }
+                try expect(
+                    scene.platform.capture.requestCount >= 3,
+                    "only \(scene.platform.capture.requestCount) attempts in forty seconds"
+                )
+                try expect(failures.count == 1, "the failure was logged \(failures.count) times")
+            }
+        }
+    ]
+}
+
+/// A roaming pet with capture authorised, ticked by hand against a clock the
+/// test owns. Roaming is what makes the core ask for a capture of its own
+/// display every six seconds with nothing else going on.
+@MainActor
+private struct CaptureScene {
+    let runtime: RoamlingRuntime
+    let platform: FakePlatform
+    let clock: TestClock
+    private let defaults: TestDefaults
+    let field: LuminanceField
+
+    init() throws {
+        clock = TestClock(startingAt: 1_000)
+        let display = DisplaySnapshot(
+            id: "1",
+            name: "test",
+            frame: WorldRect(x: 0, y: 0, width: 1440, height: 900),
+            visibleFrame: WorldRect(x: 0, y: 25, width: 1440, height: 875),
+            scale: 2
+        )
+        platform = FakePlatform(display: display, worldTop: 900)
+        platform.pointer.position = WorldPoint(x: 5_000, y: 5_000)
+        platform.userIdle.duration = 0
+        platform.capture.isAuthorized = true
+        field = try require(
+            LuminanceField(
+                bounds: display.frame,
+                columns: 4,
+                rows: 4,
+                samples: Array(repeating: 0.9, count: 16)
+            ),
+            "the test field is malformed"
+        )
+        defaults = try makeTestDefaults()
+        defaults.defaults.set(true, forKey: "roamling.roaming")
+        runtime = RoamlingRuntime(
+            services: platform.services,
+            agents: [],
+            defaults: defaults.defaults,
+            catalog: PetCatalog(roots: []),
+            clock: clock.read
+        )
+        runtime.start(drivingTicks: false)
+    }
+
+    func tearDown() { defaults.discard() }
+
+    func run(seconds: Double) {
+        let steps = Int(seconds * 30)
+        for step in 0..<steps {
+            clock.advance(1.0 / 30)
+            runtime.tick()
+            // The capture completes on the main queue; let it in.
+            if step % 3 == 0 { drainActivityEvents() }
+        }
+        drainActivityEvents()
+    }
+
+    /// Every `capture-request` message the shell wrote, oldest first.
+    var requestLog: [String] { messages(in: "capture-request") }
+
+    /// What the core last said about its field.
+    var coreCapture: String { messages(in: "capture").last ?? "(none)" }
+
+    private func messages(in category: String) -> [String] {
+        runtime.diagnosticsText.split(separator: "\n").compactMap { line -> String? in
+            let words = line.split(separator: " ", omittingEmptySubsequences: true)
+            guard words.count >= 3, words[1] == category else { return nil }
+            return words[2...].joined(separator: " ")
+        }
+    }
 }

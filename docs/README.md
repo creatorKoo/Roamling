@@ -25,6 +25,7 @@
 | 고양이 색을 어떻게 바꾸나 | [`palette.md`](palette.md) | ~400 |
 | 숨기기와 메뉴가 왜 그 모양인가 | [`hiding.md`](hiding.md) | ~150 |
 | 무엇이 실제로 배터리를 먹나 | [`battery.md`](battery.md) | ~90 |
+| 화면의 글자를 어떻게 보고, 못 보게 되면 어떻게 되나 | [`capture.md`](capture.md) | ~160 |
 
 ## 닫힌 기록 — [`history/`](history/)
 

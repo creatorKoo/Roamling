@@ -151,9 +151,34 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     private var tickTimer: Timer?
     private var activityTasks: [Task<Void, Never>] = []
     private var screenObserver: DisplayChangeSubscription?
+    // The capture path. Everything the two-hour outage of 2026-09-15 taught
+    // is encoded in these (`docs/capture.md` §3): a failure does not wipe the
+    // last good field, a field is only trusted for `fieldLifetime`, a request
+    // that does not come back is given up on at `captureDeadline`, and only the
+    // request that currently owns the slot may write to it.
     private var cachedLuminance: LuminanceField?
-    private var luminanceCapturedAt: TimeInterval = -.infinity
+    /// When the field in `cachedLuminance` was actually produced. Separate from
+    /// the attempt time so a run of failures cannot masquerade as freshness.
+    private var luminanceSucceededAt: TimeInterval = -.infinity
+    private var luminanceAttemptedAt: TimeInterval = -.infinity
+    private var luminanceStartedAt: TimeInterval = -.infinity
     private var luminanceTask: Task<Void, Never>?
+    /// Ownership of the in-flight slot. Bumped whenever the slot is given up on
+    /// or torn down, so a completion arriving for an older number is ignored
+    /// instead of overwriting whatever came after it.
+    private var captureGeneration: UInt64 = 0
+    /// Consecutive requests given up on. Drives the backoff: an abandoned call
+    /// may still be running inside the OS, and starting another every few
+    /// seconds would pile them up.
+    private var consecutiveCaptureTimeouts = 0
+    /// How long a capture may take before it is given up on. Judged on the
+    /// tick, against the injected clock -- not `Task.sleep`, which would be real
+    /// time in a test and one more cancellation race in the app.
+    private static let captureDeadline: TimeInterval = 5
+    /// How long a field is trusted after it was produced. Twice the slowest
+    /// refresh cadence: a policy value to tune on real use, not a proven bound.
+    private static let fieldLifetime: TimeInterval = 12
+    private static let captureBackoffCeiling: TimeInterval = 60
     private var running = false
 
     /// - Parameters:
@@ -260,6 +285,20 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     public func start(drivingTicks: Bool = true) {
         guard !running else { return }
         running = true
+        // One line per process, so the append-only diagnostics file shows
+        // where each run begins. Without it two launches read as one timeline
+        // and a fresh process's first successful capture looked like recovery.
+        //
+        // Written to the file only, not into the in-memory log: it marks a
+        // boundary between processes, and the in-memory log is one process by
+        // definition. Putting it in the buffer also made it the first entry,
+        // which is what every displayed timestamp is relative to.
+        let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"
+        appendToDiagnosticsFile(
+            timestamp: now(),
+            category: "launch",
+            message: "pid=\(ProcessInfo.processInfo.processIdentifier) version=\(version)"
+        )
         overlay.inputHandler = self
         overlay.setPosition(core.position)
         renderCurrentFrame()
@@ -278,9 +317,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         tickTimer?.invalidate()
         tickTimer = nil
         activityTasks.forEach { $0.cancel() }
-        luminanceTask?.cancel()
-        luminanceTask = nil
-        cachedLuminance = nil
+        dropCapture(reason: "stopped", at: now())
         activityTasks.removeAll()
         agents.forEach { $0.stopReceiving() }
         screenObserver?.cancel()
@@ -687,7 +724,8 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         let queriedFocus = didQueryFocus ? focusProvider.currentFocus() : nil
 
         let pointer = pointerProvider.currentPointer(at: now)
-        core.setLuminance(judgeableLuminance)
+        expireCaptureIfOverdue(at: now)
+        core.setLuminance(judgeableLuminance(at: now))
         let output = core.finishTick(
             at: now,
             pointer: pointer.position,
@@ -748,10 +786,16 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
 
     private func record(_ category: String, _ message: String, at timestamp: TimeInterval) {
         guard diagnostics.record(category, message, at: timestamp) else { return }
+        appendToDiagnosticsFile(timestamp: timestamp, category: category, message: message)
+    }
+
+    /// The one place the diagnostics file is written. Append-only and never
+    /// truncated, so successive launches stack up in it -- which is why the
+    /// `launch` line exists.
+    private func appendToDiagnosticsFile(timestamp: TimeInterval, category: String, message: String) {
         guard let path = diagnosticsPath,
-              let entry = diagnostics.entries.last,
               let data = String(
-                format: "%.1f %@ %@\n", entry.timestamp, entry.category, entry.message
+                format: "%.1f %@ %@\n", timestamp, category, message
               ).data(using: .utf8) else { return }
         if let handle = FileHandle(forWritingAtPath: path) {
             handle.seekToEndOfFile()
@@ -872,8 +916,15 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         captureProvider.requestAuthorization()
     }
 
-    private var judgeableLuminance: LuminanceField? {
-        captureProvider.isAuthorized ? cachedLuminance : nil
+    /// The field the core may judge by: the last one produced, only while the
+    /// permission holds and it is younger than `fieldLifetime`. A stale field
+    /// is worse than none -- placement treats any field as having seen the
+    /// screen, and a two-hour-old one would call a paragraph empty.
+    private func judgeableLuminance(at now: TimeInterval) -> LuminanceField? {
+        guard captureProvider.isAuthorized,
+              let field = cachedLuminance,
+              now - luminanceSucceededAt <= Self.fieldLifetime else { return nil }
+        return field
     }
 
     /// The interval already has the resting slow-down folded in: what is left
@@ -886,15 +937,78 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     ) {
         guard captureProvider.isAuthorized,
               luminanceTask == nil,
-              timestamp - luminanceCapturedAt >= interval,
               let display = world.display(containing: region.center)
                 ?? world.nearestDisplay(to: region.center) else { return }
-        luminanceCapturedAt = timestamp
+        // Doubled per consecutive timeout, capped. The abandoned calls may
+        // still be running in the OS; this is what keeps them from stacking.
+        let backoff = min(
+            interval * pow(2.0, Double(consecutiveCaptureTimeouts)),
+            Self.captureBackoffCeiling
+        )
+        guard timestamp - luminanceAttemptedAt >= backoff else { return }
+        luminanceAttemptedAt = timestamp
+        luminanceStartedAt = timestamp
+        captureGeneration &+= 1
+        let generation = captureGeneration
         luminanceTask = Task { [weak self] in
             guard let provider = self?.captureProvider else { return }
-            let field = await provider.captureLuminanceField(for: display)
-            self?.cachedLuminance = field
-            self?.luminanceTask = nil
+            let outcome = await provider.captureLuminanceField(for: display)
+            self?.captureCompleted(outcome, generation: generation)
+        }
+    }
+
+    /// Runs on the tick, so the deadline is judged by the same clock as
+    /// everything else and a test can advance it.
+    private func expireCaptureIfOverdue(at now: TimeInterval) {
+        guard luminanceTask != nil, now - luminanceStartedAt >= Self.captureDeadline else { return }
+        let stage = captureProvider.inFlightStage ?? "unknown"
+        // Cooperative only: a ScreenCaptureKit call ignores this. What frees
+        // the slot is the generation bump below, which orphans the late answer.
+        luminanceTask?.cancel()
+        luminanceTask = nil
+        captureGeneration &+= 1
+        consecutiveCaptureTimeouts += 1
+        record("capture-request", "timed out (\(stage))", at: now)
+    }
+
+    private func captureCompleted(_ outcome: CaptureOutcome, generation: UInt64) {
+        let now = now()
+        guard generation == captureGeneration else {
+            // Given up on, or torn down, since this was sent. Its answer is
+            // for a slot that has moved on -- possibly to a newer request.
+            record("capture-request", "late completion ignored", at: now)
+            return
+        }
+        luminanceTask = nil
+        switch outcome {
+        case let .field(field):
+            cachedLuminance = field
+            luminanceSucceededAt = now
+            consecutiveCaptureTimeouts = 0
+            record("capture-request", "ok", at: now)
+        case let .failed(reason):
+            // The last good field stays; `judgeableLuminance` retires it by
+            // age. Wiping it here is what turned one bad capture into a blind
+            // pet.
+            record("capture-request", "failed: \(reason)", at: now)
+        }
+    }
+
+    /// Forgets the field and orphans whatever is in flight. For the two
+    /// events after which the old field is wrong rather than merely stale:
+    /// the displays moved, or the runtime stopped.
+    private func dropCapture(reason: String, at now: TimeInterval) {
+        // Only worth a line when something was actually let go of. With
+        // capture off there is never a request or a field, and a display
+        // change would otherwise write "dropped" about nothing.
+        let hadSomething = luminanceTask != nil || cachedLuminance != nil
+        luminanceTask?.cancel()
+        luminanceTask = nil
+        captureGeneration &+= 1
+        cachedLuminance = nil
+        luminanceSucceededAt = -.infinity
+        if hadSomething {
+            record("capture-request", "dropped: \(reason)", at: now)
         }
     }
 
@@ -916,6 +1030,8 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         displays = displaySet.displays
         coordinateSpace = displaySet.coordinateSpace
         world = DesktopWorldSnapshot(displays: displays)
+        // The field was of a layout that no longer exists.
+        dropCapture(reason: "display change", at: now())
         let clamped = core.handleDisplayChange(
             displays: displays,
             carrying: coordinateSpace.pointFromAppKit(oldAppKitPoint),

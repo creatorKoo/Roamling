@@ -28,19 +28,39 @@ public final class MacCaptureProvider: CaptureProviding {
         CGRequestScreenCaptureAccess()
     }
 
-    public func captureLuminanceField(for display: DisplaySnapshot) async -> LuminanceField? {
+    /// The stage the capture in flight is waiting on. Read by the runtime
+    /// when it gives up on a request, so the log says *where* it stuck.
+    ///
+    /// Not cleared on return: a call the runtime already abandoned may return
+    /// while a newer one is at its first stage, and clearing here would erase
+    /// the newer one's answer. Every call sets it before its first await, so a
+    /// stale value cannot outlive the start of the next call.
+    public private(set) var inFlightStage: String?
+
+    public func captureLuminanceField(for display: DisplaySnapshot) async -> CaptureOutcome {
         guard isAuthorized,
               !display.frame.isEmpty,
-              let displayID = UInt32(display.id) else { return nil }
+              let displayID = UInt32(display.id) else { return .failed(.unavailable) }
         // SCScreenshotManager is the only single-shot path; a stream would keep
         // capturing to answer one question.
-        guard #available(macOS 14.0, *) else { return nil }
+        guard #available(macOS 14.0, *) else { return .failed(.unavailable) }
 
+        inFlightStage = "content"
         guard let content = try? await SCShareableContent.excludingDesktopWindows(
             false,
             onScreenWindowsOnly: true
-        ), let target = content.displays.first(where: { $0.displayID == displayID }) else {
-            return nil
+        ) else { return .failed(.noContent) }
+        // A request the runtime has already given up on must not go on to
+        // take a screenshot nobody will read. Cancellation is cooperative, so
+        // this is the one place between the two system calls where it can be
+        // honoured.
+        if Task.isCancelled { return .failed(.cancelled) }
+        // Named apart from `noContent`: the content list came back fine and the
+        // display the runtime chose is simply not in it. With three displays
+        // and a `nearestDisplay` fallback that is a real way to fail every
+        // time, and it needs its own line in the log.
+        guard let target = content.displays.first(where: { $0.displayID == displayID }) else {
+            return .failed(.displayNotFound)
         }
 
         // The pet must not make its own seat look busy.
@@ -61,12 +81,16 @@ public final class MacCaptureProvider: CaptureProviding {
         configuration.height = rows
         configuration.showsCursor = false
 
+        inFlightStage = "screenshot"
         guard let image = try? await SCScreenshotManager.captureImage(
             contentFilter: filter,
             configuration: configuration
-        ) else { return nil }
+        ) else { return .failed(.noImage) }
 
-        return Self.luminanceField(from: image, bounds: display.frame)
+        guard let field = Self.luminanceField(from: image, bounds: display.frame) else {
+            return .failed(.unusableImage)
+        }
+        return .field(field)
     }
 
     /// Draws the snapshot into an 8-bit gray bitmap and keeps only the samples.

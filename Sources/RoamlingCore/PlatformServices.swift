@@ -125,6 +125,35 @@ public protocol SafeZoneProviding: AnyObject {
     func safeZones(in world: DesktopWorldSnapshot) -> [SafeZone]
 }
 
+/// Why a capture produced no field. Named, because the one thing a capture
+/// path must not do is fold every failure into a single `nil`: that is how a
+/// process ran blind for two hours and the log could not say which of four
+/// different things had gone wrong (`docs/capture.md` §2).
+public enum CaptureFailure: Sendable, Equatable {
+    /// The platform cannot capture at all: no permission, or no API.
+    case unavailable
+    /// The list of capturable content could not be fetched.
+    case noContent
+    /// The content list came back, but the display asked for is not in it.
+    case displayNotFound
+    /// The screenshot itself failed.
+    case noImage
+    /// An image arrived and could not be reduced to a field.
+    case unusableImage
+    /// Cancellation was observed between stages.
+    case cancelled
+}
+
+public enum CaptureOutcome: Sendable {
+    case field(LuminanceField)
+    case failed(CaptureFailure)
+
+    public var field: LuminanceField? {
+        if case let .field(field) = self { return field }
+        return nil
+    }
+}
+
 @MainActor
 public protocol CaptureProviding: AnyObject {
     var isAuthorized: Bool { get }
@@ -132,9 +161,18 @@ public protocol CaptureProviding: AnyObject {
     @discardableResult
     func requestAuthorization() -> Bool
 
-    /// A downsampled luminance view of one display, or nil when capture is
-    /// unavailable. Implementations must not persist or log the capture.
-    func captureLuminanceField(for display: DisplaySnapshot) async -> LuminanceField?
+    /// A downsampled luminance view of one display, or which stage refused.
+    /// Implementations must not persist or log the capture.
+    func captureLuminanceField(for display: DisplaySnapshot) async -> CaptureOutcome
+
+    /// Which stage the capture in flight is waiting on, so a caller that gives
+    /// up on it can say where it stuck. Nil when nothing is in flight or the
+    /// implementation has no stages worth naming.
+    var inFlightStage: String? { get }
+}
+
+public extension CaptureProviding {
+    var inFlightStage: String? { nil }
 }
 
 @MainActor
