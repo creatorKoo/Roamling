@@ -126,7 +126,7 @@
 
 "palette.window.title" = "Roamling Colour";
 "palette.header" = "Make Mochi your own";
-"palette.footer" = "Move a slider and the Mochi on screen changes with it, and stays that way. A group you do not touch keeps the drawing exactly as it was — changing the body will not flatten the markings. To undo, press Start over, or pick Colour › Original from the menu.";
+"palette.footer" = "Move a slider and the Mochi on screen changes with it, and stays that way. A group you do not touch keeps the drawing exactly as it was — changing the body will not flatten the markings. To undo, press Start over, or pick Pet › Mochi › Original from the menu.";
 "palette.section.marking" = "Markings";
 "palette.section.body" = "Body";
 "palette.section.eye" = "Eyes";

@@ -415,27 +415,27 @@ unsafe fn build(state: &MenuState) -> Option<HMENU> {
         // catalogue -- but the coverage lines are real, read off the resolver.
         if let Ok(pets) = CreatePopupMenu() {
             let label = localized_format("menu.pet.builtin", &["Mochi"]);
-            let name = wide(&label);
-            let _ = AppendMenuW(
-                pets,
-                MF_STRING | checked(state.built_in),
-                CMD_PET_BUILT_IN,
-                PCWSTR(name.as_ptr()),
-            );
             if let Ok(colours) = CreatePopupMenu() {
                 for (index, (key, _)) in roamling_pet::built_in_mochi_presets().iter().enumerate() {
                     let label = wide(localized(key));
                     let _ = AppendMenuW(
                         colours,
-                        MF_STRING | checked(state.palette == Some(index)),
+                        MF_STRING | checked(state.built_in && state.palette == Some(index)),
                         CMD_PALETTE_BASE + index,
                         PCWSTR(label.as_ptr()),
                     );
                 }
-                attach(pets, colours, localized("menu.palette"));
-            }
-            if state.palette_custom {
-                command(pets, CMD_PALETTE_CUSTOM, localized("menu.palette.custom"));
+                if state.palette_custom {
+                    let _ = separator(colours);
+                    command(colours, CMD_PALETTE_CUSTOM, localized("menu.palette.custom"));
+                }
+                let name = wide(&label);
+                let _ = AppendMenuW(
+                    pets,
+                    MF_POPUP | MF_STRING | checked(state.built_in),
+                    colours.0 as usize,
+                    PCWSTR(name.as_ptr()),
+                );
             }
             if !state.pets.is_empty() {
                 let _ = separator(pets);
@@ -735,7 +735,6 @@ mod tests {
             CMD_UPDATE_CHECK,
             CMD_UPDATE_AUTO,
             CMD_LAUNCH_AT_LOGIN,
-            CMD_PET_BUILT_IN,
             CMD_PET_BASE,
             CMD_PET_BASE + 1,
             CMD_SCALE_BASE,
@@ -773,6 +772,40 @@ mod tests {
             seen.len(),
             "two items share a command id: {found:?}"
         );
+    }
+
+    #[test]
+    fn colours_are_directly_under_mochi_with_the_selection_checked() {
+        for built_in in [false, true] {
+            for custom in [false, true] {
+                let mut state = state();
+                state.built_in = built_in;
+                state.palette = Some(1); // Black, as restored from settings.
+                state.palette_custom = custom;
+                let menu = unsafe { build(&state) }.unwrap();
+                unsafe {
+                    let pets = GetSubMenu(menu, 4);
+                    let mochi = GetSubMenu(pets, 0);
+                    assert!(!mochi.is_invalid());
+                    let mut title = [0u16; 128];
+                    let length = GetMenuStringW(pets, 0, Some(&mut title), MF_BYPOSITION);
+                    assert_eq!(String::from_utf16_lossy(&title[..length as usize]),
+                        localized_format("menu.pet.builtin", &["Mochi"]));
+                    let presets = roamling_pet::built_in_mochi_presets();
+                    assert_eq!(GetMenuItemCount(mochi) as usize,
+                        presets.len() + if custom { 2 } else { 0 });
+                    for index in 0..presets.len() {
+                        assert_eq!(GetMenuItemID(mochi, index as i32) as usize, CMD_PALETTE_BASE + index);
+                        assert!(GetSubMenu(mochi, index as i32).is_invalid());
+                        let checked = GetMenuState(mochi, index as u32, MF_BYPOSITION) & MF_CHECKED.0 != 0;
+                        assert_eq!(checked, built_in && index == 1);
+                    }
+                    assert_eq!(GetMenuState(pets, 0, MF_BYPOSITION) & MF_CHECKED.0 != 0, built_in);
+                    assert_eq!(ids(mochi).contains(&CMD_PALETTE_CUSTOM), custom);
+                    let _ = DestroyMenu(menu);
+                }
+            }
+        }
     }
 
     #[test]

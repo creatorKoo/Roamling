@@ -126,7 +126,7 @@
 
 "palette.window.title" = "Roamling 색 고르기";
 "palette.header" = "모찌 색 만들기";
-"palette.footer" = "슬라이더를 움직이면 화면의 모찌가 바로 따라 바뀌고, 그대로 기억됩니다. 손대지 않은 묶음은 원래 그림 그대로 남습니다 — 몸통을 바꿔도 무늬가 흐려지지 않습니다. 되돌리려면 '처음으로'를 누르거나 메뉴에서 색 › 기본을 고르세요.";
+"palette.footer" = "슬라이더를 움직이면 화면의 모찌가 바로 따라 바뀌고, 그대로 기억됩니다. 손대지 않은 묶음은 원래 그림 그대로 남습니다 — 몸통을 바꿔도 무늬가 흐려지지 않습니다. 되돌리려면 '처음으로'를 누르거나 메뉴에서 펫 › Mochi › 기본을 고르세요.";
 "palette.section.marking" = "무늬";
 "palette.section.body" = "몸통";
 "palette.section.eye" = "눈";

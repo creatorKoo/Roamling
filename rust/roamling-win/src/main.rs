@@ -213,10 +213,7 @@ fn main() -> Result<()> {
 
     let mut stored = Settings::load();
     // A colour chosen in an earlier run. Absent means the sheet as drawn.
-    let palette = stored
-        .text(settings::PALETTE)
-        .and_then(|text| palette_from_text(&text))
-        .unwrap_or_else(roamling_pet::built_in_mochi_palette);
+    let palette = stored.palette();
     let work_apps = stored.work_apps();
     stored.clear_work_app_labels_except(&work_apps);
     let work_app_labels = stored.work_app_labels();
@@ -428,9 +425,11 @@ fn main() -> Result<()> {
     {
         APP.with(|slot| {
             if let Some(app) = slot.borrow_mut().as_mut() {
-                if let Some(asset) = roamling_pet::built_in_mochi_recolored(palette) {
-                    app.asset = asset;
-                    app.drawn = None;
+                if app.current_package.is_none() {
+                    if let Some(asset) = roamling_pet::built_in_mochi_recolored(palette) {
+                        app.asset = asset;
+                        app.drawn = None;
+                    }
                 }
             }
         });
@@ -1024,16 +1023,6 @@ fn work_app_items(app: &App) -> Vec<(String, String, bool)> {
     )
 }
 
-/// What the tray menu should show, read off the app.
-///
-/// Split out from the message handler because showing the menu has to happen
-/// with the app back in its cell -- see the note on `wndproc`.
-/// A palette as fifteen numbers, for the settings file.
-///
-/// Text because settings is one flat key/value file and a colour is not worth
-/// a second format. Semicolons between the three regions, commas inside.
-use roamling_core::pet_image::{palette_from_text, palette_to_text};
-
 /// Wear a colour and remember it.
 ///
 /// Clearing rather than storing the original is the same rule the tuning panel
@@ -1041,22 +1030,20 @@ use roamling_core::pet_image::{palette_from_text, palette_to_text};
 /// never reaches the machine that stored it.
 fn apply_palette(app: &mut App, palette: roamling_core::Palette) {
     app.palette = palette;
-    if palette == roamling_pet::built_in_mochi_palette() {
-        app.settings.clear(settings::PALETTE);
-    } else {
-        app.settings
-            .set(settings::PALETTE, palette_to_text(palette));
-    }
-    // Scoped to the built-in Mochi. An installed package keeps its artist's
-    // colours.
-    if app.current_package.is_none() {
-        if let Some(asset) = roamling_pet::built_in_mochi_recolored(palette) {
+    app.settings.set_palette(palette);
+    // Picking a colour under Mochi also selects Mochi. Adopt the built-in
+    // before the next restart can bring back the previously selected package.
+    if let Some(asset) = roamling_pet::built_in_mochi_recolored(palette) {
+        if app.current_package.is_some() {
+            adopt(app, asset, None);
+        } else {
             app.asset = asset;
             app.drawn = None;
         }
     }
 }
 
+/// What the tray menu should show, read off the app.
 fn menu_state(app: &App) -> tray::MenuState {
     let coverage = app.resolver.coverage();
     let names = |set: &[roamling_core::PetCapability]| {

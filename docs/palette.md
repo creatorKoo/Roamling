@@ -290,6 +290,27 @@ p5를 그대로 어두운 끝에 쓰면 무늬의 절반이 너무 어두워지�
 시험했는데, 다섯 중 둘만 고치면서 r4c0에 1x8짜리 크림 부스러기를 집어넣었다 — 검정 위에서는
 흰 선이다. **잘못된 판단이 내려지는 자리에서 고쳐야 했다.**
 
+### 선택한 색 기억과 메뉴 — Windows (2026-09-15)
+
+프리셋과 직접 고른 색은 선택 즉시 자동으로 기억한다. 별도 저장 버튼이나 보관 목록은 없다
+(사용자 정정 `docs/requests.md` R7). `%APPDATA%\Roamling\settings.txt`의 `roamling.palette`에
+전체 팔레트를 적고, 시작할 때 읽어 같은 색으로 복원한다. 기본색을 고르면 키를 지워 원본을
+따르게 한다 (`settings.rs`의 `set_palette`·`palette`, `main.rs`의 `apply_palette`·`main`).
+
+색 프리셋은 **펫 › Mochi › 기본·검정·하양…**에 직접 들어 있다. 별도의 `색` 하위 메뉴는 없다.
+Shift를 누른 채 메뉴를 열면 같은 Mochi 하위에 **색 직접 고르기…**도 나온다. Mochi를 쓰는
+동안 부모 줄에 체크가 붙고, 프리셋과 일치하는 색에는 해당 색의 체크도 붙는다
+(`tray.rs`의 `build`, `main.rs`의 `menu_state`).
+
+다른 펫을 쓰다가 Mochi의 색을 고르면 Mochi로 전환하며 그 선택도 기억한다. 반대로 다른 펫을
+선택한 뒤 재실행하면 그 펫을 유지한다. 기억된 Mochi 색을 다른 펫 위에 덮지 않는다
+(`main.rs`의 `apply_palette`·`adopt`·시작 시 팔레트 복원 절).
+
+`settings.rs`의 `the_selected_colour_survives_restart_without_a_save_button`은 프리셋 아홉 개와
+직접 고른 색의 파일 저장·재로드 및 기본색 복귀를 확인한다. `tray.rs`의
+`colours_are_directly_under_mochi_with_the_selection_checked`는 실제 Win32 메뉴의 계층,
+색 체크 및 Shift에 따른 직접 고르기 노출을 확인한다.
+
 ### macOS — 실렸다 (2026-09-14)
 
 **양쪽이 같은 것을 한다.** 프리셋 아홉 줄, 시스템 색 피커, 그리고 축마다 슬라이더가 있는 창.
@@ -302,7 +323,7 @@ p5를 그대로 어두운 끝에 쓰면 무늬의 절반이 너무 어두워지�
 
 | | Windows | macOS |
 |---|---|---|
-| 프리셋 아홉 개 | 트레이 `색 ▸` | 펫 ▸ **Mochi 줄의 하위 메뉴** |
+| 프리셋 아홉 개 | 펫 ▸ **Mochi 줄의 하위 메뉴** | 같은 것 |
 | 색 고르기 | `ChooseColorW` (OS 대화상자) | `NSColorPanel` (OS 패널) |
 | 슬라이더 창 | Win32 트랙바, Shift로 열림 | SwiftUI, **Option**으로 열림 |
 | 리컬러 · 프리셋 값 · 설정 형식 | 공유 Rust | 같은 것 |

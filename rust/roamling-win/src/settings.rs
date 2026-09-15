@@ -90,6 +90,22 @@ impl Settings {
         self.values.get(key)?.parse().ok()
     }
 
+    pub fn palette(&self) -> roamling_core::Palette {
+        self.text(PALETTE)
+            .and_then(|text| roamling_core::pet_image::palette_from_text(&text))
+            .unwrap_or_else(roamling_pet::built_in_mochi_palette)
+    }
+
+    /// The last colour is remembered immediately. Original follows the
+    /// authored default, so it is represented by an absent key.
+    pub fn set_palette(&mut self, palette: roamling_core::Palette) {
+        if palette == roamling_pet::built_in_mochi_palette() {
+            self.clear(PALETTE);
+        } else {
+            self.set(PALETTE, roamling_core::pet_image::palette_to_text(palette));
+        }
+    }
+
     /// Missing means the authored defaults; a present empty value is the
     /// user's explicit choice to watch nothing.
     pub fn work_apps(&self) -> Vec<String> {
@@ -204,6 +220,36 @@ fn parse(text: &str) -> BTreeMap<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_selected_colour_survives_restart_without_a_save_button() {
+        let directory = std::env::temp_dir().join(format!(
+            "roamling-palette-{}-{}", std::process::id(),
+            std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()
+        ));
+        let path = directory.join("settings.txt");
+        let mut settings = Settings::load_from(Some(path.clone()));
+        settings.set(PET_PACKAGE_PATH, "");
+        settings.set(ROAMING, false);
+        for (_, preset) in roamling_pet::built_in_mochi_presets() {
+            settings.set_palette(*preset);
+            settings = Settings::load_from(Some(path.clone()));
+            assert_eq!(settings.palette(), *preset);
+            assert_eq!(settings.text(PET_PACKAGE_PATH).as_deref(), Some(""));
+        }
+        let mut custom = settings.palette();
+        custom.eye = custom.eye.aimed_at([35, 95, 210]);
+        settings.set_palette(custom);
+        settings = Settings::load_from(Some(path.clone()));
+        assert_eq!(settings.palette(), custom);
+        settings.set_palette(roamling_pet::built_in_mochi_palette());
+        settings = Settings::load_from(Some(path.clone()));
+        assert_eq!(settings.palette(), roamling_pet::built_in_mochi_palette());
+        assert_eq!(settings.text(PALETTE), None);
+        assert!(!settings.bool(ROAMING, true));
+        std::fs::remove_file(path).unwrap();
+        std::fs::remove_dir(directory).unwrap();
+    }
 
     /// A cleared key has to actually go, or whatever supplies the fallback --
     /// for the tuning values, the authored default -- never gets to answer.
