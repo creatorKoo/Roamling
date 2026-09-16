@@ -56,6 +56,22 @@ Win32 타입은 `platform.rs`를 넘지 않는다. Windows에 Swift는 없다: �
 그날 시행됐다(`docs/history/windows.md` W4의 "실행 결과"·"처방"). **지금도 깨진다면 그것은 새로운
 발견이므로 픽스처를 다시 만들지 말고 원인을 찾는다.**
 
+## 에이전트 훅 출력
+
+Windows 훅은 `curl.exe --silent --output NUL`로 응답과 진단 출력을 버린다
+(`rust/roamling-agent/src/installer.rs::command`, Swift 대조 구현 `HookCommand.silencer`).
+`>NUL` 셸 리다이렉션은 Git Bash에서 프로젝트 안에 파일을 만들므로 쓰지 않는다.
+`--output NUL`은 Windows 네이티브 curl이 널 장치를 직접 열어 Git Bash와 PowerShell에서
+같이 쓸 수 있다 ([curl 문서](https://curl.se/docs/manpage.html#-o)).
+표준입력을 받는 `--data-binary "@-"`도 따옴표로 감싸 PowerShell 구문 해석을 피한다.
+Claude Code는 Windows에서 Git Bash, 없으면 PowerShell로 명령 훅을 실행한다
+([훅 문서](https://code.claude.com/docs/en/hooks)).
+
+이전 명령은 `is_current`에서 `NeedsRepair`로 판정된다. 업데이트한 앱의 Claude Code
+메뉴에서 **통합 복구…**를 실행하면 10개 이벤트의 Roamling 훅이 교체된다. 다른 훅과 설정은 보존하며,
+Windows에서는 앱 시작만으로 설정을 다시 쓰지 않는다 (`installer::status`, `install`, `strip`,
+`rust/roamling-win/src/main.rs`의 `installer::install` 호출).
+
 ## 파일이 놓이는 자리
 
 | | 어디 |

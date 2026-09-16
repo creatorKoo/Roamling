@@ -196,6 +196,24 @@
 
 ---
 
+### B3. Windows Claude Code 훅이 프로젝트에 NUL 파일을 만든다 (2026-09-16)
+
+- **요청** Git Bash에서 매 훅 호출마다 생기는 0바이트 `NUL` 파일을 막고, 훅 재설치 뒤에도
+  수정이 유지되어야 한다. 사용자는 `>/dev/null 2>&1`로 바꾼 뒤 재생성이 멈췄음을 확인했다.
+- **원인** `rust/roamling-agent/src/installer.rs::command`와 Swift `HookCommand.silencer`가
+  Windows라는 이유로 `>NUL 2>&1`을 썼다. 파일을 여는 주체는 이 경우 Git Bash다.
+- **고침** 셸 리다이렉션을 없애고 Windows 네이티브 `curl.exe --silent --output NUL`이
+  출력을 버리게 한다. PowerShell 대체 실행도 같은 명령을 쓴다. 구형 훅은 기존 `is_current`와
+  `strip` 경로로 식별·교체하고, 사용자 설정과 다른 도구의 훅은 보존한다.
+- **회귀 테스트** `rust/roamling-agent/tests/windows_hook_shells.rs`에서 실제 Git Bash와
+  PowerShell로 JSON 전달·응답 폐기·수신기 종료 시 무출력·cwd 무변경을 확인한다.
+  `installer.rs::tests::legacy_nul_redirections_are_repairable_for_every_event`는 구형 명령의
+  식별·복구 필요 판정과 다른 설정·훅의 보존을 확인한다.
+- **검증** Windows `scripts/test.ps1` 통과(셸 51개 통과, 네트워크 테스트 1개 제외),
+  릴리스 빌드와 앱 재시작 완료. Swift Windows 분기는 소스만 수정했고 컴파일하지 않았다.
+
+---
+
 ## 거절·보류
 
 아직 없다.

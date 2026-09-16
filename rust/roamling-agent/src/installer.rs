@@ -81,15 +81,15 @@ impl Agent {
 ///
 /// Ported from `HookCommand`, whose Windows branches were already written on
 /// the macOS side. Windows has shipped the real `curl.exe` in System32 since 10
-/// build 1803, so only the path and the quoting differ. Failure is swallowed:
-/// a closed companion must never surface a hook error, which a native `http`
-/// handler used to do on every session that outlived the app.
+/// build 1803. Let that native executable discard the response: a shell's
+/// `>NUL` creates a regular file under Git Bash, while `/dev/null` redirection
+/// is not portable to PowerShell. `--silent` suppresses curl's diagnostics.
 pub fn command(agent: Agent, token: &str) -> String {
     format!(
-        "curl.exe --silent --connect-timeout 0.15 --max-time 0.3 \
+        "curl.exe --silent --output NUL --connect-timeout 0.15 --max-time 0.3 \
          --request POST --header \"Content-Type: application/json\" \
-         --header \"{TOKEN_HEADER}: {token}\" --data-binary @- \
-         \"{}\" >NUL 2>&1 # {}",
+         --header \"{TOKEN_HEADER}: {token}\" --data-binary \"@-\" \
+         \"{}\" # {}",
         agent.endpoint(),
         agent.marker()
     )
@@ -346,8 +346,42 @@ mod tests {
         assert!(built.contains(TOKEN_HEADER));
         assert!(built.contains("roamling-claude-code-hook"));
         assert!(built.contains("127.0.0.1:47831/v1/hooks/claude-code"));
-        // Failure has to be swallowed, or a closed companion surfaces an error
-        // on every session.
-        assert!(built.contains(">NUL 2>&1"));
+        assert!(built.contains("--silent --output NUL"));
+        assert!(!built.contains('>'), "the shell must not open an output file");
+    }
+
+    #[test]
+    fn legacy_nul_redirections_are_repairable_for_every_event() {
+        for agent in [Agent::ClaudeCode, Agent::Codex] {
+            let mut root = installed(agent, "test-token");
+            let hooks = root.get_mut("hooks").unwrap().as_object_mut().unwrap();
+            for event in agent.installed_events() {
+                let entry = &mut hooks[*event][0]["hooks"][0];
+                let legacy_command = command(agent, "test-token")
+                    .replace(" --output NUL", "")
+                    .replace("\"@-\"", "@-")
+                    .replace(" # ", " >NUL 2>&1 # ");
+                entry["command"] = json!(legacy_command);
+                assert!(is_ours(agent, entry));
+                assert!(!is_current(agent, "test-token", entry));
+            }
+            root.insert("model".into(), json!("user-choice"));
+            root["hooks"]["PreToolUse"][0]["hooks"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!({ "type": "command", "command": "echo mine" }));
+            strip(agent, &mut root);
+            assert_eq!(root["model"], "user-choice");
+            assert_eq!(
+                root["hooks"],
+                json!({
+                    "PreToolUse": [{ "hooks": [{ "type": "command", "command": "echo mine" }] }]
+                })
+            );
+            for event in agent.installed_events() {
+                assert!(is_current(agent, "test-token", &handler(agent, "test-token")));
+                assert!(ours_for(agent, hooks_of(&root), event).is_empty());
+            }
+        }
     }
 }

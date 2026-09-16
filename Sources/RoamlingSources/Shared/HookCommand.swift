@@ -20,18 +20,18 @@ public enum HookCommand {
         #endif
     }
 
-    /// Discards output and never fails: a closed companion must not surface a
-    /// hook error, which a native `http` handler used to do on every session
-    /// that outlived the app.
+    /// On Windows, native curl opens the null device itself. Shell redirection
+    /// to NUL creates a file in Git Bash; /dev/null is not a PowerShell sink.
+    /// POSIX shells also swallow curl's failure exit status.
     private static var silencer: String {
         #if os(Windows)
-        ">NUL 2>&1"
+        "--output NUL"
         #else
         ">/dev/null 2>&1 || true"
         #endif
     }
 
-    /// Quoting differs: cmd.exe does not treat single quotes as grouping.
+    /// Windows uses double quotes for native curl's arguments.
     private static func quoted(_ value: String) -> String {
         #if os(Windows)
         "\"\(value)\""
@@ -48,9 +48,15 @@ public enum HookCommand {
         token: String,
         marker: String
     ) -> String {
-        "\(curlPath) --silent --connect-timeout 0.15 --max-time 0.3 "
+        // PowerShell parses an unquoted @- as syntax rather than an argument.
+        #if os(Windows)
+        let standardInput = quoted("@-")
+        #else
+        let standardInput = "@-"
+        #endif
+        return "\(curlPath) --silent --connect-timeout 0.15 --max-time 0.3 "
             + "--request POST --header \(quoted("Content-Type: application/json")) "
-            + "--header \(quoted("\(tokenHeader): \(token)")) --data-binary @- "
+            + "--header \(quoted("\(tokenHeader): \(token)")) --data-binary \(standardInput) "
             + "\(quoted(endpoint.absoluteString)) \(silencer) # \(marker)"
     }
 }
