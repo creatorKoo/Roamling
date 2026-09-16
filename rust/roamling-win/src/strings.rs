@@ -215,6 +215,7 @@ mod tests {
             "menu.advanced",
             "menu.pet",
             "menu.pet.builtin",
+            "pet.name.bori",
             "menu.pet.coverage",
             "menu.size",
             "menu.roaming",

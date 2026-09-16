@@ -323,7 +323,7 @@ fn built_in_mochi_from_images(atlas: PetImage, extension_sheet: PetImage) -> Pet
     }
 
     PetAsset {
-        display_name: "Mochi".to_string(),
+        display_name: "Bori".to_string(),
         atlas,
         extension_atlas,
         frame_width: CELL_WIDTH,

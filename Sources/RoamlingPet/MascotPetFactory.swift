@@ -9,8 +9,8 @@ public enum BuiltInPetKind: String, CaseIterable, Codable, Sendable {
 
     public var displayName: String {
         switch self {
-        case .mochi: "Mochi"
-        case .fatMochi: "FatMochi"
+        case .mochi: "Bori"
+        case .fatMochi: "FatBori"
         }
     }
 
@@ -120,7 +120,7 @@ public enum MascotPetFactory {
         let manifest = PetManifest(
             id: BuiltInPetKind.mochi.manifestID,
             displayName: BuiltInPetKind.mochi.displayName,
-            description: "Roamling's built-in Mochi mascot.",
+            description: "Roamling's built-in Bori mascot.",
             spritesheetPath: "builtin://mochi",
             frame: PetFrameManifest(
                 width: cellWidth,
@@ -200,7 +200,7 @@ public enum MascotPetFactory {
         let manifest = PetManifest(
             id: BuiltInPetKind.mochi.manifestID,
             displayName: BuiltInPetKind.mochi.displayName,
-            description: "Roamling's built-in Mochi mascot.",
+            description: "Roamling's built-in Bori mascot.",
             spritesheetPath: "builtin://mochi",
             frame: PetFrameManifest(
                 width: cellWidth,
@@ -290,7 +290,7 @@ public enum MascotPetFactory {
         let manifest = PetManifest(
             id: BuiltInPetKind.fatMochi.manifestID,
             displayName: BuiltInPetKind.fatMochi.displayName,
-            description: "Roamling's built-in FatMochi mascot.",
+            description: "Roamling's built-in FatBori mascot.",
             spritesheetPath: "builtin://fat-mochi",
             frame: PetFrameManifest(
                 width: cellWidth,

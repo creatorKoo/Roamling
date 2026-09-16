@@ -34,7 +34,7 @@ public enum PlaceholderPetFactory {
 
         let manifest = PetManifest(
             id: "roamling-placeholder-cat",
-            displayName: "Mochi",
+            displayName: "Bori",
             description: "Roamling's license-safe, code-drawn placeholder cat.",
             spriteVersionNumber: 2,
             spritesheetPath: "procedural://mochi"

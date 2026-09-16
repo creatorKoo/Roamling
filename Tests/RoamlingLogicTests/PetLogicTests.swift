@@ -201,7 +201,7 @@ func petLogicTests() -> [LogicTest] {
             try expect(pet.resolver.resolve(.sit)?.name == "idle")
         },
         LogicTest(name: "built-in mascots load with semantic tracks") {
-            try expect(MascotPetFactory.make(images: testImages).manifest.displayName == "FatMochi")
+            try expect(MascotPetFactory.make(images: testImages).manifest.displayName == "FatBori")
             for kind in BuiltInPetKind.allCases {
                 let pet = MascotPetFactory.make(kind, images: testImages)
                 // FatMochi keeps the seven-row internal layout; Mochi ships the

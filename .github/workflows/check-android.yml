@@ -47,8 +47,11 @@ jobs:
           cargo install cargo-ndk --version 4.1.2 --locked
       - name: Rust and Kotlin bindings
         run: bash scripts/build-android-core.sh
+      - name: Native bridge contracts
+        working-directory: rust
+        run: cargo test --locked --release -p roamling-android
       - name: Debug APK and Android lint
-        run: bash android/gradlew -p android :app:assembleDebug :app:lintDebug --no-daemon
+        run: bash android/gradlew -p android :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug --no-daemon
       - name: Native 16 KB alignment
         shell: bash
         run: |

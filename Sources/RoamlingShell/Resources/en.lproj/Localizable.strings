@@ -4,6 +4,7 @@
 "menu.hide" = "Hide for Now";
 "menu.pet" = "Pet";
 "menu.pet.builtin" = "%@ (Built-in)";
+"pet.name.bori" = "Bori";
 "menu.pet.coverage" = "Animations: %1$d of %2$d";
 "menu.pet.substituted" = "Borrowed: %@";
 "menu.pet.placeholder" = "No stand-in: %@";
@@ -125,8 +126,8 @@
 "palette.rainbow" = "Rainbow";
 
 "palette.window.title" = "Roamling Colour";
-"palette.header" = "Make Mochi your own";
-"palette.footer" = "Move a slider and the Mochi on screen changes with it, and stays that way. A group you do not touch keeps the drawing exactly as it was — changing the body will not flatten the markings. To undo, press Start over, or pick Pet › Mochi › Original from the menu.";
+"palette.header" = "Make Bori your own";
+"palette.footer" = "Move a slider and the Bori on screen changes with it, and stays that way. A group you do not touch keeps the drawing exactly as it was — changing the body will not flatten the markings. To undo, press Start over, or pick Pet › Bori › Original from the menu.";
 "palette.section.marking" = "Markings";
 "palette.section.body" = "Body";
 "palette.section.eye" = "Eyes";

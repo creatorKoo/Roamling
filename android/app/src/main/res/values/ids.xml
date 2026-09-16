@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <item name="show_mochi" type="id" />
+    <item name="hide_mochi" type="id" />
+    <item name="preview_status" type="id" />
+    <item name="mochi_stage" type="id" />
+</resources>

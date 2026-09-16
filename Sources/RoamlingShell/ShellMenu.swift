@@ -116,8 +116,10 @@ public enum ShellMenu {
         for runtime: RoamlingRuntime,
         alternateHeld: Bool = false
     ) -> [MenuItem] {
+        let petName = runtime.selectedBuiltInPet.map { localizedBuiltInPetName($0) }
+            ?? runtime.petDisplayName
         var items: [MenuItem] = [
-            MenuItem(localizedFormat("menu.title", runtime.petDisplayName), .caption),
+            MenuItem(localizedFormat("menu.title", petName), .caption),
             .separator,
             MenuItem(localized("menu.hide"), .check(.toggleHidden, isOn: runtime.isHidden)),
             .separator,
@@ -236,12 +238,12 @@ public enum ShellMenu {
             // because the colours are only Mochi's.
             guard kind == .mochi else {
                 return MenuItem(
-                    localizedFormat("menu.pet.builtin", kind.displayName),
+                    localizedFormat("menu.pet.builtin", localizedBuiltInPetName(kind)),
                     .check(.selectBuiltInPet(kind), isOn: runtime.selectedBuiltInPet == kind)
                 )
             }
             return MenuItem(
-                localizedFormat("menu.pet.builtin", kind.displayName),
+                localizedFormat("menu.pet.builtin", localizedBuiltInPetName(kind)),
                 .submenu(
                     paletteItems(for: runtime, alternateHeld: alternateHeld),
                     isOn: runtime.selectedBuiltInPet == kind

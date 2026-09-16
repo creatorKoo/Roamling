@@ -2,6 +2,15 @@
 // SPDX-License-Identifier: GPL-3.0-only
 
 import Foundation
+import RoamlingPet
+
+/// Stable pet IDs are independent of the name shown in the current language.
+public func localizedBuiltInPetName(_ kind: BuiltInPetKind) -> String {
+    switch kind {
+    case .mochi: localized("pet.name.bori")
+    case .fatMochi: kind.displayName
+    }
+}
 
 /// Menu, dialog, and panel copy.
 ///

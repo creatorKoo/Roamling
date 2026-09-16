@@ -21,7 +21,7 @@ This repository contains the first working vertical slice:
 - a native AppKit menu-bar app and transparent, non-activating overlay;
 - Codex/Petdex v1 (8×9) and v2 (8×11) pet loading, plus custom animation
   definitions and graceful capability fallback;
-- two original built-in mascots, **Mochi** and **FatMochi**, with authored
+- two original built-in mascots, **Bori** and **FatBori**, with authored
   idle/walk/sleep/caught/stretch/landing animation sets, selectable from the
   menu, plus a code-drawn emergency fallback;
 - global desktop coordinates, display topology, hot-plug handling, and
@@ -92,7 +92,7 @@ $ROAMLING_PET_PATH
 
 `ROAMLING_PET_PATH` may point either to one package directory or to a directory
 containing packages. A package contains `pet.json` and the referenced PNG or
-WebP atlas. FatMochi is the default. Mochi and discovered Petdex-compatible
+WebP atlas. Bori is the default. Other built-ins and discovered Petdex-compatible
 packages can be selected from the menu, and the choice persists across launches.
 
 Claude Code integration is disabled until explicitly installed from

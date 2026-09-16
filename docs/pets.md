@@ -1,5 +1,20 @@
 # Pets: what Roamling needs, what Petdex gives, and what it borrows
 
+**표시 이름 (2026-09-17): 보리 / Bori.** 기존 `Mochi`의 표시 이름만 바꿨다.
+`BuiltInPetKind.displayName`·Rust `PetAsset.display_name`은 `Bori`를 반환하고, 한국어 메뉴는
+`pet.name.bori`를 통해 `보리`로 표시한다. 기존 `FatMochi`의 표시 이름은 `FatBori`다.
+`mochi`, `fat-mochi`, `mochi-v3`, manifest ID·설정 키·리소스 경로·FFI 이름은 호환성을 위해 유지한다.
+외부 설치 패키지는 `displayName`을 그대로 사용하며, 기존 사용자 파일을 수정하지 않는다.
+이 문서와 과거 제작 기록에서 쓰는 Mochi는 같은 자산의 이전 이름이다.
+
+검증 (2026-09-17): `scripts/test.ps1` 통과(Windows 메뉴 51개·기존 네트워크 검사 1개 ignored,
+release 빌드 포함). 외부 패키지 이름 보존과 내장 메뉴 제목은 기존 메뉴 검사에서 확인한다.
+Android ARM64·x86_64 빌드와 `assembleDebug`·`lintDebug` 통과(오류 0, 기존 `DataExtractionRules` 경고 1).
+APK 리소스에도 `Meet Bori`·`보리를 만나 보세요`가 들어 있음을 확인했다.
+macOS는 소스·기존 테스트 기대값만 수정했고 이 Windows 호스트에서 컴파일·화면 확인은 하지 못했다.
+이번 이름 수정 후 Android 실화면 검사는 재실행하지 않았다. 로그는 미추적
+`output/android-setup/bori-{windows-tests,android-native,android-gradle}.log`에 있다.
+
 `docs/architecture.md`는 모듈 경계를, `docs/art/mochi-animation-handoff.md`는 프레임을
 어떻게 그리는지를 다룬다. 이 문서는 그 사이다 — **Roamling이 요구하는 동작 목록과 펫
 패키지가 실제로 담고 있는 것 사이의 간격**, 그리고 그 간격을 무엇으로 메우는가.

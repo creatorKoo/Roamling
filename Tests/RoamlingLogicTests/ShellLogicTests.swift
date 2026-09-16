@@ -225,7 +225,7 @@ func shellLogicTests() -> [LogicTest] {
                 let titles = pets.map(\.title)
                 for kind in BuiltInPetKind.allCases {
                     try expect(
-                        titles.contains(localizedFormat("menu.pet.builtin", kind.displayName)),
+                        titles.contains(localizedFormat("menu.pet.builtin", localizedBuiltInPetName(kind))),
                         "\(kind) is not in the menu: \(titles)"
                     )
                 }
@@ -235,7 +235,7 @@ func shellLogicTests() -> [LogicTest] {
                 _ = ShellController.perform(.selectBuiltInPet(other), runtime: runtime, version: "1.2.3")
                 let after = try require(submenu(named: localized("menu.pet"), in: ShellMenu.items(for: runtime)))
                 try expect(
-                    marked(after) == [localizedFormat("menu.pet.builtin", other.displayName)],
+                    marked(after) == [localizedFormat("menu.pet.builtin", localizedBuiltInPetName(other))],
                     "picking a pet did not move the mark: \(marked(after))"
                 )
             }
@@ -502,7 +502,7 @@ func shellLogicTests() -> [LogicTest] {
                     )
                     return try require(
                         submenu(
-                            named: localizedFormat("menu.pet.builtin", BuiltInPetKind.mochi.displayName),
+                            named: localizedFormat("menu.pet.builtin", localizedBuiltInPetName(.mochi)),
                             in: pet
                         ),
                         "Mochi carries no colours: \(pet.map(\.title))"

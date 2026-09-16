@@ -400,7 +400,12 @@ unsafe fn build(state: &MenuState) -> Option<HMENU> {
         let checked = |on: bool| if on { MF_CHECKED } else { MF_UNCHECKED };
         let separator = |menu| AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
 
-        caption(menu, &localized_format("menu.title", &[&state.pet_name]));
+        let pet_name = if state.built_in {
+            localized("pet.name.bori")
+        } else {
+            &state.pet_name
+        };
+        caption(menu, &localized_format("menu.title", &[pet_name]));
         let _ = separator(menu);
         let hide_label = wide(localized("menu.hide"));
         let _ = AppendMenuW(
@@ -414,7 +419,7 @@ unsafe fn build(state: &MenuState) -> Option<HMENU> {
         // Pet. Only the built-in for now -- installed packages arrive with the
         // catalogue -- but the coverage lines are real, read off the resolver.
         if let Ok(pets) = CreatePopupMenu() {
-            let label = localized_format("menu.pet.builtin", &["Mochi"]);
+            let label = localized_format("menu.pet.builtin", &[localized("pet.name.bori")]);
             if let Ok(colours) = CreatePopupMenu() {
                 for (index, (key, _)) in roamling_pet::built_in_mochi_presets().iter().enumerate() {
                     let label = wide(localized(key));
@@ -650,7 +655,7 @@ mod tests {
 
     fn state() -> MenuState {
         MenuState {
-            pet_name: "Mochi".into(),
+            pet_name: "Bori".into(),
             covered: 14,
             total: 16,
             substituted: vec!["sit".into()],
@@ -780,17 +785,27 @@ mod tests {
             for custom in [false, true] {
                 let mut state = state();
                 state.built_in = built_in;
+                state.pet_name = "Guest Mochi".into(); // External package names must remain unchanged.
                 state.palette = Some(1); // Black, as restored from settings.
                 state.palette_custom = custom;
                 let menu = unsafe { build(&state) }.unwrap();
                 unsafe {
+                    let mut caption = [0u16; 128];
+                    let length = GetMenuStringW(menu, 0, Some(&mut caption), MF_BYPOSITION);
+                    let name = if built_in {
+                        localized("pet.name.bori")
+                    } else {
+                        &state.pet_name
+                    };
+                    assert_eq!(String::from_utf16_lossy(&caption[..length as usize]),
+                        localized_format("menu.title", &[name]));
                     let pets = GetSubMenu(menu, 4);
                     let mochi = GetSubMenu(pets, 0);
                     assert!(!mochi.is_invalid());
                     let mut title = [0u16; 128];
                     let length = GetMenuStringW(pets, 0, Some(&mut title), MF_BYPOSITION);
                     assert_eq!(String::from_utf16_lossy(&title[..length as usize]),
-                        localized_format("menu.pet.builtin", &["Mochi"]));
+                        localized_format("menu.pet.builtin", &[localized("pet.name.bori")]));
                     let presets = roamling_pet::built_in_mochi_presets();
                     assert_eq!(GetMenuItemCount(mochi) as usize,
                         presets.len() + if custom { 2 } else { 0 });

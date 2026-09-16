@@ -1,6 +1,9 @@
 # Android 첫 프로젝트 방향
 
-**상태: A0 Windows 구현·실행 검증 완료, macOS·사용자 확인 대기 (2026-09-16).** 첫 사용 대상은 아내분의 Android
+**이름 변경 (2026-09-17):** 현재 UI의 이름은 `보리 / Bori`다. `MochiImages`·`MochiOverlay` 같은
+내부 식별자는 유지한다. 아래 2026-09-16 검증 기록과 당시 캡처의 모치는 같은 마스코트의 이전 이름이다.
+
+**상태: A1 Windows 구현·에뮬레이터 검증 완료, 사용자 화면 확인 대기 (2026-09-16).** A0 macOS 검증은 별도 잔여 항목이다. 첫 사용 대상은 아내분의 Android
 휴대전화다. 데스크톱판의 모든 기능을 옮기기보다, 먼저 모치가 휴대전화 안에서 살아 있는 것처럼
 보이게 한다.
 
@@ -61,7 +64,7 @@ Windows는 rlib 직결(`rust/roamling-core/Cargo.toml:11`의 `crate-type`), **An
 튜닝값은 사용자가 눈으로 보고 닫은 것이라 다시 쓰면 그 눈을 다시 빌려야 한다. 그 판단의 기록이
 `docs/history/windows.md` 3절이고, 언어를 바꾸자는 논의를 시작하기 전에 읽을 문서도 그것이다.
 
-seam의 정본 표는 `docs/architecture.md`의 "플랫폼 seam" 절에 있다. Android A0 열은
+seam의 정본 표는 `docs/architecture.md`의 "플랫폼 seam" 절에 있다. Android 열은
 현재 단발성 틱 코드만 적고, 아래의 첫 판 표는 이후 게이트까지 포함한 계획이다.
 
 ## 무엇이 어디에 사나
@@ -69,11 +72,11 @@ seam의 정본 표는 `docs/architecture.md`의 "플랫폼 seam" 절에 있다. 
 ```text
 rust/roamling-android/   새 크레이트. cdylib 하나(libroamling_android.so).
                          roamling-core + roamling-pet에 의존하고 자기 uniffi scaffolding을
-                         갖는다. A0는 default_tuning, A1에서 아래 두 이미지 표면 추가
+                         갖는다. default_tuning, MascotAtlas, Player를 노출한다.
 android/                 Gradle 프로젝트. 모듈 둘
   core/                  생성된 Kotlin 바인딩(미추적) + jniLibs/<abi>/*.so + JNA
-  app/                   A0: debug 전용 CoreSmokeActivity. 이후 권한 화면, 오버레이 View,
-                         foreground service, 알림, 잠금 수신기, 틱 루프, 설정
+  app/                   A0: debug 전용 CoreSmokeActivity. A1: MainActivity 권한 화면과
+                         MochiOverlay 미리보기. 서비스·알림·걷기 틱 루프는 다음 단계.
 scripts/build-android-core.sh    build-rust-core.sh의 형제
 scripts/build-android-core.ps1   같은 산출물을 내는 Windows 쪽 (개발 환경 절)
 ```
@@ -115,7 +118,34 @@ A0에서는 기존 코어의 의존·FFI 표면을 보존하고 Android에 업�
 - Windows·macOS/Linux 빌드 스크립트와 Linux APK 빌드 CI를 함께 추가한다.
   이 Windows에서의 성공과 macOS 실측, 사용자 확인은 별도로 기록한다.
 
-## Kotlin이 채우는 것
+### A1 구현 흐름 — 사용자 "커밋하고 다음으로 가자" 승인
+
+이번 범위는 권한 화면과 실제 `TYPE_APPLICATION_OVERLAY` 창에 기존 Mochi idle을 표시하는
+미리보기다. A3의 foreground service 전이므로 **Activity가 보이는 동안만** 표시하고,
+홈·뒤로가기·잠금으로 Activity가 멈추면 창과 애니메이션 콜백을 제거한다.
+
+1. `MainActivity`: 표시 버튼 → `Settings.canDrawOverlays` 확인 → 없으면 Android 설정으로 이동.
+   돌아오면 권한을 다시 확인한다. 거절·설정 화면 없음은 앱 안에서 설명하며 계속 재요청하지 않는다.
+2. `MascotAtlas` (`rust/roamling-android/src/lib.rs`): `built_in_mochi()`를 한 번 디코딩해 보유한다.
+   배경 스레드에서 바인딩을 통해 두 시트를 받는다. `PetImage`는 **이미 premultiplied RGBA8**이다
+   (`rust/roamling-core/src/pet_image.rs::PetImage`). 초기 계획의 straight-alpha 가정은 정정한다.
+3. `MochiImages`: Android `ARGB_8888` bitmap에 `copyPixelsFromBuffer`로 바이트를 복사한다.
+   alpha를 다시 곱하거나 `setPixels`로 이중 변환하지 않는다. 작은 합성 픽셀 검사로 색·alpha를 확인한다.
+4. `Player`: 기존 `AnimationResolver`·`PetAnimationPlayer`를 감싸 프레임의 시트와 사각형을 반환한다.
+   Kotlin에 트랙 이름·프레임 시간표를 복사하지 않는다. A1은 초기 idle만 재생하고 위치는 고정한다.
+5. `MochiOverlay`: 투명한 96×104 dp 창, 초점·터치 미획득, bitmap 필터링 없이 그린다.
+   system bar·cutout insets 안에 배치한다. 숨기기·Activity 중단·회전 시 이전 창과 콜백을 정리한다.
+   화면 회전 후 표시 의도를 복원하되 권한은 다시 검사한다. 잠금 위에 남기지 않는다.
+
+UI 문구는 `android/app/src/main/res/values{,-ko}/strings.xml`에 같은 키로 둔다.
+걷기·드래그·잠금 뒤 자동 복귀·상시 서비스는 A2/A3 범위다. macOS와 Samsung 실측은 별도로 남긴다.
+공식 근거: [overlay 권한](https://developer.android.com/reference/android/provider/Settings#ACTION_MANAGE_OVERLAY_PERMISSION),
+[창 종류](https://developer.android.com/reference/android/view/WindowManager.LayoutParams#TYPE_APPLICATION_OVERLAY),
+[bitmap 복사](https://developer.android.com/reference/android/graphics/Bitmap#copyPixelsFromBuffer(java.nio.Buffer)).
+
+## Kotlin이 채우는 것 — 첫 판 계획
+
+아래 표는 A2/A3까지 포함한다. A1의 실제 구현은 위 구현 흐름과 `docs/architecture.md`의 표를 따른다.
 
 런타임이 기계에 닿는 통로는 `PlatformServices` 하나이고(`Sources/RoamlingEngine/
 PlatformServices.swift:54-71`), 자리는 열하나다(`docs/architecture.md:586-629`). Android는 그중
@@ -131,7 +161,7 @@ PlatformServices.swift:54-71`), 자리는 열하나다(`docs/architecture.md:586
 | focus | `focus_authorized=false`, `did_query_focus=false`, `queried_focus=null` | 스텁 |
 | capture | `capture_authorized=false`, 휘도 없음 | 스텁 |
 | window | 빈 목록 | 스텁 |
-| overlay | `TYPE_APPLICATION_OVERLAY` + `FLAG_NOT_FOCUSABLE` + `FLAG_LAYOUT_NO_LIMITS` 창 하나를 `LayoutParams.x/y`로 옮긴다 | 채움 |
+| overlay | `TYPE_APPLICATION_OVERLAY` + `FLAG_NOT_FOCUSABLE` + `FLAG_LAYOUT_IN_SCREEN` 창 하나를 insets 안에서 `LayoutParams.x/y`로 옮긴다 | 채움 |
 | images | `MascotAtlas`의 RGBA8 → `Bitmap`(ARGB_8888) | 채움 |
 | coordinateSpace | px ÷ density. y 뒤집기 없음 | 채움 |
 
@@ -166,25 +196,31 @@ PlatformServices.swift:54-71`), 자리는 열하나다(`docs/architecture.md:586
 **전면 앱 식별(focus)과 화면 캡처는 첫 판에서 안 한다.** UsageStats·접근성·MediaProjection 권한이
 필요하고, 첫 판의 제외 목록("기존 프로젝트에서 가져올 것")에 이미 들어 있다.
 
-## roamling-android가 노출할 것 — A1 계획
+## roamling-android가 노출하는 것 — A1 구현
 
 `ffi.rs`에는 애니메이션이 없다 — `AnimationResolver`(`rust/roamling-core/src/animation.rs:297`)와
 `PetAnimationPlayer`(`animation.rs:446`)는 uniffi로 나가 있지 않고, 내장 마스코트는 uniffi가 없는
-`roamling-pet`에 있다. A0의 `default_tuning()`에 이어 새 크레이트가 감쌀 것은 아래 둘이다.
+`roamling-pet`에 있다. A0의 `default_tuning()`에 이어 새 크레이트가 감싸는 것은 아래 둘이다
+(`rust/roamling-android/src/lib.rs`).
 
 - **`MascotAtlas`** — `built_in_mochi()`(`rust/roamling-pet/src/lib.rs:211`)를 감싸 표준·확장 시트
-  각각의 `width`/`height`/`rgba`, `frame_width`·`frame_height`(192×208, `lib.rs:112-113`),
-  `columns`(8, `lib.rs:114`), `frame_rect(index)`(`lib.rs:75`)를 준다. 아틀라스는
+  각각의 `FfiPetImage`(width·height·premultiplied RGBA8)와 `AtlasFrame`(시트·사각형)을 준다.
+  프레임 배치는 기존 `PetAsset::frame_rect`에 위임한다. 아틀라스는
   `include_bytes!`로 `.so` 안에 들어가므로(`lib.rs:122-125`) **APK에 에셋을 따로 넣지 않는다.**
   리컬러(`lib.rs:226`)는 첫 판 제외이고 나중 게이트다.
 - **`Player`** — 위 둘과 `PetAsset.tracks`(`rust/roamling-pet/src/lib.rs:51-65`)를 감싸,
-  Kotlin은 매 틱 capability와 delta를 주고 **프레임 번호만** 받는다. delta는
-  `TickOutput.delta_time`에 `locomotion_rate`를 곱한 값이다
-  (`rust/roamling-core/src/pet_runtime.rs:135-144`의 주석). **capability→track 해석은 Rust가 한다** —
+  Kotlin은 capability와 delta를 주고 **시트와 프레임 사각형만** 받는다. A1은 idle capability와
+  `Choreographer`의 경과 시간을 사용한다. A2의 이동 틱에서는 `TickOutput.delta_time`에
+  `locomotion_rate`를 곱할 예정이다(`rust/roamling-core/src/pet_runtime.rs:135-144`의 주석).
+  **capability→track 해석은 Rust가 한다** —
   Kotlin이 트랙 이름을 알기 시작하면 `docs/state-contract.md`의 층 구조를 셸이 깰 수 있다.
-- 둘 다 `PetLoop`(`ffi.rs:1602-1604`)과 같은 관용구다: `Mutex` 안의 상태를 uniffi 객체가 감싼다.
+- `MascotAtlas`는 불변 에셋을 소유한다. `Player`는 `Arc<MascotAtlas>`와 resolver를 보유하고,
+  변하는 `PetAnimationPlayer`만 `Mutex`로 감싼다. 잘못된 capability·음수·비유한 delta는 상태 변경 없이 거부한다.
 
-## 틱과 생명주기
+## 틱과 생명주기 — A2/A3 계획
+
+A1은 `MochiOverlay`의 `Choreographer` 콜백에서 idle 프레임만 진행하고, 프레임이 바뀔 때만
+다시 그린다. 아래의 `PetLoop` 주기·서비스·잠금 복귀는 아직 구현하지 않았다.
 
 ```text
 Service 시작    PetLoop.new(저장된 자리 또는 화면 중앙, 기본 FfiTuning, seed)   ffi.rs:1609
@@ -269,7 +305,7 @@ adb -s "$serial" logcat -d -s RoamlingA0:I '*:S' | grep "$smoke_token"
 - Gradle wrapper는 커밋한다. `gradlew`는 LF여야 하므로 `.gitattributes`에 `gradlew text eol=lf`
   한 줄을 둔다 — Windows checkout이 CRLF로 바꾸면 다른 호스트에서 깨진다.
 - CI는 `.github/workflows/check-android.yml` 하나를 **ubuntu-latest**에 둔다(NDK가 러너 이미지에
-  있고 셋 중 제일 싸다). `cargo ndk` 빌드, Gradle `assembleDebug`·`lintDebug`, APK 안의 네이티브
+  있고 셋 중 제일 싸다). `cargo ndk` 빌드, 브리지 Rust 테스트, Gradle `assembleDebug`·`assembleDebugAndroidTest`·`lintDebug`, APK 안의 네이티브
   라이브러리 4개 및 16 KB ELF·ZIP 정렬을 확인한다. 에뮬레이터 실행 검사는 로컬에서 한다. 릴리스 워크플로에는 첫 판에서
   넣지 않는다. 로컬에서 Rust 표면만 빠르게 확인하려면 `rust/`에서
   `cargo check -p roamling-android`를 실행한다. NDK 링크·APK·실행 검사는 대신하지 못한다.
@@ -375,7 +411,7 @@ SHA-256과 비교했고, SDK 패키지는 [sdkmanager](https://developer.android
 IDE 첫 실행과 실제 창에서의 조작 확인은 남아 있다. macOS 환경과 Samsung One UI 실기기는
 미검증이다. A0의 Gradle·Rust 연결 작업은 환경 준비 다음 단계다.
 
-### A0 Windows 검증 결과 — 2026-09-16
+### A0 Windows 검증 결과 — 2026-09-16, 커밋 e3a4d45 당시
 
 `scripts/build-android-core.ps1`의 최종 경로가 host 바인딩 생성과 ARM64·x86_64 빌드를 모두 통과했다.
 `android/gradlew.bat -p android :app:assembleDebug --no-daemon`으로 debug APK를 만들었다.
@@ -401,7 +437,7 @@ IDE 첫 실행과 실제 창에서의 조작 확인은 남아 있다. macOS 환�
 APK: `android/app/build/outputs/apk/debug/app-debug.apk` (미추적).
 로그: `output/android-setup/a0-{native-final,apk-build,smoke,lint,windows-tests}.log` (미추적).
 
-macOS에서 비교할 Windows 생성 Kotlin SHA-256은 아래와 같다. macOS에서 같은 소스로 생성한 뒤
+이 A0 커밋에서 생성한 Windows Kotlin SHA-256은 아래와 같다. macOS에서 같은 소스로 생성한 뒤
 `shasum -a 256 android/core/src/main/kotlin/uniffi/*/*.kt`로 비교한다.
 
 ```text
@@ -410,7 +446,58 @@ roamling_core.kt     d43e8f8e0df9d48f26916f145ee7ab058c2b81f263b398657352c271c85
 ```
 
 **A0 전체 게이트는 아직 열려 있다.** macOS 빌드·생성물 비교와 사용자 확인이 남았다.
-Samsung One UI, ARM64 실기기와 A1의 모치 표시는 이번 검사에 포함되지 않는다.
+Samsung One UI, ARM64 실기기와 A1의 모치 표시는 A0 검사에 포함되지 않는다.
+
+### A1 Windows 검증 결과 — 2026-09-16
+
+A0를 `e3a4d45`로 커밋한 뒤 사용자의 "커밋하고 다음으로 가자" 승인으로 A1을 진행했다.
+A0의 macOS 항목을 완료로 간주하지 않으며, A1도 사용자 화면 확인은 남아 있다.
+`MainActivity`·`MochiImages`·`MochiOverlay`가 구현 위치다. 아이콘은 기존 `assets/Roamling.ico`의
+256px PNG 항목을 그대로 가져왔고, 모치 원본 그림·코어 행동·fixture·trace는 변경하지 않았다.
+
+- `scripts/build-android-core.ps1 -Jobs 2`: host 바인딩 생성·ARM64·x86_64 네이티브 빌드 성공.
+  `cargo test --locked --release -p roamling-android --jobs 2`: 2개 통과. 기존 player와 모든 capability의
+  프레임 진행을 비교하고, 잘못된 입력·프레임 경계·premultiplied 픽셀을 검증한다.
+- Gradle `assembleDebug`·`assembleDebugAndroidTest`·`lintDebug` 통과. lint 오류 0, 경고 1:
+  `DataExtractionRules`는 저장 설정을 붙일 때 남은 항목이다. 현재 앱은 사용자 설정을 저장하지 않는다.
+- Android 17 / API 37 / 16KB 페이지의 x86_64 에뮬레이터에서 `PreviewTest` 2개 통과.
+  합성 픽셀의 RGBA 채널·반투명 alpha, 실제 창 표시와 버튼 상태, 두 번의 표시/숨김,
+  Activity 재생성·가로 회전·홈 이동 시 창 정리를 확인했다. 세로·가로 캡처도 눈으로 확인했다.
+  최초 캡처에서 발견한 창 attach 후 버튼 상태 갱신 지연을 수정하고 검사를 다시 통과했다.
+  애니메이션도 창 attach 뒤 시작하도록 순서를 맞췄으며, stage 영역의 실제 화면 픽셀이
+  시간에 따라 바뀌는 검사로 idle 진행을 확인한다.
+- 실제 Android 설정 UI에서도 권한을 주지 않고 돌아오면 안내와 비활성 숨김 버튼을 유지하고,
+  권한을 켠 뒤 돌아오면 자동으로 창이 뜨고 숨김 버튼이 활성화되는 것을 확인했다.
+- A1 APK로 `scripts/test-android.ps1` 재실행: 현재 token의 `A0 PASS`와 유한 좌표 확인.
+  APK의 네이티브 라이브러리 4개 모두 ELF LOAD 정렬 `0x4000`, `zipalign -c -P 16 4` 통과.
+- `scripts/test.ps1` 최종 재실행 통과: 공통 Rust·차등 fixture, Windows 51개 통과·기존 1개 ignored,
+  release 빌드 성공. 첫 실행은 기존 `windows_hook_shells`의 PowerShell stdin 검사에서
+  비차단 소켓 `WouldBlock(10035)`로 실패했으며, 해당 코드·테스트 변경 없이 전체 검사를 한 번 재실행했다.
+- 계측 검사 스크립트는 임시 overlay app-op을 실행 전 모드로 복구했다. 최종 테스트 AVD에는
+  실제 설정 UI 검사에서 승인한 오버레이 권한이 남아 있다(`allow`). 앱 언어는 기존 빈 목록으로 복구했다.
+  창 없는 에뮬레이터를 종료하고 원래의 설치본 데스크톱 펫을 복원했다.
+
+재현은 부팅된 **명시적인 에뮬레이터 serial**로만 한다. 아래 검사는 두 APK를 설치하고 임시로
+오버레이 app-op을 허용한 뒤 `finally`에서 앱 종료·기존 모드 복구를 수행한다.
+
+```powershell
+.\android\gradlew.bat -p android :app:assembleDebug :app:assembleDebugAndroidTest :app:lintDebug --no-daemon
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-android-preview.ps1 -Serial emulator-5580
+```
+
+APK: `android/app/build/outputs/apk/debug/app-debug.apk`.
+캡처: `output/android-setup/a1-preview.png`, `output/android-setup/a1-preview-landscape.png`.
+로그: `output/android-setup/a1-{native,bridge-tests,gradle-final,instrumentation,a0-regression,windows-tests-recheck}.log`.
+산출물은 모두 미추적이다. 현 A1 소스에서 생성한 Windows Kotlin SHA-256:
+
+```text
+roamling_android.kt  6d058658ccce8fd8dde5398162147d8ed5ac3ffd0ae44a7d391abacc126c3590
+roamling_core.kt     d43e8f8e0df9d48f26916f145ee7ab058c2b81f263b398657352c271c857117a
+```
+
+macOS 빌드·동일 소스의 바인딩 비교, ARM64 실행, Samsung One UI, 실기기 디코드 시간과 배터리는 미검증이다.
+CI에 브리지 검사와 계측 APK 빌드를 추가했으나 원격 CI 실행은 하지 않았다.
+다른 앱을 사용하는 동안의 상시 표시·걷기·드래그·잠금 뒤 자동 복귀는 A1 범위에 포함되지 않는다.
 
 ## 게이트
 
@@ -438,7 +525,7 @@ Samsung One UI, ARM64 실기기와 A1의 모치 표시는 이번 검사에 포�
 - macOS에서 같은 소스의 빌드·Kotlin 바인딩 일치 확인 (A0). Windows의 두 컴포넌트 생성·실행과
   cargo-ndk의 16 KB rustflags 반영은 위 결과로 확인했다.
 - Windows에서 NDK 경로의 공백·한글 문제. 현재 `C:\Android\sdk` 경로만 실측했다.
-- straight alpha RGBA8을 Android `Bitmap`에 넣을 때의 premultiply 처리 (A1).
+- premultiplied RGBA8의 Android `Bitmap` 채널·alpha 처리는 A1 합성 픽셀 테스트와 화면으로 확인했다.
 - `image` 크레이트의 WebP 디코드가 휴대전화 CPU에서 얼마나 걸리는지 (A1). **데스크톱 수치를
   그대로 옮기지 않는다** — 맥에서 잰 것은 시트 한 장 디코드 24.09 ms(Rust native)이고,
   거기에 uniffi를 건너면 39.37 ms가 된다. **그 차이 15.3 ms는 디코드가 아니라 11.5 MB가 FFI를

@@ -21,6 +21,7 @@ android {
         targetSdk = 37
         versionName = appVersion
         versionCode = major * 1_000_000 + minor * 1_000 + patch
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
     compileOptions {
@@ -29,4 +30,9 @@ android {
     }
 }
 
-dependencies { implementation(project(":core")) }
+dependencies {
+    implementation(project(":core"))
+    androidTestImplementation("androidx.test:runner:1.7.0")
+    androidTestImplementation("androidx.test:core:1.7.0")
+    androidTestImplementation("junit:junit:4.13.2")
+}
