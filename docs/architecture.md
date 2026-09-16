@@ -583,7 +583,7 @@ frame swap에 scene graph가 필요하지 않다. particle/effect가 복잡해�
 failure 전용 fallback이다. 이 내부 atlas는 third-party asset license에 의존하지 않으며
 Petdex loader는 사용자 package와 fixtures로 계속 검증한다.
 
-## 플랫폼 seam — 양쪽이 다 채워져 있다
+## 플랫폼 seam — 데스크톱 두 구현과 Android A0
 
 **이 절은 한때 "Windows 쪽에서 채울 자리"였다. 2026-09-04에 W7까지 닫히면서 양 플랫폼이
 같은 seam을 실제로 채웠고, 마지막 게이트 W8(지정 앱 source의 Windows 배선)도 2026-09-12에
@@ -627,3 +627,23 @@ Game/media도 동일하다. official telemetry/local event를 먼저 쓰며 occa
 detection은 opt-in fallback이다. injection, process memory, anti-cheat-sensitive hook은
 Roamling의 관찰자 모델과 맞지 않아 금지한다. 붙일 때의 상태 낱말은
 `docs/state-sources.md`가 이미 자리를 잡아 뒀다.
+
+Android A0는 `android/app/src/debug/kotlin/io/github/creatorkoo/roamling/CoreSmokeActivity.kt`
+의 단발성 호출이다. 아래 셋째 열은 현재 코드만 적으며 전체 오버레이 계획은 `docs/android.md`에 있다.
+
+| 자리 | macOS | Windows | Android A0 |
+|---|---|---|---|
+| display | `NSScreen` | `EnumDisplayMonitors` | `currentWindowMetrics`에서 system bar·cutout insets를 뺀 경계 |
+| displayChanges | 화면 변경 구독 | 메시지 루프 | 없음 — 한 틱만 실행 |
+| safeZone | visible frame | `rcWork` | 별도 목록 없음 — display에 insets 적용 |
+| pointer | `NSEvent` | `GetCursorPos` | 화면 밖 상수, 버튼 false — 터치 없음 |
+| userIdle | `CGEventSource` | `GetLastInputInfo` | 0 — 지속 런타임에 사용할 구현 아님 |
+| focus | AX | `GetGUIThreadInfo` | 권한 false, 쿼리 없음 |
+| capture | ScreenCaptureKit | Desktop Duplication | 권한 false, 휘도 없음 |
+| window | CGWindow/AX | HWND/Win32 | 없음 |
+| overlay | NSPanel | layered window | 없음 — Activity가 로그 후 종료 |
+| images | AppKit bitmap | DIB | 없음 — A1 범위 |
+| coordinateSpace | world 변환 | DPI로 나눔 | px ÷ density, y 아래 방향 |
+
+Kotlin → JNA → `libroamling_android.so` 안의 UniFFI → 기존 `PetLoop` 순서다.
+`rust/roamling-android/src/lib.rs::default_tuning`은 코어 기본값을 내보내며 행동을 복제하지 않는다.

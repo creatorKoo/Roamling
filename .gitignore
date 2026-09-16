@@ -18,3 +18,11 @@ Sources/RoamlingCoreRs/*
 
 Sources/CRoamlingCoreFFI/*
 !Sources/CRoamlingCoreFFI/README.md
+
+# Android local state and generated UniFFI/native artifacts.
+android/.gradle/
+android/.kotlin/
+android/.idea/
+android/local.properties
+android/core/src/main/kotlin/
+android/core/src/main/jniLibs/

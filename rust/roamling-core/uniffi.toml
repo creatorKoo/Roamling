@@ -1,0 +1,8 @@
+# SPDX-FileCopyrightText: 2026 GooBeom Jeoung
+# SPDX-License-Identifier: GPL-3.0-only
+[bindings.kotlin]
+android = true
+
+[bindings.kotlin.rename]
+# Keep the existing Rust/Swift name; JNA imports its own Pointer in Kotlin.
+Pointer = "PointerInteraction"

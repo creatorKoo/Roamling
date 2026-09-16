@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: 2026 GooBeom Jeoung
+# SPDX-License-Identifier: GPL-3.0-only
+[package]
+name = "roamling-android"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Android's shared native library and UniFFI entry points."
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+roamling-core = { path = "../roamling-core" }
+# The atlas/player seam will use this in A1; no Android types enter Rust.
+roamling-pet = { path = "../roamling-pet" }
+uniffi = "0.32"

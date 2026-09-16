@@ -11,3 +11,11 @@
 # macOS is untouched: this is keyed to the MSVC target.
 [target.x86_64-pc-windows-msvc]
 rustflags = ["-C", "target-feature=+crt-static"]
+
+# Android's 16 KB page-size devices load the same libraries as 4 KB devices.
+# Keep this target-scoped so host builds retain their existing linker flags.
+[target.aarch64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]
+
+[target.x86_64-linux-android]
+rustflags = ["-C", "link-arg=-Wl,-z,max-page-size=16384"]

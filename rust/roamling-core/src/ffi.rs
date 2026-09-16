@@ -1,9 +1,9 @@
 // SPDX-FileCopyrightText: 2026 GooBeom Jeoung
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! What the Swift shell calls while the port is under way.
+//! Shared boundary for the Swift and Kotlin shells.
 //!
-//! Only macOS crosses this boundary; the Windows shell links the crate and
+//! macOS and Android cross this boundary; the Windows shell links the crate and
 //! calls the same functions directly. Kept coarse on purpose -- one call with a
 //! whole world rather than a call per rectangle, which is the shape that
 //! measured 0.03% of a frame in `docs/history/windows.md` section 12.

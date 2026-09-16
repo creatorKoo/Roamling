@@ -1,6 +1,6 @@
 # Android 첫 프로젝트 방향
 
-**상태: 설계 초안 (2026-09-14) · 구현 시작 전.** 첫 사용 대상은 아내분의 Android
+**상태: A0 Windows 구현·실행 검증 완료, macOS·사용자 확인 대기 (2026-09-16).** 첫 사용 대상은 아내분의 Android
 휴대전화다. 데스크톱판의 모든 기능을 옮기기보다, 먼저 모치가 휴대전화 안에서 살아 있는 것처럼
 보이게 한다.
 
@@ -61,19 +61,19 @@ Windows는 rlib 직결(`rust/roamling-core/Cargo.toml:11`의 `crate-type`), **An
 튜닝값은 사용자가 눈으로 보고 닫은 것이라 다시 쓰면 그 눈을 다시 빌려야 한다. 그 판단의 기록이
 `docs/history/windows.md` 3절이고, 언어를 바꾸자는 논의를 시작하기 전에 읽을 문서도 그것이다.
 
-seam의 정본 표는 `docs/architecture.md:586-629`에 있고 지금은 macOS·Windows 두 열뿐이다.
-**세 번째 열은 A0에서 더한다** — 코드가 생기기 전에 적으면 그 표가 그날부터 거짓이다.
+seam의 정본 표는 `docs/architecture.md`의 "플랫폼 seam" 절에 있다. Android A0 열은
+현재 단발성 틱 코드만 적고, 아래의 첫 판 표는 이후 게이트까지 포함한 계획이다.
 
 ## 무엇이 어디에 사나
 
 ```text
 rust/roamling-android/   새 크레이트. cdylib 하나(libroamling_android.so).
                          roamling-core + roamling-pet에 의존하고 자기 uniffi scaffolding을
-                         갖는다. core에 없는 둘만 노출한다
+                         갖는다. A0는 default_tuning, A1에서 아래 두 이미지 표면 추가
 android/                 Gradle 프로젝트. 모듈 둘
   core/                  생성된 Kotlin 바인딩(미추적) + jniLibs/<abi>/*.so + JNA
-  app/                   Kotlin 셸: 권한 화면, 오버레이 View, foreground service, 알림,
-                         잠금 수신기, 틱 루프, 설정(SharedPreferences)
+  app/                   A0: debug 전용 CoreSmokeActivity. 이후 권한 화면, 오버레이 View,
+                         foreground service, 알림, 잠금 수신기, 틱 루프, 설정
 scripts/build-android-core.sh    build-rust-core.sh의 형제
 scripts/build-android-core.ps1   같은 산출물을 내는 Windows 쪽 (개발 환경 절)
 ```
@@ -93,8 +93,27 @@ default set 밖이라 **태그 푸시 전까지 아무도 빌드하지 않던** 
 (`.github/workflows/check-windows.yml` 서문)을 이쪽에는 만들지 않는다. NDK 타겟 크로스 빌드만
 스크립트와 CI가 한다.
 
-**`roamling-agent`·`roamling-update`는 링크하지 않는다.** 첫 판에 agent 연동도 자동 업데이트도
-없다("첫 판에 넣을 것"). 배포는 APK 설치(adb 또는 파일)로 대신한다.
+**`roamling-agent`와 업데이터를 Android 셸에서 사용하지 않는다.** `roamling-core/Cargo.toml`에
+이미 `roamling-update` 의존이 있으므로 간접 의존까지 없다는 초기 초안은 정정한다.
+A0에서는 기존 코어의 의존·FFI 표면을 보존하고 Android에 업데이트 호출 경로를 만들지 않는다.
+배포는 APK 설치(adb 또는 파일)로 대신한다.
+
+### A0 구현 범위
+
+- `roamling-android`는 자체 scaffolding과 코어 scaffolding을 한 라이브러리로 내보낸다.
+  Kotlin에 튜닝 기본값을 복사하지 않도록 `default_tuning()`만 새 표면으로 추가한다.
+  `MascotAtlas`·`Player`는 A1에 남긴다. A0에서 이미지 디코딩·표시는 하지 않는다.
+- `android/core`는 생성된 두 Kotlin 패키지와 두 ABI의 `.so` 및 JNA를 묶는다.
+  `android/app`의 최소 Activity가 코어의 `PetLoop`를 만들고 디스플레이를 설정한 뒤
+  `begin_tick` → `finish_tick`을 한 번 호출해 유한한 x/y를 검증하고 로그를 남긴 후 종료한다.
+  오버레이 권한·서비스·지속 타이머는 아직 없다.
+- 휘도 요청은 캡처 실행 자체가 아니다. 코어의 `request_luminance`는 요청을 반환하고
+  Windows도 `refresh_luminance`에서 opt-in 여부를 검사한다. Android A0는 캡처 API를 호출하지
+  않으며 반환된 요청은 처리하지 않는다. 권한 false이면 요청 목록도 비어야 한다는 검사는 잘못된 계약이다.
+- Android 11(API 30)을 최소로 두고, 설치된 SDK 37.1로 컴파일한다. `currentWindowMetrics`의
+  insets를 뺀 경계를 dp로 변환한다. 앱 버전은 Rust workspace의 버전에서 읽는다.
+- Windows·macOS/Linux 빌드 스크립트와 Linux APK 빌드 CI를 함께 추가한다.
+  이 Windows에서의 성공과 macOS 실측, 사용자 확인은 별도로 기록한다.
 
 ## Kotlin이 채우는 것
 
@@ -147,11 +166,11 @@ PlatformServices.swift:54-71`), 자리는 열하나다(`docs/architecture.md:586
 **전면 앱 식별(focus)과 화면 캡처는 첫 판에서 안 한다.** UsageStats·접근성·MediaProjection 권한이
 필요하고, 첫 판의 제외 목록("기존 프로젝트에서 가져올 것")에 이미 들어 있다.
 
-## roamling-android가 노출하는 것
+## roamling-android가 노출할 것 — A1 계획
 
 `ffi.rs`에는 애니메이션이 없다 — `AnimationResolver`(`rust/roamling-core/src/animation.rs:297`)와
 `PetAnimationPlayer`(`animation.rs:446`)는 uniffi로 나가 있지 않고, 내장 마스코트는 uniffi가 없는
-`roamling-pet`에 있다. 새 크레이트가 감싸는 것은 그 둘뿐이다.
+`roamling-pet`에 있다. A0의 `default_tuning()`에 이어 새 크레이트가 감쌀 것은 아래 둘이다.
 
 - **`MascotAtlas`** — `built_in_mochi()`(`rust/roamling-pet/src/lib.rs:211`)를 감싸 표준·확장 시트
   각각의 `width`/`height`/`rgba`, `frame_width`·`frame_height`(192×208, `lib.rs:112-113`),
@@ -195,21 +214,46 @@ USER_PRESENT    set_hidden(false), 창 다시 붙임, 저장된 자리에서 재
 ## 빌드·버전
 
 ```sh
-./scripts/build-android-core.sh          # macOS
+bash scripts/build-android-core.sh       # macOS/Linux
+bash android/gradlew -p android :app:assembleDebug --no-daemon
 ```
 
 ```powershell
-.\scripts\build-android-core.ps1         # Windows
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\build-android-core.ps1
+.\android\gradlew.bat -p android :app:assembleDebug --no-daemon
+# 부팅한 에뮬레이터의 실제 serial을 adb devices로 확인한 뒤:
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\test-android.ps1 -Serial emulator-5580
 ```
 
-둘 다 같은 일을 한다 — `cargo ndk -t arm64-v8a -t x86_64 -o android/core/src/main/jniLibs build
---release -p roamling-android`로 ABI별 `.so`를 놓고, 이어서 같은 `uniffi-bindgen`
-(`rust/roamling-core/src/bin/uniffi-bindgen.rs`)을 `--language kotlin`으로 부른다.
+APK는 `android/app/build/outputs/apk/debug/app-debug.apk`에 생긴다. A0에는 런처 아이콘이
+없으며 debug 전용 Activity를 명시적으로 실행한다. Windows 검사 스크립트는 현재 실행의
+고유 token을 로그에서 확인하므로 이전 PASS를 성공으로 오인하지 않는다. 에뮬레이터를
+자동으로 부팅하거나 실제 휴대전화에 설치하지 않는다.
+
+macOS에서는 부팅한 에뮬레이터의 serial을 확인한 뒤 아래처럼 같은 검사를 실행할 수 있다.
+출력의 token이 이번 실행과 일치하고 x/y가 유한한지 본다.
+
+```sh
+serial=emulator-5554  # adb devices에 나온 에뮬레이터
+smoke_token=$(uuidgen)
+adb -s "$serial" install -r android/app/build/outputs/apk/debug/app-debug.apk
+adb -s "$serial" shell am start -W -n io.github.creatorkoo.roamling/.CoreSmokeActivity --es smoke_token "$smoke_token"
+adb -s "$serial" logcat -d -s RoamlingA0:I '*:S' | grep "$smoke_token"
+```
+
+둘 다 host 라이브러리를 빌드한 뒤 `uniffi-bindgen`을 `--language kotlin`으로 부르고,
+`cargo ndk -t arm64-v8a -t x86_64 --platform 30 build --locked --release
+-p roamling-android --lib`로 빌드한 뒤 `libroamling_android.so`만 ABI별 `jniLibs`로 복사한다.
+작업 디렉터리는 `rust/`다. `cargo ndk -o`는 의존 크레이트의 `libroamling_core.so`도 복사하므로
+쓰지 않는다. 두 UniFFI 컴포넌트는 이미 Android 라이브러리 하나에 들어 있다.
 
 - **바인딩은 host 빌드의 라이브러리에서 뽑는다.** FFI 표면은 타겟과 무관하므로 두 호스트가 같은
   Kotlin을 낸다. `scripts/build-rust-core.sh:38-41`이 Swift 쪽에서 쓰는 방식과 같고, 이쪽은
-  **한 `.so`에 두 크레이트의 scaffolding이 있을 때 `generate --library`가 둘 다 뽑는지**가 아직
-  확인 전이다(아래 "확인 필요").
+  한 라이브러리에서 `uniffi.roamling_core`·`uniffi.roamling_android` 두 패키지를 생성한다.
+  Windows host DLL에서 두 패키지가 생성되는 것은 확인했다. macOS 산출물 비교는 남아 있다.
+- `rust/roamling-core/uniffi.toml`은 Kotlin에서만 `Pointer`를 `PointerInteraction`으로 이름 붙인다.
+  JNA의 `Pointer` import와 충돌했기 때문이다. Rust·Swift 이름과 동작은 그대로다.
+  두 크레이트의 Kotlin 설정에 `android = true`를 지정한다. 생성 파일을 직접 수정하지 않는다.
 - 생성물 두 디렉터리(`android/core/src/main/kotlin`, `jniLibs`)는 **미추적**이다. Swift 쪽
   `Sources/RoamlingCoreRs`와 같은 규칙 — 빌드 산출물이므로 손으로 고치지 않는다.
 - **링크 플래그는 스크립트가 아니라 `rust/.cargo/config.toml`에 둔다.** Android 15의 16 KB 페이지
@@ -217,14 +261,18 @@ USER_PRESENT    set_hidden(false), 창 다시 붙임, 저장된 자리에서 재
   `[target.x86_64-linux-android]` 섹션에 걸고, MSVC의 `+crt-static`이 그 파일에서 Windows 타겟에만
   걸려 있는 것(`rust/.cargo/config.toml:12-13`)과 같은 방식이다. 타겟 키가 격리라 세 호스트가 서로
   무관해지고, 두 스크립트가 같은 플래그를 따로 들고 다니지 않는다.
-- Kotlin 바인딩은 JNA(`net.java.dev.jna:jna:<ver>@aar`)를 요구한다. `android/core/build.gradle`의 의존.
+- Kotlin 바인딩은 JNA 5.19.1 AAR, coroutines 1.10.2, AndroidX annotation 1.10.0을 사용한다
+  (`android/core/build.gradle.kts`). Android용 생성 코드의 `RequiresApi`도 이 의존성에서 온다.
+- Gradle 9.6.1 wrapper(SHA-256 고정)와 AGP 9.4.0을 쓴다. JBR 25에서도 실행할 수 있고,
+  Kotlin은 AGP 내장 지원을 사용한다. [AGP 호환표](https://developer.android.com/build/releases/agp-9-4-0-release-notes),
+  [Gradle Java 호환표](https://docs.gradle.org/current/userguide/compatibility.html).
 - Gradle wrapper는 커밋한다. `gradlew`는 LF여야 하므로 `.gitattributes`에 `gradlew text eol=lf`
   한 줄을 둔다 — Windows checkout이 CRLF로 바꾸면 다른 호스트에서 깨진다.
 - CI는 `.github/workflows/check-android.yml` 하나를 **ubuntu-latest**에 둔다(NDK가 러너 이미지에
-  있고 셋 중 제일 싸다). `cargo ndk` 빌드와 Gradle `assembleDebug`까지. 릴리스 워크플로에는 첫 판에서
-  넣지 않는다. 로컬의 값싼 대응은 두 호스트 공통으로
-  `cargo check -p roamling-android --target aarch64-linux-android`이고, 이것은 맥에서 Windows 셸을
-  타입 검사하는 관용구(`docs/windows.md:35-37`)와 같다.
+  있고 셋 중 제일 싸다). `cargo ndk` 빌드, Gradle `assembleDebug`·`lintDebug`, APK 안의 네이티브
+  라이브러리 4개 및 16 KB ELF·ZIP 정렬을 확인한다. 에뮬레이터 실행 검사는 로컬에서 한다. 릴리스 워크플로에는 첫 판에서
+  넣지 않는다. 로컬에서 Rust 표면만 빠르게 확인하려면 `rust/`에서
+  `cargo check -p roamling-android`를 실행한다. NDK 링크·APK·실행 검사는 대신하지 못한다.
 - **버전에 네 번째 자리를 만들지 않는다.** Gradle이 빌드할 때 `rust/Cargo.toml:11`의 `version`을
   읽어 `versionName`으로 쓰고 `versionCode`는 그것을 정수화한다. 태그와 맞춰야 하는 자리를 늘리지
   않는 것이 목적이다.
@@ -280,7 +328,7 @@ Android·One UI 버전은 미확인이다(`docs/requests.md` R6). 모델 확인�
 
 사용자가 원격 작업 중이라 Windows 기능·BIOS·드라이버 변경과 재부팅 없이 준비했다.
 공식 ZIP 배포본을 사용자 폴더에 풀고 시작 메뉴 바로가기를 만들었으며 **IDE 첫 실행은 하지 않았다.**
-이 절은 이 PC의 설치 기록이고, 위의 Android 빌드 스크립트·Gradle 프로젝트가 구현됐다는 뜻은 아니다.
+이 절은 환경 준비 당시의 설치 기록이다. 실제 앱 검증은 아래 A0 결과에 별도로 기록한다.
 
 | 구성 | 설치 결과 |
 |---|---|
@@ -324,8 +372,45 @@ SHA-256과 비교했고, SDK 패키지는 [sdkmanager](https://developer.android
 & 'C:\Android\sdk\platform-tools\adb.exe' devices
 ```
 
-남은 것은 IDE 첫 실행, 실제 창에서의 조작 확인, A0의 Gradle·Rust 연결이다. 내장 JBR 25를
-지원하는 Gradle wrapper 버전은 A0에서 고정한다. macOS 환경과 Samsung One UI 실기기는 미검증이다.
+IDE 첫 실행과 실제 창에서의 조작 확인은 남아 있다. macOS 환경과 Samsung One UI 실기기는
+미검증이다. A0의 Gradle·Rust 연결 작업은 환경 준비 다음 단계다.
+
+### A0 Windows 검증 결과 — 2026-09-16
+
+`scripts/build-android-core.ps1`의 최종 경로가 host 바인딩 생성과 ARM64·x86_64 빌드를 모두 통과했다.
+`android/gradlew.bat -p android :app:assembleDebug --no-daemon`으로 debug APK를 만들었다.
+`CoreSmokeActivity`는 debug에만 있고 사용자용 화면·런처·오버레이는 아직 없다.
+
+- `scripts/test-android.ps1 -Serial emulator-5580`: 설치 성공, 이번 실행 token에 대한
+  `A0 PASS ... x=205.71428571428572 y=457.14285714285717 state=0` 확인.
+  `defaultTuning()`과 `PetLoop`가 서로 다른 Kotlin 패키지에서 한 `.so`를 호출했다.
+- 게스트 Android 17 / API 37 / 페이지 크기 16384. APK의 ARM64·x86_64별
+  `libroamling_android.so`와 JNA `libjnidispatch.so` 총 4개의 ELF LOAD 정렬이 모두 `0x4000`,
+  `zipalign -c -P 16 4` 통과. ARM64는 빌드·정렬만 확인했고 실제 실행은 x86_64다.
+- Android `lintDebug`: 오류 0, 경고 2. 앱 아이콘과 Android 12+ data extraction 규칙은
+  각각 사용자용 화면·저장 설정을 붙일 때 남은 항목이다. A0는 저장 데이터를 만들지 않는다.
+- `scripts/test.ps1`: 공통 Rust·차등 fixture 통과, Windows 셸 51개 통과·기존 네트워크 검사
+  1개 ignored, Windows release 빌드 성공. fixture와 `RuntimeTrace.txt`는 변경하지 않았다.
+- Kotlin 전용 `uniffi.toml` 적용 전후에 같은 host DLL에서 생성한 Swift·헤더·modulemap 3개가
+  바이트 단위로 동일했다. Swift 컴파일이나 macOS 실행 검증은 아니다.
+- PowerShell 파서·Bash 구문·ShellCheck 및 `git diff --check` 통과.
+  `.github/workflows/check-android.yml`은 추가했지만 원격 CI는 아직 실행하지 않았다.
+- 검사 뒤 에뮬레이터·해당 포트가 종료되고 adb 기기 목록이 빈 것을 확인했다.
+  빌드 전 실행 중이던 `%LOCALAPPDATA%\Programs\Roamling\roamling.exe` 설치본을 복원했다.
+
+APK: `android/app/build/outputs/apk/debug/app-debug.apk` (미추적).
+로그: `output/android-setup/a0-{native-final,apk-build,smoke,lint,windows-tests}.log` (미추적).
+
+macOS에서 비교할 Windows 생성 Kotlin SHA-256은 아래와 같다. macOS에서 같은 소스로 생성한 뒤
+`shasum -a 256 android/core/src/main/kotlin/uniffi/*/*.kt`로 비교한다.
+
+```text
+roamling_android.kt  6a9c3e95115fa85a38165ae9122293830bd5c8cde074ba4e6c9512c2812f2f2e
+roamling_core.kt     d43e8f8e0df9d48f26916f145ee7ab058c2b81f263b398657352c271c857117a
+```
+
+**A0 전체 게이트는 아직 열려 있다.** macOS 빌드·생성물 비교와 사용자 확인이 남았다.
+Samsung One UI, ARM64 실기기와 A1의 모치 표시는 이번 검사에 포함되지 않는다.
 
 ## 게이트
 
@@ -350,10 +435,9 @@ SHA-256과 비교했고, SDK 패키지는 [sdkmanager](https://developer.android
 
 ## 확인 필요
 
-- uniffi 0.32 Kotlin library mode가 **한 `.so` 안의 두 크레이트**를 한 번에 뽑는지 (A0).
-- cargo-ndk가 `rust/.cargo/config.toml`의 android 타겟 rustflags를 존중하는지. 16 KB 페이지 정렬은
-  `readelf -l`로 본다 (A0).
-- Windows에서 NDK 경로의 공백·한글 문제 (A0).
+- macOS에서 같은 소스의 빌드·Kotlin 바인딩 일치 확인 (A0). Windows의 두 컴포넌트 생성·실행과
+  cargo-ndk의 16 KB rustflags 반영은 위 결과로 확인했다.
+- Windows에서 NDK 경로의 공백·한글 문제. 현재 `C:\Android\sdk` 경로만 실측했다.
 - straight alpha RGBA8을 Android `Bitmap`에 넣을 때의 premultiply 처리 (A1).
 - `image` 크레이트의 WebP 디코드가 휴대전화 CPU에서 얼마나 걸리는지 (A1). **데스크톱 수치를
   그대로 옮기지 않는다** — 맥에서 잰 것은 시트 한 장 디코드 24.09 ms(Rust native)이고,
