@@ -113,6 +113,14 @@ impl Player {
         player.update(delta_time);
         self.atlas.frame(player.current_frame_index() as u32)
     }
+
+    /// Let the shared catch lifecycle use the resolved asset's real timing.
+    pub fn duration(&self, capability: u8) -> f64 {
+        PET_CAPABILITIES
+            .get(capability as usize)
+            .and_then(|capability| self.resolver.resolve(*capability))
+            .map_or(0.0, |track| track.frames.iter().map(|frame| frame.duration).sum())
+    }
 }
 
 #[cfg(test)]

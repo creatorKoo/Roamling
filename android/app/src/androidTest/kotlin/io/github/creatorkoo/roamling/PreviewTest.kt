@@ -8,6 +8,10 @@ import android.graphics.Rect
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.os.SystemClock
+import android.view.InputDevice
+import android.view.MotionEvent
+import android.view.WindowInsets
+import android.view.WindowManager
 import android.provider.Settings
 import android.widget.Button
 import androidx.test.core.app.ActivityScenario
@@ -16,9 +20,53 @@ import java.io.File
 import org.junit.Assert.*
 import org.junit.Test
 import uniffi.roamling_core.FfiPetImage
+import uniffi.roamling_core.FfiDisplay
+import uniffi.roamling_core.FfiPoint
+import uniffi.roamling_core.FfiRect
+import uniffi.roamling_android.defaultTuning
 
 class PreviewTest {
     private val instrumentation get() = InstrumentationRegistry.getInstrumentation()
+
+    @Test fun sharedRuntimeWalksRestsWakesAndClampsDirectContact() {
+        val images = MochiImages.load()
+        var now = 100.0
+        val bounds = FfiRect(0.0, 24.0, 412.0, 800.0)
+        try {
+            PreviewRuntime(images.atlas, FfiDisplay("test", bounds, bounds), FfiPoint(150.0, 350.0), { now }, 7u).use { pet ->
+                val seen = mutableSetOf<UByte>()
+                val start = pet.position
+                var moved = false
+                // Advance a controlled clock at the actual requested cadence, using unchanged tuning.
+                val deadline = now + defaultTuning().idleBeforeRest + 180.0
+                while (now < deadline && pet.capability != 4.toUByte()) {
+                    pet.tick()
+                    seen.add(pet.capability)
+                    moved = moved || kotlin.math.abs(pet.position.x - start.x) > 5.0 || kotlin.math.abs(pet.position.y - start.y) > 5.0
+                    assertTrue(pet.position.x in 48.0..364.0 && pet.position.y in 76.0..772.0)
+                    now += pet.interval
+                }
+                assertTrue("The shared core must walk", moved && (1.toUByte() in seen || 2.toUByte() in seen))
+                assertEquals("The real idle threshold must lead to sleep", 4.toUByte(), pet.capability)
+                assertEquals(0.5, pet.interval, 0.001)
+                pet.noteInput(); pet.tick()
+                assertNotEquals(4.toUByte(), pet.capability)
+                val point = pet.position
+                pet.down(point.x + 40, point.y + 50)
+                assertTrue(pet.hasContact)
+                pet.move(2000.0, -2000.0)
+                assertTrue(pet.position.x in 48.0..364.0 && pet.position.y in 76.0..772.0)
+                pet.up()
+                assertFalse(pet.hasContact)
+                // Release cannot leave a ghost finger keeping the pet awake.
+                val sleepAgain = now + defaultTuning().idleBeforeRest + 180.0
+                while (now < sleepAgain && pet.capability != 4.toUByte()) {
+                    now += pet.interval; pet.tick()
+                }
+                assertEquals(4.toUByte(), pet.capability)
+            }
+        } finally { images.close() }
+    }
 
     @Test fun premultipliedRgbaReachesAndroidWithoutChannelSwapOrDoubleMultiply() {
         val image = FfiPetImage(3u, 1u, byteArrayOf(
@@ -58,8 +106,18 @@ class PreviewTest {
             }
             scenario.onActivity { it.findViewById<Button>(R.id.show_mochi).performClick() }
             awaitCondition { onMain { current.previewIsAttached } }
+            var first = Rect()
+            scenario.onActivity { first = checkNotNull(it.previewOverlay).boundsOnScreen }
             assertPreviewAnimates(scenario)
-            capture("a1-preview.png")
+            // Capture the starting position before screenshot sampling, which
+            // can outlast a short first walk. A natural rest may last 40 seconds.
+            awaitCondition(timeoutMs = (defaultTuning().wanderPause * 1000).toLong() + 15_000) { onMain {
+                val next = checkNotNull(current.previewOverlay).boundsOnScreen
+                kotlin.math.abs(next.left - first.left) + kotlin.math.abs(next.top - first.top) > 10
+            } }
+            assertSystemDrag(scenario)
+            assertCancelAndMultipleContacts(scenario)
+            capture("a2-preview.png")
             val old = current
             scenario.recreate()
             awaitCondition {
@@ -78,11 +136,86 @@ class PreviewTest {
                 }
                 attached
             }
-            capture("a1-preview-landscape.png")
+            assertWithinSafeScreen(scenario)
+            capture("a2-preview-landscape.png")
             instrumentation.uiAutomation.executeShellCommand("input keyevent KEYCODE_HOME").use {
                 android.os.ParcelFileDescriptor.AutoCloseInputStream(it).readBytes()
             }
             awaitCondition { onMain { !current.previewIsAttached } }
+        }
+    }
+
+    private fun assertSystemDrag(scenario: ActivityScenario<MainActivity>) {
+        var before = Rect()
+        var density = 1f
+        scenario.onActivity {
+            before = checkNotNull(it.previewOverlay).boundsOnScreen
+            density = it.resources.displayMetrics.density
+        }
+        val downTime = SystemClock.uptimeMillis()
+        fun inject(action: Int, x: Float, y: Float) {
+            val event = MotionEvent.obtain(downTime, SystemClock.uptimeMillis(), action, x, y, 0)
+            event.source = InputDevice.SOURCE_TOUCHSCREEN
+            try { assertTrue(instrumentation.uiAutomation.injectInputEvent(event, true)) }
+            finally { event.recycle() }
+        }
+        val x = before.exactCenterX()
+        val y = before.exactCenterY()
+        // Move inward from either screen half, well away from system gestures.
+        val targetX = x + (if (before.left > 150 * density) -70 else 70) * density
+        val targetY = y - 60 * density
+        inject(MotionEvent.ACTION_DOWN, x, y)
+        repeat(12) { step ->
+            SystemClock.sleep(25)
+            inject(MotionEvent.ACTION_MOVE, x + (targetX - x) * (step + 1) / 12, y + (targetY - y) * (step + 1) / 12)
+        }
+        inject(MotionEvent.ACTION_UP, targetX, targetY)
+        instrumentation.waitForIdleSync()
+        scenario.onActivity {
+            val overlay = checkNotNull(it.previewOverlay)
+            assertFalse(overlay.hasContact)
+            val after = overlay.boundsOnScreen
+            assertEquals(before.left + targetX - x, after.left.toFloat(), 4f)
+            assertEquals(before.top + targetY - y, after.top.toFloat(), 4f)
+        }
+        assertWithinSafeScreen(scenario)
+    }
+
+    private fun assertCancelAndMultipleContacts(scenario: ActivityScenario<MainActivity>) {
+        scenario.onActivity {
+            val overlay = checkNotNull(it.previewOverlay)
+            val bounds = overlay.boundsOnScreen
+            val time = SystemClock.uptimeMillis()
+            fun send(action: Int, count: Int = 1) {
+                val properties = Array(count) { id -> MotionEvent.PointerProperties().apply { this.id = id; toolType = MotionEvent.TOOL_TYPE_FINGER } }
+                val coords = Array(count) { id -> MotionEvent.PointerCoords().apply {
+                    x = bounds.exactCenterX() + id * 4; y = bounds.exactCenterY() + id * 4; pressure = 1f; size = 1f
+                } }
+                val event = MotionEvent.obtain(time, SystemClock.uptimeMillis(), action, count, properties, coords,
+                    0, 0, 1f, 1f, 0, 0, InputDevice.SOURCE_TOUCHSCREEN, 0)
+                try { overlay.dispatchContact(event) } finally { event.recycle() }
+            }
+            send(MotionEvent.ACTION_DOWN)
+            assertTrue(overlay.hasContact)
+            send(MotionEvent.ACTION_POINTER_DOWN or (1 shl MotionEvent.ACTION_POINTER_INDEX_SHIFT), 2)
+            send(MotionEvent.ACTION_POINTER_UP, 2) // original finger leaves; second cannot take ownership
+            assertFalse(overlay.hasContact)
+            send(MotionEvent.ACTION_MOVE) // no new DOWN, no new grab
+            assertFalse(overlay.hasContact)
+            send(MotionEvent.ACTION_DOWN)
+            send(MotionEvent.ACTION_CANCEL)
+            assertFalse(overlay.hasContact)
+        }
+    }
+
+    private fun assertWithinSafeScreen(scenario: ActivityScenario<MainActivity>) {
+        scenario.onActivity {
+            val metrics = it.getSystemService(WindowManager::class.java).currentWindowMetrics
+            val safe = Rect(metrics.bounds)
+            val insets = metrics.windowInsets.getInsetsIgnoringVisibility(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+            safe.inset(insets)
+            val bounds = checkNotNull(it.previewOverlay).boundsOnScreen
+            assertTrue("$bounds must be inside $safe", safe.contains(bounds))
         }
     }
 
@@ -111,8 +244,8 @@ class PreviewTest {
         } finally { first.recycle() }
     }
 
-    private fun awaitCondition(condition: () -> Boolean) {
-        val deadline = SystemClock.elapsedRealtime() + 15_000
+    private fun awaitCondition(timeoutMs: Long = 15_000, condition: () -> Boolean) {
+        val deadline = SystemClock.elapsedRealtime() + timeoutMs
         while (SystemClock.elapsedRealtime() < deadline) {
             if (condition()) return
             SystemClock.sleep(100)

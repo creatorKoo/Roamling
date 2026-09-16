@@ -2,7 +2,7 @@
 <resources>
     <string name="app_name" translatable="false">Roamling</string>
     <string name="preview_title">Meet Bori</string>
-    <string name="preview_description">A little companion, taking a quiet break. This preview stays here and rests when you leave this screen.</string>
+    <string name="preview_description">Bori walks around and takes quiet breaks. Try dragging Bori to a new spot. This preview ends when you leave this screen.</string>
     <string name="show_mochi">Show Bori</string>
     <string name="hide_mochi">Hide Bori</string>
     <string name="loading">Bori is getting ready…</string>
@@ -11,6 +11,6 @@
     <string name="permission_unavailable">Overlay settings are unavailable on this device.</string>
     <string name="show_failed">Bori could not appear. Check the display permission and try again.</string>
     <string name="ready">Ready when you are.</string>
-    <string name="showing">Bori is here.</string>
+    <string name="showing">Bori is here. Touch and drag to move.</string>
     <string name="preview_space">A little space for Bori</string>
 </resources>

@@ -583,7 +583,7 @@ frame swap에 scene graph가 필요하지 않다. particle/effect가 복잡해�
 failure 전용 fallback이다. 이 내부 atlas는 third-party asset license에 의존하지 않으며
 Petdex loader는 사용자 package와 fixtures로 계속 검증한다.
 
-## 플랫폼 seam — 데스크톱 두 구현과 Android A0/A1
+## 플랫폼 seam — 데스크톱 두 구현과 Android A0/A1/A2
 
 **이 절은 한때 "Windows 쪽에서 채울 자리"였다. 2026-09-04에 W7까지 닫히면서 양 플랫폼이
 같은 seam을 실제로 채웠고, 마지막 게이트 W8(지정 앱 source의 Windows 배선)도 2026-09-12에
@@ -629,25 +629,28 @@ Roamling의 관찰자 모델과 맞지 않아 금지한다. 붙일 때의 상태
 `docs/state-sources.md`가 이미 자리를 잡아 뒀다.
 
 Android A0는 `android/app/src/debug/kotlin/io/github/creatorkoo/roamling/CoreSmokeActivity.kt`
-의 단발성 호출이다. A1은 `MainActivity`가 권한을 받고 `MochiOverlay`로 idle 미리보기를 띄운다.
+의 단발성 호출이다. `MainActivity`가 권한을 받고 `MochiOverlay`로 미리보기를 띄우며,
+A2 `PreviewRuntime`이 공유 `PetLoop`의 걷기·휴식·터치를 연결한다.
 아래 Android 열은 현재 코드만 적으며 전체 오버레이 계획은 `docs/android.md`에 있다.
 
-| 자리 | macOS | Windows | Android A0/A1 |
+| 자리 | macOS | Windows | Android A0/A1/A2 |
 |---|---|---|---|
 | display | `NSScreen` | `EnumDisplayMonitors` | `currentWindowMetrics`에서 system bar·cutout insets를 뺀 경계 |
-| displayChanges | 화면 변경 구독 | 메시지 루프 | A0 없음. A1 Activity 재생성 시 창·insets 재계산 |
+| displayChanges | 화면 변경 구독 | 메시지 루프 | Activity 재생성 시 dp 위치 운반·창·insets 재계산 |
 | safeZone | visible frame | `rcWork` | 별도 목록 없음 — display에 insets 적용 |
-| pointer | `NSEvent` | `GetCursorPos` | 화면 밖 상수, 버튼 false — 터치 없음 |
-| userIdle | `CGEventSource` | `GetLastInputInfo` | 0 — 지속 런타임에 사용할 구현 아님 |
+| pointer | `NSEvent` | `GetCursorPos` | `MotionEvent` raw 좌표/density, 직접 `touch_down` 뒤 공유 drag/up, 손가락 없으면 화면 밖 |
+| userIdle | `CGEventSource` | `GetLastInputInfo` | 실제 overlay/outside/Activity 터치 이후 단조 시계 경과 |
 | focus | AX | `GetGUIThreadInfo` | 권한 false, 쿼리 없음 |
 | capture | ScreenCaptureKit | Desktop Duplication | 권한 false, 휘도 없음 |
 | window | CGWindow/AX | HWND/Win32 | 없음 |
-| overlay | NSPanel | layered window | A1 `TYPE_APPLICATION_OVERLAY`, Activity 중단 시 제거, 터치 미획득 |
+| overlay | NSPanel | layered window | `TYPE_APPLICATION_OVERLAY`, 96×104 dp 터치 영역, Activity 중단 시 창·콜백 제거 |
 | images | AppKit bitmap | DIB | A1 `MascotAtlas`의 premultiplied RGBA8 → `ARGB_8888` bitmap |
 | coordinateSpace | world 변환 | DPI로 나눔 | px ÷ density, y 아래 방향 |
 
 Kotlin → JNA → `libroamling_android.so` 안의 UniFFI → 기존 `PetLoop` 순서다.
 `rust/roamling-android/src/lib.rs::default_tuning`은 코어 기본값을 내보내며 행동을 복제하지 않는다.
 A1의 `MascotAtlas`·`Player`도 같은 라이브러리의 UniFFI를 통해 기존 에셋과
-`AnimationResolver`·`PetAnimationPlayer`를 호출한다. 미리보기는 idle 프레임만 진행하며,
-걷기·터치·서비스·잠금 복귀 런타임은 아직 없다.
+`AnimationResolver`·`PetAnimationPlayer`를 호출한다. A2 `PreviewRuntime.tick`은 코어의 capability·
+delta_time·locomotion_rate를 플레이어로 전달하고, `MochiOverlay.schedule`은 코어가 요청한 주기로
+다음 틱을 예약한다. 직접 터치의 진입점 `PetRuntime::touch_down`은 데스크톱 `pointer_down`과
+같은 catch 본체를 사용한다. 서비스·홈 유지·잠금 복귀는 A3에 남아 있다.

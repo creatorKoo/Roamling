@@ -1,0 +1,110 @@
+// SPDX-FileCopyrightText: 2026 GooBeom Jeoung
+// SPDX-License-Identifier: GPL-3.0-only
+package io.github.creatorkoo.roamling
+
+import android.os.SystemClock
+import uniffi.roamling_android.AtlasFrame
+import uniffi.roamling_android.MascotAtlas
+import uniffi.roamling_android.Player
+import uniffi.roamling_android.defaultTuning
+import uniffi.roamling_core.FfiDisplay
+import uniffi.roamling_core.FfiInteractionOutput
+import uniffi.roamling_core.FfiPoint
+import uniffi.roamling_core.FfiTickInput
+import uniffi.roamling_core.PetLoop
+import kotlin.math.hypot
+
+/** Main-thread adapter: the native runtime owns every behavior and timing rule. */
+internal class PreviewRuntime(
+    atlas: MascotAtlas,
+    display: FfiDisplay,
+    initial: FfiPoint,
+    private val clock: () -> Double = { SystemClock.elapsedRealtimeNanos() / 1_000_000_000.0 },
+    seed: ULong = SystemClock.elapsedRealtimeNanos().toULong(),
+) : AutoCloseable {
+    private val pet = PetLoop(initial.x, initial.y, defaultTuning(), seed)
+    private val player = Player(atlas)
+    private var lastTouchAt = clock()
+    private var finger: FfiPoint? = null
+    private var downAt: FfiPoint? = null
+    var frame: AtlasFrame? = null
+        private set
+    var capability: UByte = 0u
+        private set
+    val position: FfiPoint get() = pet.position()
+    val hasContact: Boolean get() = finger != null
+    val interval: Double get() = pet.preferredTickInterval(clock())
+
+    init {
+        pet.setObjectSize(WIDTH, HEIGHT)
+        pet.handleDisplayChange(listOf(display), initial.x, initial.y, clock())
+        // Wire order is declared once in core's PET_CAPABILITIES; no frame timings here.
+        pet.setAnimationDurations(player.duration(13u), player.duration(14u))
+    }
+
+    fun noteInput() { lastTouchAt = clock() }
+
+    fun tick() {
+        val now = clock()
+        val point = finger
+        val origin = position
+        pet.beginTick(now)
+        val result = pet.finishTick(FfiTickInput(
+            now = now, pointerX = point?.x ?: -10_000.0, pointerY = point?.y ?: -10_000.0,
+            primaryButtonDown = point != null, userIdleDuration = (now - lastTouchAt).coerceAtLeast(0.0),
+            captureAuthorized = false, focusAuthorized = false, didQueryFocus = false, queriedFocus = null,
+            pointerIsOverPet = point != null && kotlin.math.abs(point.x - origin.x) <= WIDTH / 2 &&
+                kotlin.math.abs(point.y - origin.y) <= HEIGHT / 2,
+            affectionHeld = false,
+        ))
+        capability = result.capability
+        frame = player.advance(capability, result.deltaTime * result.locomotionRate)
+    }
+
+    fun down(x: Double, y: Double): Double {
+        noteInput()
+        finger = FfiPoint(x, y)
+        downAt = FfiPoint(x, y)
+        val result = pet.touchDown(x, y, clock())
+        if (result.setInteractionEnabled == false) {
+            finger = null
+            downAt = null
+        }
+        return apply(result)
+    }
+
+    fun move(x: Double, y: Double): Double {
+        val start = downAt ?: return interval
+        noteInput()
+        finger = FfiPoint(x, y)
+        val result = pet.pointerDragged(x, y, hypot(x - start.x, y - start.y), clock())
+        // Use the core's clamp during contact too, not just at drop.
+        pet.setScale(WIDTH, HEIGHT)
+        return apply(result)
+    }
+
+    fun up(): Double {
+        val point = finger ?: return interval
+        noteInput()
+        finger = null
+        downAt = null
+        // The core tracks its own drag threshold; Kotlin does not duplicate it.
+        return apply(pet.pointerUp(point.x, point.y, false, clock()))
+    }
+
+    private fun apply(result: FfiInteractionOutput): Double {
+        capability = result.capability
+        frame = player.advance(capability, 0.0)
+        return result.rescheduleAfter ?: interval
+    }
+
+    override fun close() {
+        pet.destroy()
+        player.destroy()
+    }
+
+    companion object {
+        const val WIDTH = 96.0
+        const val HEIGHT = 104.0
+    }
+}

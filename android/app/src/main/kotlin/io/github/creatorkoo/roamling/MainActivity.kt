@@ -14,6 +14,7 @@ import android.os.Bundle
 import android.provider.Settings
 import android.util.Log
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.WindowInsets
 import android.widget.Button
@@ -22,11 +23,13 @@ import android.widget.ScrollView
 import android.widget.TextView
 import java.util.concurrent.Executors
 import kotlin.math.roundToInt
+import uniffi.roamling_core.FfiPoint
 
 class MainActivity : Activity() {
     private val loader = Executors.newSingleThreadExecutor()
     private var images: MochiImages? = null
     private var overlay: MochiOverlay? = null
+    private var carriedPosition: FfiPoint? = null
     private var resumed = false
     private var showRequested = false
     private var awaitingPermission = false
@@ -36,11 +39,15 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var stage: View
     internal val previewIsAttached: Boolean get() = overlay?.isShowing == true
+    internal val previewOverlay: MochiOverlay? get() = overlay
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         showRequested = savedInstanceState?.getBoolean("show_requested") ?: false
         awaitingPermission = savedInstanceState?.getBoolean("awaiting_permission") ?: false
+        savedInstanceState?.getDoubleArray("preview_position")?.takeIf { it.size == 2 }?.let {
+            carriedPosition = FfiPoint(it[0], it[1])
+        }
         buildScreen()
         loader.execute {
             val loaded = runCatching { MochiImages.load() }
@@ -70,7 +77,14 @@ class MainActivity : Activity() {
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putBoolean("show_requested", showRequested || previewIsAttached)
         outState.putBoolean("awaiting_permission", awaitingPermission)
+        (overlay?.position ?: carriedPosition)?.let { outState.putDoubleArray("preview_position", doubleArrayOf(it.x, it.y)) }
         super.onSaveInstanceState(outState)
+    }
+
+    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_MOVE ||
+            event.actionMasked == MotionEvent.ACTION_UP) overlay?.noteInput()
+        return super.dispatchTouchEvent(event)
     }
 
     override fun onStop() {
@@ -106,6 +120,7 @@ class MainActivity : Activity() {
     }
 
     private fun removeOverlay() {
+        overlay?.position?.let { carriedPosition = it }
         overlay?.close()
         overlay = null
     }
@@ -132,7 +147,7 @@ class MainActivity : Activity() {
             stage.getLocationOnScreen(location)
             val next = MochiOverlay(this, checkNotNull(images))
             try {
-                next.show(location[0] + stage.width / 2, location[1] + stage.height / 2) { refresh() }
+                next.show(location[0] + stage.width / 2, location[1] + stage.height / 2, carriedPosition) { refresh() }
                 overlay = next
                 showRequested = false
                 refresh()

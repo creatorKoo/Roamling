@@ -1792,6 +1792,10 @@ impl PetLoop {
         )
     }
 
+    pub fn touch_down(&self, x: f64, y: f64, now: f64) -> FfiInteractionOutput {
+        interaction_out(self.inner.lock().unwrap().touch_down(WorldPoint::new(x, y), now))
+    }
+
     pub fn pointer_dragged(&self, x: f64, y: f64, distance: f64, now: f64) -> FfiInteractionOutput {
         interaction_out(self.inner.lock().unwrap().pointer_dragged(
             WorldPoint::new(x, y),

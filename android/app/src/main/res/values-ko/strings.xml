@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="preview_title">보리를 만나 보세요</string>
-    <string name="preview_description">조용히 쉬어 가는 작은 친구예요. 미리보기는 이곳에 머물고, 화면을 벗어나면 함께 쉬어요.</string>
+    <string name="preview_description">보리가 화면을 걷다가 조용히 쉬어요. 손가락으로 잡아 원하는 곳에 옮겨 보세요. 이 화면을 나가면 미리보기가 끝나요.</string>
     <string name="show_mochi">보리 보기</string>
     <string name="hide_mochi">보리 숨기기</string>
     <string name="loading">보리가 준비하고 있어요…</string>
@@ -10,6 +10,6 @@
     <string name="permission_unavailable">이 기기에서 표시 권한 설정을 열 수 없어요.</string>
     <string name="show_failed">보리를 표시하지 못했어요. 표시 권한을 확인하고 다시 눌러 주세요.</string>
     <string name="ready">준비됐어요. 보리를 불러 주세요.</string>
-    <string name="showing">보리가 여기 있어요.</string>
+    <string name="showing">보리가 여기 있어요. 잡아서 옮겨 보세요.</string>
     <string name="preview_space">보리가 쉬어 가는 자리</string>
 </resources>

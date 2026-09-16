@@ -3,7 +3,7 @@
 **이름 변경 (2026-09-17):** 현재 UI의 이름은 `보리 / Bori`다. `MochiImages`·`MochiOverlay` 같은
 내부 식별자는 유지한다. 아래 2026-09-16 검증 기록과 당시 캡처의 모치는 같은 마스코트의 이전 이름이다.
 
-**상태: A1 Windows 구현·에뮬레이터 검증 완료, 사용자 화면 확인 대기 (2026-09-16).** A0 macOS 검증은 별도 잔여 항목이다. 첫 사용 대상은 아내분의 Android
+**상태: A2 Windows 구현·에뮬레이터 검증 완료, 사용자 체감 확인 대기 (2026-09-17).** A0 macOS 검증은 별도 잔여 항목이다. 첫 사용 대상은 아내분의 Android
 휴대전화다. 데스크톱판의 모든 기능을 옮기기보다, 먼저 모치가 휴대전화 안에서 살아 있는 것처럼
 보이게 한다.
 
@@ -65,7 +65,7 @@ Windows는 rlib 직결(`rust/roamling-core/Cargo.toml:11`의 `crate-type`), **An
 `docs/history/windows.md` 3절이고, 언어를 바꾸자는 논의를 시작하기 전에 읽을 문서도 그것이다.
 
 seam의 정본 표는 `docs/architecture.md`의 "플랫폼 seam" 절에 있다. Android 열은
-현재 단발성 틱 코드만 적고, 아래의 첫 판 표는 이후 게이트까지 포함한 계획이다.
+현재 A0/A1/A2 코드를 적고, 아래의 첫 판 표는 이후 게이트까지 포함한 계획이다.
 
 ## 무엇이 어디에 사나
 
@@ -75,8 +75,9 @@ rust/roamling-android/   새 크레이트. cdylib 하나(libroamling_android.so)
                          갖는다. default_tuning, MascotAtlas, Player를 노출한다.
 android/                 Gradle 프로젝트. 모듈 둘
   core/                  생성된 Kotlin 바인딩(미추적) + jniLibs/<abi>/*.so + JNA
-  app/                   A0: debug 전용 CoreSmokeActivity. A1: MainActivity 권한 화면과
-                         MochiOverlay 미리보기. 서비스·알림·걷기 틱 루프는 다음 단계.
+  app/                   A0: debug 전용 CoreSmokeActivity. MainActivity 권한 화면과
+                         MochiOverlay 미리보기. A2 PreviewRuntime이 공유 코어 틱·터치를 연결.
+                         서비스·알림은 A3.
 scripts/build-android-core.sh    build-rust-core.sh의 형제
 scripts/build-android-core.ps1   같은 산출물을 내는 Windows 쪽 (개발 환경 절)
 ```
@@ -143,9 +144,65 @@ UI 문구는 `android/app/src/main/res/values{,-ko}/strings.xml`에 같은 키�
 [창 종류](https://developer.android.com/reference/android/view/WindowManager.LayoutParams#TYPE_APPLICATION_OVERLAY),
 [bitmap 복사](https://developer.android.com/reference/android/graphics/Bitmap#copyPixelsFromBuffer(java.nio.Buffer)).
 
+### A2 구현 흐름 — 사용자 "응 다음 진행 고고" 승인 (2026-09-17)
+
+아래는 구현 계약이다. A1의 Activity 수명을 유지하고 전체 화면의 system bar·cutout 안에서 움직인다.
+
+1. `PreviewRuntime`이 기존 `PetLoop`와 `Player`를 소유한다. `default_tuning()`을 그대로 쓰고
+   `set_displays`·`set_object_size`로 dp 좌표계를 설정한다. `Player.duration`은 resolver가 고른
+   caught/dragged 트랙 길이를 반환하여 `set_animation_durations`에 전달한다.
+2. `PreviewRuntime.tick`: 단조 시계 → `begin_tick` → `finish_tick`. 포커스·캡처 권한은 false,
+   손가락이 없으면 화면 밖 포인터, 실제 마지막 터치 이후 경과를 idle로 준다. 위치와 capability,
+   `delta_time * locomotion_rate`를 창과 플레이어에 전달한다. Kotlin에 행동 규칙을 복제하지 않는다.
+3. **직접 터치는 마우스 접근과 다르다.** 기존 `PetRuntime::pointer_down`은 접근 속도로 미리
+   arm된 포인터만 잡는다(`pointer.rs::evaluate`). 가짜 접근 좌표·속도를 만들지 않는다.
+   `PetRuntime::touch_down` / `PetLoop.touch_down`을 추가하여 실제 펫 영역 안 직접 터치를 받는다.
+   hidden/interactions/이미 잡힌 상태를 검사하고 같은 `begin_catch` 본체를 부른다.
+   데스크톱의 `pointer_down` 조건과 기존 트레이스는 유지한다.
+4. `MochiOverlay.SpriteView.onTouchEvent`: 첫 pointer ID만 소유한다. MOVE는 dp 좌표와 시작점부터
+   거리를 기존 `pointer_dragged`에 전달하고, UP/CANCEL/소유 손가락 POINTER_UP은 `pointer_up`으로
+   해제한다. 두 번째 손가락으로 소유권을 옮기지 않는다. 드래그 중에도 `set_scale`의 코어 clamp를
+   적용하며, release 뒤 포인터를 화면 밖으로 지운다. 터치 영역은 96×104 dp 창 하나다.
+5. `MochiOverlay.schedule`: `preferred_tick_interval`이 1/60이면 Choreographer, 그 외 Handler.
+   `reschedule_after`를 존중하고 이전 예약은 취소한다. 변경된 위치·프레임만 창에 반영한다.
+   `ACTION_OUTSIDE`와 `MainActivity.dispatchTouchEvent`는 사용자 입력 시각만 갱신한다.
+6. `MainActivity`: 회전/재생성 시 마지막 dp 위치를 Bundle로 운반하고 새 경계에 clamp한다.
+   숨김·홈·종료 시 창·타이머·native 객체를 해제한다. 장기 위치 저장·상시 서비스는 A3 범위다.
+
+검증: 기존 렌더/수명 계측에 실제 이동·시스템 주입 드래그·취소·회전 경계를 더한다.
+`PreviewRuntime`에 주입한 시계로 기본 휴식 시간과 깨우기를 검증하고 실제 OS 타이머와 구분한다.
+공식 API 근거: [MotionEvent](https://developer.android.com/reference/android/view/MotionEvent),
+[outside touch](https://developer.android.com/reference/android/view/WindowManager.LayoutParams#FLAG_WATCH_OUTSIDE_TOUCH).
+
+### A2 결과 (2026-09-17, Windows 호스트)
+
+- `PreviewRuntime`: 기본 코어 튜닝의 걷기·휴식·잠들기·깨우기, `Player`의 실제 트랙 길이와
+  프레임을 연결했다. `MochiOverlay`는 코어 중심점을 창 왼쪽 위 좌표로 변환하고 변경 시에만
+  창/프레임을 갱신한다. 터치 해제 후 포인터를 남기지 않는다.
+- `PreviewTest` 3개 통과: premultiplied 픽셀, 실제 창 이동·시스템 입력 드래그·멀티터치 해제·취소·
+  재생성·가로 회전 경계·Home 제거, 그리고 기본 75초 휴식·수면 주기·깨우기·드롭 경계.
+  마지막 휴식 검사는 **주입한 단조 시계**로 시간을 진행했다. 장시간 실기기 배터리 검사가 아니다.
+  UI 이동 검사는 스크린샷보다 먼저 출발 위치를 기록하여 짧은 첫 걸음 뒤의 휴식을 이동 실패로
+  오인하지 않게 했다. 제품 튜닝과 기존 fixture/trace는 바꾸지 않았다.
+- `build-android-core.ps1 -Jobs 2`: Windows host 바인딩 및 ARM64/x86_64 성공.
+  Gradle `assembleDebug`, `assembleDebugAndroidTest`, `lintDebug` 성공. lint는 오류 0,
+  기존 `DataExtractionRules` 경고 1. APK 안 4개 `.so`의 ELF LOAD `0x4000`, `zipalign -c -P 16 4` 통과.
+- `test-android.ps1 -Serial emulator-5580`: A0 PASS. `test-android-preview.ps1 -Serial emulator-5580`:
+  `OK (3 tests)` (15.335초). runner는 앱을 종료하고 기존 overlay app-op을 복원한다.
+  캡처 `output/android-setup/a2-preview.png`, `a2-preview-landscape.png`를 직접 확인했다.
+- `scripts/test.ps1`: 코어/펫/agent/update 및 Windows 셸 검사·release 빌드 **all green**.
+  새 코어 `direct_touch_uses_the_shared_catch_drag_and_drop_without_arming_a_mouse` 검사도 통과.
+- 재현 로그는 `output/android-setup/a2-{native-build,gradle,windows-tests,a0-smoke,instrumentation}.log`.
+  최신 개발 APK는 `android/app/build/outputs/apk/debug/app-debug.apk`이며 테스트 AVD에 설치했다.
+  이번 변경은 커밋·push·릴리스하지 않았다.
+
+아직 **Activity 화면에서만** 동작한다. Home 유지/서비스/알림/잠금 복귀는 A3이고, 이 A2의
+속도·드래그 체감은 사용자 확인을 기다린다. 이번 변경의 macOS 및 Android macOS 호스트 빌드,
+Samsung/One UI 실측은 하지 않았다. 0.6.4의 이전 macOS CI 성공을 이번 변경 검증으로 세지 않는다.
+
 ## Kotlin이 채우는 것 — 첫 판 계획
 
-아래 표는 A2/A3까지 포함한다. A1의 실제 구현은 위 구현 흐름과 `docs/architecture.md`의 표를 따른다.
+아래 표는 A3까지 포함한다. A2의 실제 구현은 위 구현 흐름과 `docs/architecture.md`의 표를 따른다.
 
 런타임이 기계에 닿는 통로는 `PlatformServices` 하나이고(`Sources/RoamlingEngine/
 PlatformServices.swift:54-71`), 자리는 열하나다(`docs/architecture.md:586-629`). Android는 그중
@@ -154,7 +211,7 @@ PlatformServices.swift:54-71`), 자리는 열하나다(`docs/architecture.md:586
 | 자리 | Android 답 | 첫 판 |
 |---|---|---|
 | display | `WindowManager.currentWindowMetrics` 경계 − `WindowInsets`(status·navigation·cutout) → `FfiDisplay` 하나 | 채움 |
-| displayChanges | `onConfigurationChanged`(회전·폴더블 접힘) → 디스플레이 다시 설정 | 채움 |
+| displayChanges | Activity 재생성(회전·크기 변경) → 위치 운반·디스플레이 다시 설정 | 채움 |
 | safeZone | insets를 display 경계에서 이미 뺐으므로 빈 목록 | 빈값 |
 | pointer | 오버레이 View의 `MotionEvent` 좌표(px→dp) | 채움 |
 | userIdle | 마지막 터치 시각으로부터의 경과 | 채움 |
@@ -177,6 +234,9 @@ PlatformServices.swift:54-71`), 자리는 열하나다(`docs/architecture.md:586
 픽셀을 DPI 배율로 나눠 world 단위를 만들고, 그 나누기를 `rect_to_world`(`platform.rs:72`)와
 `pointer`(`platform.rs:129`)가 똑같이 쓴다. Android의 density가 그 배율 자리에 그대로 들어간다.
 **y를 뒤집지 않는다** — Win32도 Android도 좌상단 원점·y 아래라 core world와 방향이 같다.
+다만 **펫 위치는 중심점**이다(`DesktopWorldSnapshot::clamp` → `WorldRect::clamped_center`).
+`MochiOverlay.render/show`만 `중심 px − 창 크기/2`로 `LayoutParams.x/y`를 만든다.
+터치 raw 좌표는 화면 좌표 그대로 dp로 바꾸며, Bundle에도 코어의 중심을 저장한다.
 
 **손가락이 없을 때의 포인터는 마지막 터치 자리가 아니라 화면 밖 좌표다.** 데스크톱 커서는 화면에
 남아 있지만 손가락은 사라진다. 남겨 두면 펫이 있지도 않은 손을 계속 피한다.
@@ -184,7 +244,8 @@ PlatformServices.swift:54-71`), 자리는 열하나다(`docs/architecture.md:586
 **userIdle은 `lastTouchAt`에서 재고 상수로 주지 않는다.** `finish_tick`은
 `user_idle_duration < 0.8`이면 쉬던 펫을 깨우므로(`rust/roamling-core/src/pet_runtime.rs:493`),
 0을 주면 영영 못 자고 큰 값을 주면 영영 못 깬다. 오버레이 밖 터치는 `FLAG_WATCH_OUTSIDE_TOUCH`의
-`ACTION_OUTSIDE`(좌표 없이 시각만)로 받고, 화면 켜짐·`USER_PRESENT`도 같은 시계를 리셋한다.
+`ACTION_OUTSIDE`(좌표 없이 시각만)와 Activity 터치로 받는다. 화면 켜짐·`USER_PRESENT`에
+같은 시계를 리셋하는 것은 A3 계획이다.
 **내용은 보지 않고 시각만 본다** — macOS가 `CGEventSource`의 경과 시간 하나만 쓰는 것과 같은 선이다.
 
 **`pointer_is_over_pet`은 View가 곧 hit region이다.** 오버레이 창이 펫 크기라 터치가 그 안에
@@ -219,15 +280,15 @@ PlatformServices.swift:54-71`), 자리는 열하나다(`docs/architecture.md:586
 
 ## 틱과 생명주기 — A2/A3 계획
 
-A1은 `MochiOverlay`의 `Choreographer` 콜백에서 idle 프레임만 진행하고, 프레임이 바뀔 때만
-다시 그린다. 아래의 `PetLoop` 주기·서비스·잠금 복귀는 아직 구현하지 않았다.
+A2는 `PreviewRuntime`에서 `PetLoop`를 진행하고 `MochiOverlay`가 주기·창·터치를 연결한다.
+프레임이나 위치가 바뀔 때만 다시 그리거나 창을 옮긴다. 아래의 서비스·장기 저장·잠금 복귀는 A3 계획이다.
 
 ```text
 Service 시작    PetLoop.new(저장된 자리 또는 화면 중앙, 기본 FfiTuning, seed)   ffi.rs:1609
                 set_displays(1619) / set_object_size(1638) / MascotAtlas → Bitmap
 매 틱           begin_tick(now)(1735) → 포커스는 묻지 않음 → finish_tick(1739)
                 → 창 위치 갱신, Player로 프레임 하나 → 다음 틱 예약
-터치            pointer_down(1786) / pointer_dragged(1795) / pointer_up(1803)
+터치            PetLoop.touch_down / pointer_dragged / pointer_up (ffi.rs)
 자리 저장       persist_position이 참일 때 SharedPreferences에 x, y
 SCREEN_OFF      set_hidden(true)(1667), 틱 중단, 창 제거
 USER_PRESENT    set_hidden(false), 창 다시 붙임, 저장된 자리에서 재개(set_position 1678)

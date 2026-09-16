@@ -682,6 +682,28 @@ impl PetRuntime {
         if self.is_hidden || !self.are_interactions_enabled || now > self.catch_armed_until {
             return self.interaction(now, Some(false), false);
         }
+        self.begin_catch(pointer, now)
+    }
+
+    /// Direct contact has no preceding cursor approach. Only a contact inside
+    /// the pet may begin the same catch used by an armed desktop pointer.
+    pub fn touch_down(&mut self, pointer: WorldPoint, now: f64) -> InteractionOutput {
+        let position = self.movement.position();
+        let inside = pointer.x >= position.x - self.object_size.width / 2.0
+            && pointer.y >= position.y - self.object_size.height / 2.0
+            && pointer.x <= position.x + self.object_size.width / 2.0
+            && pointer.y <= position.y + self.object_size.height / 2.0;
+        if self.is_hidden
+            || !self.are_interactions_enabled
+            || self.behavior.state().is_held()
+            || !inside
+        {
+            return self.interaction(now, Some(false), false);
+        }
+        self.begin_catch(pointer, now)
+    }
+
+    fn begin_catch(&mut self, pointer: WorldPoint, now: f64) -> InteractionOutput {
         self.drag_offset = self.movement.position().vector_from(pointer);
         self.click_reaction_until = 0.0;
         self.is_click_reaction_pending = false;
@@ -1588,6 +1610,41 @@ fn empty_hint() -> LocationHint {
 mod hidden_tests {
     use super::*;
     use crate::activity::CompanionEventKind;
+
+    #[test]
+    fn direct_touch_uses_the_shared_catch_drag_and_drop_without_arming_a_mouse() {
+        let mut pet = PetRuntime::new(WorldPoint::new(100.0, 100.0), RuntimeTuning::default(), 7);
+        pet.set_object_size(WorldSize::new(96.0, 104.0));
+        pet.set_displays(vec![DisplaySnapshot {
+            id: "phone".into(), name: "Test".into(),
+            frame: WorldRect::new(0.0, 20.0, 400.0, 750.0),
+            visible_frame: WorldRect::new(0.0, 20.0, 400.0, 750.0), scale: 1.0,
+        }]);
+        let contact = WorldPoint::new(140.0, 150.0);
+        pet.pointer_down(contact, 10.0);
+        assert!(!pet.state().is_held(), "desktop still requires an approach");
+        pet.touch_down(WorldPoint::new(51.0, 150.0), 10.0);
+        assert!(!pet.state().is_held());
+        pet.set_hidden(true);
+        pet.touch_down(contact, 10.0);
+        assert!(!pet.state().is_held());
+        pet.set_hidden(false);
+        pet.set_flags(true, true, false);
+        pet.touch_down(contact, 10.0);
+        assert!(!pet.state().is_held());
+        pet.set_flags(true, true, true);
+        pet.touch_down(contact, 10.0);
+        assert_eq!(pet.state(), BehaviorState::Caught);
+        // A second contact must not replace the original grab offset.
+        pet.touch_down(WorldPoint::new(120.0, 130.0), 10.01);
+        pet.pointer_dragged(WorldPoint::new(240.0, 250.0), 140.0, 10.1);
+        assert_eq!(pet.position(), WorldPoint::new(200.0, 200.0));
+        assert_eq!(pet.state(), BehaviorState::Dragged);
+        let dropped = pet.pointer_up(WorldPoint::new(500.0, 900.0), false, 10.2);
+        assert!(dropped.persist_position);
+        assert!(!pet.state().is_held());
+        assert!(pet.position().x <= 352.0 && pet.position().y <= 718.0);
+    }
 
     #[test]
     fn hiding_releases_the_catch_and_suppresses_only_luminance() {

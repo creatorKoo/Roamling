@@ -166,6 +166,13 @@ idle / wander ─────────── 170px 이내 ──▶ lookAtPoi
 
 자고 있을 때 커서가 가까이 오면 rest가 즉시 취소되고 `wake`로 간다(흐름 A의 오른쪽 경로).
 
+**Android 직접 터치 (A2, 2026-09-17).** 손가락에는 hover/접근 속도가 없으므로 펫 영역 안
+`ACTION_DOWN`은 `PetRuntime::touch_down`으로 들어온다. 숨김·상호작용 비활성·이미 잡힌 상태는
+거절하고, 데스크톱 `pointer_down`과 같은 `begin_catch`를 호출한다. 이후의 이동 임계값과
+잡힘·드롭 타이밍은 `pointer_dragged`·`pointer_up`·`finish_drop` 그대로다. Android 셸은 취소나
+소유 손가락 해제도 release로 전달하고 손가락 없는 tick의 포인터를 화면 밖으로 보낸다
+(`PreviewRuntime`, `MochiOverlay.SpriteView.onTouchEvent`; 전체 흐름은 `docs/android.md` A2).
+
 **예외가 하나 있다 — 사용자 글자 위에서 벗어나는 걸음은 170px 대역을 무시한다.**
 배회 중의 탈출이든 활동 중 자리 감시가 내는 `coveringCaret` · `coveringWork` 걸음이든 같고,
 커서가 좌석에 앉아 시작된 `seatUnderPointer` 걸음도 같다 — 커서 때문에 떠나는 걸음이 커서를

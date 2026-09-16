@@ -33,11 +33,11 @@ try {
     $exitCode = $LASTEXITCODE
     $result | Write-Output
     if ($exitCode -ne 0 -or ($result -join "`n") -notmatch 'OK \([1-9][0-9]* tests?\)') {
-        throw 'A1 instrumentation did not pass.'
+        throw 'Android preview instrumentation did not pass.'
     }
     $outputDir = Join-Path $root 'output\android-setup'
     New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
-    foreach ($name in @('a1-preview.png', 'a1-preview-landscape.png')) {
+    foreach ($name in @('a2-preview.png', 'a2-preview-landscape.png')) {
         & $adb -s $Serial pull "/sdcard/Android/data/$package/files/$name" (Join-Path $outputDir $name)
         if ($LASTEXITCODE -ne 0) { throw 'Preview screenshot was not produced.' }
     }
