@@ -231,6 +231,21 @@ USER_PRESENT    set_hidden(false), 창 다시 붙임, 저장된 자리에서 재
 
 ## 개발 환경 — 두 호스트
 
+**일상 개발은 Android 에뮬레이터를 기본으로 한다 (사용자 결정 2026-09-16).** 테스트폰은 있지만
+상시 연결할 수 없다. 아내분 기기는 Galaxy S25+ 또는 S26+로 추정되며 정확한 모델과
+Android·One UI 버전은 미확인이다(`docs/requests.md` R6). 모델 확인은 A0 착수를 막지 않는다.
+
+- Windows는 x86_64 휴대전화 AVD 하나로 시작한다. 설치 시 SDK Manager에서 제공하는 최신
+  안정 Android 이미지를 선택하고 실제 API 레벨을 기록한다. 실기기 버전은 나중에 별도로 확인한다.
+- A0의 코어 호출과 A1~A3의 오버레이·걷기·드래그·알림·잠금 전환은 에뮬레이터에서 반복 검증한다.
+  각 단계의 화면과 조작감은 사용자가 에뮬레이터로 확인한다.
+- 일반 Android AVD의 결과를 Samsung One UI 검증으로 간주하지 않는다. A3의 제조사 배터리
+  제한·잠금 뒤 복귀는 실기기 확인 전까지 미확인으로 남기고, A4는 아내분 실제 휴대전화에서 닫는다.
+- 에뮬레이터 사용과 Windows 가상화 가속 설정은
+  [Android Emulator 공식 안내](https://developer.android.com/studio/run/emulator)와
+  [하드웨어 가속 안내](https://developer.android.com/studio/run/emulator-acceleration)를 따른다.
+  도구 설치와 Windows 기능 활성화 여부는 환경 준비 때 확인한다.
+
 **개발은 macOS와 Windows 양쪽에서 한다 (사용자 결정 2026-09-14).** 그래서 이 절만 보고 어느 쪽
 기계에서든 A0를 이어갈 수 있어야 한다. **여기 없는 도구는 필요 없다.**
 
@@ -239,7 +254,7 @@ USER_PRESENT    set_hidden(false), 창 다시 붙임, 저장된 자리에서 재
 | Rust | rustup + `rustup target add aarch64-linux-android x86_64-linux-android` | 같음 (`~/.cargo/bin`이 PATH에) |
 | cargo-ndk | `cargo install cargo-ndk` | 같음 |
 | Android SDK/NDK | Android Studio의 SDK Manager, `ANDROID_HOME`·`ANDROID_NDK_HOME` | 같음. 경로에 공백·한글이 없게(`C:\Android\sdk`) |
-| JDK | Android Studio 내장 JBR(17) | 같음 |
+| JDK | Android Studio 내장 JBR. 실제 버전과 Gradle 호환성은 A0에서 확인 | 같음. 이 Windows 설치의 JBR은 25.0.3 |
 | 실기기 | USB 디버깅을 켜고 `adb devices` | 같음. USB 드라이버는 제조사 것 |
 | 에뮬레이터 ABI | Apple Silicon → **arm64-v8a** 이미지 | **x86_64** 이미지 |
 | 빌드 스크립트 | `./scripts/build-android-core.sh` | `.\scripts\build-android-core.ps1` |
@@ -261,6 +276,57 @@ USER_PRESENT    set_hidden(false), 창 다시 붙임, 저장된 자리에서 재
   `roamling-win`처럼 CI만이 방어선인 구멍을 만들지 않기 위해서다.
 - Windows 셸과 Android 셸은 서로의 도구를 요구하지 않는다. `.cargo/config.toml`의 타겟 키가 그 격리다.
 
+### Windows 환경 준비 결과 — 2026-09-16
+
+사용자가 원격 작업 중이라 Windows 기능·BIOS·드라이버 변경과 재부팅 없이 준비했다.
+공식 ZIP 배포본을 사용자 폴더에 풀고 시작 메뉴 바로가기를 만들었으며 **IDE 첫 실행은 하지 않았다.**
+이 절은 이 PC의 설치 기록이고, 위의 Android 빌드 스크립트·Gradle 프로젝트가 구현됐다는 뜻은 아니다.
+
+| 구성 | 설치 결과 |
+|---|---|
+| Android Studio | Quail 4 / 2026.1.4.7, `%LOCALAPPDATA%\Programs\android-studio` |
+| 내장 Java | JBR 25.0.3, 위 경로의 `jbr` |
+| SDK 루트 | `C:\Android\sdk` |
+| SDK 패키지 | `platforms;android-37.1`, `build-tools;37.0.0`, `platform-tools` 37.0.1 |
+| 명령줄 도구 | 공식 다운로드 페이지의 ZIP, revision 22.0 (`cmdline-tools\latest`) |
+| NDK | r30 / 30.0.16248370 |
+| Emulator | 37.1.11 |
+| 가상 기기 | `Roamling_API37_1`, `medium_phone`, x86_64, CPU 2개, RAM 2048MB |
+| 시스템 이미지 | `system-images;android-37.1;google_apis_ps16k;x86_64`, revision 9 |
+| Rust | `aarch64-linux-android`·`x86_64-linux-android` 설치, `cargo-ndk` 4.1.2 |
+
+사용자 범위에 `ANDROID_HOME`, `ANDROID_NDK_HOME`, `JAVA_HOME`을 설정하고 PATH에는
+SDK의 `platform-tools`, `emulator`, `cmdline-tools\latest\bin`을 추가했다. 기존 항목은 보존했다.
+Studio와 명령줄 도구 ZIP은 [공식 다운로드 페이지](https://developer.android.com/studio)의
+SHA-256과 비교했고, SDK 패키지는 [sdkmanager](https://developer.android.com/tools/sdkmanager)로 설치했다.
+
+**확인한 것:**
+
+- `emulator -accel-check` exit 0, `WHPX(10.0.26200) is installed and usable`.
+  WMI의 `HypervisorPlatform.InstallState=2` 조회와 달랐으므로 실제 도구 검사와 부팅 결과를 우선한다.
+  Windows 기능을 바꿀 필요가 없었고, BIOS 가상화가 꺼졌다고 단정하지 않는다.
+- 창 없는 부팅 약 77초 뒤 `sys.boot_completed=1`, `adb` 연결 `device`.
+  게스트는 Android 17, API 37, 페이지 크기 16384바이트라고 응답했다.
+- 임시 독립 크레이트를 `cargo ndk`로 ARM64·x86_64 둘 다 빌드했다.
+  `llvm-readelf -l`에서 두 `.so`의 LOAD 정렬이 모두 `0x4000`이다.
+  **Roamling 코어나 APK를 빌드·실행한 검사는 아니다.**
+- 검사 뒤 해당 에뮬레이터를 종료하고 adb 기기 목록이 빈 것을 확인했다.
+  캡처는 첫 화면 전환 중 모습이어서 런처 홈 화면의 육안 검증으로 세지 않는다.
+
+다운로드·검증 로그와 임시 크레이트는 미추적 `output/android-setup/`에 있다. SDK 설치 로그에
+`sdkmanager`의 Android CLI 전환 권고가 있으나 설치 exit는 0이다.
+
+다음에 새 터미널에서 가상 기기를 직접 볼 때는 아래처럼 실행한다. 현재 세션에 환경 변수가
+아직 반영되지 않았더라도 실행 파일의 절대 경로를 쓰면 된다.
+
+```powershell
+& 'C:\Android\sdk\emulator\emulator.exe' -avd Roamling_API37_1 -memory 2048 -cores 2
+& 'C:\Android\sdk\platform-tools\adb.exe' devices
+```
+
+남은 것은 IDE 첫 실행, 실제 창에서의 조작 확인, A0의 Gradle·Rust 연결이다. 내장 JBR 25를
+지원하는 Gradle wrapper 버전은 A0에서 고정한다. macOS 환경과 Samsung One UI 실기기는 미검증이다.
+
 ## 게이트
 
 **각 게이트는 사용자의 실사용 확인으로 닫는다.** 한 단계의 체감 품질을 닫고 피드백을 받은 뒤에
@@ -268,7 +334,7 @@ USER_PRESENT    set_hidden(false), 창 다시 붙임, 저장된 자리에서 재
 
 | | 무엇 | 닫는 조건 |
 |---|---|---|
-| A0 | 빌드 뚫기 — 크레이트, 스크립트 쌍, Gradle 뼈대 | 기기에서 `PetLoop`를 만들고 틱 한 번 돌려 x, y를 로그로 본다. 화면에는 아무것도 안 뜬다 |
+| A0 | 빌드 뚫기 — 크레이트, 스크립트 쌍, Gradle 뼈대 | 에뮬레이터에서 `PetLoop`를 만들고 틱 한 번 돌려 x, y를 로그로 본다. 화면에는 아무것도 안 뜬다 |
 | A1 | 모치가 보인다 — 권한 화면(`Settings.ACTION_MANAGE_OVERLAY_PERMISSION` 인텐트), 오버레이, Bitmap, idle | 움직이지 않아도 좋다. 그림이 제자리에 뜬다 |
 | A2 | 걷고 잡힌다 | 화면 경계 안 걷기·쉬기와 드래그 |
 | A3 | 잠금과 알림 | foreground service, 숨기기/종료, SCREEN_OFF/USER_PRESENT |
