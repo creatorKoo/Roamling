@@ -82,7 +82,9 @@
 - **흐름** `MascotPetFactory`·`PlaceholderPetFactory`·`roamling-pet`의 표시 메타데이터 →
   `ShellMenu`·Windows `tray`의 현지화된 내장 이름 → 팔레트 안내와 Android 문자열.
   설치된 외부 펫의 이름은 해당 패키지 값을 그대로 표시한다. README와 현재 메뉴 안내도 맞춘다.
-- **상태** 완료. Windows 공통·메뉴 회귀 검사와 release 빌드, Android 두 ABI 빌드·APK·lint 통과. macOS는 소스만 수정했으며 컴파일·UI 확인은 남아 있다. 기존 A1 변경은 보존했고 버전·태그·발행은 하지 않았다.
+- **상태** 완료. Windows 공통·메뉴 회귀 검사와 release 빌드, Android 두 ABI 빌드·APK·lint 통과.
+  `1349475`로 커밋했고 [GitHub macOS 검증](https://github.com/creatorKoo/Roamling/actions/runs/35114221148)도
+  테스트·서명·패키징·실행까지 통과했다. 승인에 따라 `0.6.4` 릴리즈를 준비한다. 실제 사용자 UI 확인은 별개다.
 
 ### R7. 선택한 색 기억과 Mochi 하위 색 선택
 

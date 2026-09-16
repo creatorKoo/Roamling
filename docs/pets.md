@@ -11,7 +11,10 @@
 release 빌드 포함). 외부 패키지 이름 보존과 내장 메뉴 제목은 기존 메뉴 검사에서 확인한다.
 Android ARM64·x86_64 빌드와 `assembleDebug`·`lintDebug` 통과(오류 0, 기존 `DataExtractionRules` 경고 1).
 APK 리소스에도 `Meet Bori`·`보리를 만나 보세요`가 들어 있음을 확인했다.
-macOS는 소스·기존 테스트 기대값만 수정했고 이 Windows 호스트에서 컴파일·화면 확인은 하지 못했다.
+이 Windows 호스트에서는 macOS 컴파일·화면 확인을 하지 못했다. 이후 커밋 `1349475`의
+[GitHub Check macOS](https://github.com/creatorKoo/Roamling/actions/runs/35114221148)가 통과했다:
+Swift·Rust 테스트, 서명 빌드, DMG·ZIP 검증과 패키지에서 꺼낸 앱의 실행 확인까지 포함한다.
+실제 사용자에 의한 macOS 메뉴 육안 확인은 이 CI와 별개다.
 이번 이름 수정 후 Android 실화면 검사는 재실행하지 않았다. 로그는 미추적
 `output/android-setup/bori-{windows-tests,android-native,android-gradle}.log`에 있다.
 
