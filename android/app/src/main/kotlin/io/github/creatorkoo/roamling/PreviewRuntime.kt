@@ -31,6 +31,8 @@ internal class PreviewRuntime(
         private set
     var capability: UByte = 0u
         private set
+    var positionNeedsSaving = false
+        private set
     val position: FfiPoint get() = pet.position()
     val hasContact: Boolean get() = finger != null
     val interval: Double get() = pet.preferredTickInterval(clock())
@@ -58,6 +60,7 @@ internal class PreviewRuntime(
             affectionHeld = false,
         ))
         capability = result.capability
+        positionNeedsSaving = result.persistPosition
         frame = player.advance(capability, result.deltaTime * result.locomotionRate)
     }
 
@@ -94,8 +97,14 @@ internal class PreviewRuntime(
 
     private fun apply(result: FfiInteractionOutput): Double {
         capability = result.capability
+        positionNeedsSaving = result.persistPosition
         frame = player.advance(capability, 0.0)
         return result.rescheduleAfter ?: interval
+    }
+
+    fun setHidden(hidden: Boolean) {
+        if (hidden) up() else noteInput()
+        pet.setHidden(hidden)
     }
 
     override fun close() {

@@ -9,9 +9,11 @@ import android.graphics.Paint
 import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.RectF
+import android.hardware.display.DisplayManager
 import android.os.Handler
 import android.os.Looper
 import android.view.Choreographer
+import android.view.Display
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -24,9 +26,16 @@ import uniffi.roamling_core.FfiRect
 import kotlin.math.ceil
 import kotlin.math.roundToInt
 
-/** Activity-owned window and input adapter; all decisions live in PreviewRuntime's core. */
-internal class MochiOverlay(context: Context, private val images: MochiImages) : AutoCloseable {
-    private val windowContext = context.createWindowContext(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, null)
+/** Service-owned window and input adapter; all behavior lives in the shared core. */
+internal class MochiOverlay(
+    context: Context,
+    private val images: MochiImages,
+    private val savePosition: (FfiPoint) -> Unit = {},
+    private val onFailure: (RuntimeException) -> Unit = { throw it },
+) : AutoCloseable {
+    private val windowContext = context.createDisplayContext(
+        context.getSystemService(DisplayManager::class.java).getDisplay(Display.DEFAULT_DISPLAY)
+    ).createWindowContext(WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY, null)
     private val manager = windowContext.getSystemService(WindowManager::class.java)
     private val choreographer = Choreographer.getInstance()
     private val handler = Handler(Looper.getMainLooper())
@@ -35,8 +44,12 @@ internal class MochiOverlay(context: Context, private val images: MochiImages) :
     private var params: WindowManager.LayoutParams? = null
     private var closed = false
     private var windowAdded = false
+    private var visibleRequested = false
+    private var attachmentGeneration = 0
     private val view = SpriteView(windowContext)
-    val isShowing: Boolean get() = view.isAttachedToWindow
+    val isShowing: Boolean get() = visibleRequested && view.isAttachedToWindow
+    internal var tickCount = 0L
+        private set
     val position: FfiPoint? get() = runtime?.position
     internal val boundsOnScreen: Rect get() {
         val location = IntArray(2)
@@ -57,9 +70,10 @@ internal class MochiOverlay(context: Context, private val images: MochiImages) :
     private fun tick() {
         if (closed || !isShowing) return
         val active = runtime ?: return
+        tickCount++
         active.tick()
         render()
-        schedule(active.interval)
+        if (!closed) schedule(active.interval)
     }
 
     private fun schedule(seconds: Double) {
@@ -79,12 +93,14 @@ internal class MochiOverlay(context: Context, private val images: MochiImages) :
         val active = runtime ?: return
         val layout = params ?: return
         val point = active.position
+        if (active.positionNeedsSaving) savePosition(point)
         val x = (point.x * density - layout.width / 2.0).roundToInt()
         val y = (point.y * density - layout.height / 2.0).roundToInt()
         if (layout.x != x || layout.y != y) {
             layout.x = x
             layout.y = y
-            manager.updateViewLayout(view, layout)
+            try { manager.updateViewLayout(view, layout) }
+            catch (failure: RuntimeException) { onFailure(failure); return }
         }
         if (active.frame != view.frame) {
             view.frame = active.frame
@@ -94,9 +110,10 @@ internal class MochiOverlay(context: Context, private val images: MochiImages) :
 
     // Core/raw touch coordinates have a physical left origin even in RTL locales.
     @SuppressLint("RtlHardcoded")
-    fun show(centerX: Int, centerY: Int, carried: FfiPoint? = null, onShown: () -> Unit) {
+    fun show(centerX: Int? = null, centerY: Int? = null, carried: FfiPoint? = null, onShown: () -> Unit) {
         check(!closed)
         if (isShowing) return
+        if (runtime != null) { resume(onShown); return }
         val width = (PreviewRuntime.WIDTH * density).roundToInt()
         val height = (PreviewRuntime.HEIGHT * density).roundToInt()
         val metrics = manager.currentWindowMetrics
@@ -113,7 +130,7 @@ internal class MochiOverlay(context: Context, private val images: MochiImages) :
             (bounds.height() - insets.top - insets.bottom) / density)
         val display = FfiDisplay("android", safe, safe)
         val active = PreviewRuntime(images.atlas, display,
-            carried ?: FfiPoint(centerX / density, centerY / density))
+            carried ?: FfiPoint((centerX ?: bounds.centerX()) / density, (centerY ?: bounds.centerY()) / density))
         runtime = active
         val params = WindowManager.LayoutParams(
             width, height, WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
@@ -131,27 +148,43 @@ internal class MochiOverlay(context: Context, private val images: MochiImages) :
         this.params = params
         active.tick()
         view.frame = active.frame
-        manager.addView(view, params)
+        resume(onShown)
+    }
+
+    private fun resume(onShown: () -> Unit) {
+        check(!closed)
+        runtime?.setHidden(false)
+        visibleRequested = true
+        val generation = ++attachmentGeneration
+        manager.addView(view, checkNotNull(params))
         windowAdded = true
         // addView returns before attachment. Report the actual visible state
         // on the next UI turn so Show/Hide controls do not stay stale.
         view.post {
-            if (!closed && isShowing) {
+            if (!closed && isShowing && generation == attachmentGeneration) {
                 onShown()
-                schedule(active.interval)
+                schedule(checkNotNull(runtime).interval)
             }
+        }
+    }
+
+    fun pause() {
+        visibleRequested = false
+        attachmentGeneration++
+        choreographer.removeFrameCallback(animate)
+        handler.removeCallbacks(delayedTick)
+        runtime?.setHidden(true)
+        position?.let(savePosition)
+        if (windowAdded) {
+            manager.removeViewImmediate(view)
+            windowAdded = false
         }
     }
 
     override fun close() {
         if (closed) return
         closed = true
-        choreographer.removeFrameCallback(animate)
-        handler.removeCallbacks(delayedTick)
-        if (windowAdded) {
-            manager.removeViewImmediate(view)
-            windowAdded = false
-        }
+        pause()
         runtime?.close()
         runtime = null
     }

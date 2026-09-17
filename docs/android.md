@@ -3,7 +3,7 @@
 **이름 변경 (2026-09-17):** 현재 UI의 이름은 `보리 / Bori`다. `MochiImages`·`MochiOverlay` 같은
 내부 식별자는 유지한다. 아래 2026-09-16 검증 기록과 당시 캡처의 모치는 같은 마스코트의 이전 이름이다.
 
-**상태: A2 Windows 구현·에뮬레이터 검증 완료, 사용자 체감 확인 대기 (2026-09-17).** A0 macOS 검증은 별도 잔여 항목이다. 첫 사용 대상은 아내분의 Android
+**상태: A2는 66775b2로 커밋, A3 서비스·알림·잠금 복귀 구현과 에뮬레이터 검사 완료 (2026-09-17).** 사용자 체감·Samsung 실기기와 A0 macOS 검증은 남아 있다. 첫 사용 대상은 아내분의 Android
 휴대전화다. 데스크톱판의 모든 기능을 옮기기보다, 먼저 모치가 휴대전화 안에서 살아 있는 것처럼
 보이게 한다.
 
@@ -29,8 +29,9 @@
 - 잠금과 해제를 감지해 오버레이를 멈추고 다시 시작하기
 - 지원되는 기기의 잠금화면 위젯에는 쉬거나 자는 자세 표시
 
-첫 실행에서 사용자가 Android의 **다른 앱 위에 표시** 권한을 직접 허용하게 한다. 모치가 보이는
-동안만 foreground service를 쓰고, 알림에서 언제든 숨기거나 끝낼 수 있게 한다.
+첫 실행에서 사용자가 Android의 **다른 앱 위에 표시** 권한을 직접 허용하게 한다. 보리를 시작한
+세션 동안 foreground service를 쓰고, 알림에서 언제든 숨기거나 끝낼 수 있게 한다.
+숨김·잠금 중에는 창과 틱을 중단하며 재개/종료용 알림은 유지한다(`CompanionService`, `MochiOverlay.pause`).
 
 ## 기존 프로젝트에서 가져올 것
 
@@ -65,7 +66,7 @@ Windows는 rlib 직결(`rust/roamling-core/Cargo.toml:11`의 `crate-type`), **An
 `docs/history/windows.md` 3절이고, 언어를 바꾸자는 논의를 시작하기 전에 읽을 문서도 그것이다.
 
 seam의 정본 표는 `docs/architecture.md`의 "플랫폼 seam" 절에 있다. Android 열은
-현재 A0/A1/A2 코드를 적고, 아래의 첫 판 표는 이후 게이트까지 포함한 계획이다.
+현재 A0–A3 코드를 적고, 아래의 첫 판 표는 이후 게이트까지 포함한 계획이다.
 
 ## 무엇이 어디에 사나
 
@@ -77,7 +78,7 @@ android/                 Gradle 프로젝트. 모듈 둘
   core/                  생성된 Kotlin 바인딩(미추적) + jniLibs/<abi>/*.so + JNA
   app/                   A0: debug 전용 CoreSmokeActivity. MainActivity 권한 화면과
                          MochiOverlay 미리보기. A2 PreviewRuntime이 공유 코어 틱·터치를 연결.
-                         서비스·알림은 A3.
+                         A3 CompanionService가 창·코어·알림·잠금 수명을 소유.
 scripts/build-android-core.sh    build-rust-core.sh의 형제
 scripts/build-android-core.ps1   같은 산출물을 내는 Windows 쪽 (개발 환경 절)
 ```
@@ -200,9 +201,98 @@ UI 문구는 `android/app/src/main/res/values{,-ko}/strings.xml`에 같은 키�
 속도·드래그 체감은 사용자 확인을 기다린다. 이번 변경의 macOS 및 Android macOS 호스트 빌드,
 Samsung/One UI 실측은 하지 않았다. 0.6.4의 이전 macOS CI 성공을 이번 변경 검증으로 세지 않는다.
 
+### A3 구현 흐름 — 사용자 "응 커밋하고 다음 진행" 승인 (2026-09-17)
+
+1. `MainActivity`는 `CompanionService.LocalBinder`로 상태를 구독하며, 더 이상 창·native 객체를
+   소유하지 않는다. 화면에 있는 사용자의 보기 요청에서만 `startForegroundService`를 호출한다.
+   overlay 설정 복귀 후 알림 권한을 안내한다. 제어 알림을 볼 수 있게 알림 허용을 시작 조건으로
+   두고, 거절하면 설명과 다시 요청/설정 경로를 제공한다. OS가 알림 허용을 FGS 필수 조건으로
+   강제하는 것은 아니며, 이 앱의 시작 UX 선택이다.
+2. `CompanionService.onStartCommand`는 즉시 조용한 LOW 알림과 `specialUse` foreground를 시작한
+   뒤 atlas를 비동기로 로드한다. Manifest에 FGS·SPECIAL_USE·POST_NOTIFICATIONS를 선언하고
+   subtype을 설명한다. 요청 도중 숨김·종료 시 늦게 끝난 로더가 창을 되살리지 않도록 세대를 검사한다.
+3. 서비스가 `MochiOverlay`·이미지·코어를 소유한다. Home/다른 앱/Activity 재생성은 계속 표시한다.
+   `MochiOverlay.pause/show`는 코어 hidden 플래그·접촉 해제·모든 예약 취소·창 제거/재부착을
+   함께 수행한다. 화면 밖 터치는 시각만 받으며, 화면 캡처·접근성·wake lock은 쓰지 않는다.
+4. 동적 screen receiver가 OFF/ON/USER_PRESENT를 받고 `PowerManager.isInteractive`와
+   `KeyguardManager.isKeyguardLocked`를 다시 확인한다. 잠금 위에는 창이 없고 틱도 없다.
+   해제 후 사용자 숨김 상태가 아니면 마지막 자리에서 재개한다. 알림 숨김은 수동 상태라 해제해도
+   유지한다. 서비스 자체를 새로 시작하는 unlock/boot receiver는 만들지 않는다.
+   이 세 protected system broadcast의 receiver는 `RECEIVER_EXPORTED`로 등록한다. Android 17
+   테스트 기기의 SystemUI는 system UID 1000이 아닌 `android.uid.systemui/10185`여서
+   NOT_EXPORTED에서는 USER_PRESENT를 놓쳤다. 프레임을 계속 폴링하는 우회 대신 수신 경계를
+   바로잡고, 표시 직전 OS의 interactive/keyguard 상태를 계속 재확인한다.
+   근거: [시스템 broadcast의 UID와 exported 규칙](https://developer.android.com/develop/background-work/background-tasks/broadcasts).
+5. 알림의 숨기기/다시 보기/종료는 명시적 immutable PendingIntent로 비공개 서비스에 전달한다.
+   숨김·잠금 중 알림은 상태와 재개/종료 제어를 위해 유지하되 native 틱을 중지한다.
+   종료는 창·콜백·이미지·알림을 정리하고 `stopSelf`한다. `START_NOT_STICKY`로 강제 종료나
+   OS process 종료 뒤 자동 부활시키지 않는다. 필요하면 사용자가 앱에서 다시 시작한다.
+6. `PreviewRuntime`의 persist_position 출력과 pause/stop/config 전환 때 마지막 중심 dp를
+   SharedPreferences에 저장한다. `CompanionService.onConfigurationChanged`는 위치를 운반해
+   새 metrics/density의 창을 만든다. 권한 회수(AppOps watcher)는 즉시 중단하고 설정 복귀 시 재검사한다.
+
+검증: 기존 A2 이동/드래그·회전 검사를 서비스 소유 수명에 맞춰 유지하고, 실제 Home/다른 앱,
+알림 PendingIntent 숨김/재개/종료, 화면 OFF/ON·keyguard 해제, 위치 저장, 권한 거절/회수,
+서비스 중단 후 자동 부활 없음까지 에뮬레이터에서 확인한다. 삼성 배터리 정책·장시간 실측은 A4다.
+근거: [FGS specialUse](https://developer.android.com/develop/background-work/services/fgs/service-types#special-use),
+[백그라운드 시작 제한](https://developer.android.com/develop/background-work/services/fgs/restrictions-bg-start),
+[알림 권한](https://developer.android.com/develop/ui/views/notifications/notification-permission),
+[START_NOT_STICKY](https://developer.android.com/reference/android/app/Service#START_NOT_STICKY).
+
+### A3 결과 (2026-09-17, Windows 호스트)
+
+- `CompanionService`가 Activity와 독립적으로 창·native runtime·알림을 소유한다. Home/다른 앱에서도
+  유지하고 알림의 숨김/다시 보기/종료를 처리한다. `MochiOverlay.pause`는 숨김·화면 꺼짐·잠금 때
+  창과 틱을 중단하며, `USER_PRESENT` 뒤 수동 숨김이 아니면 저장 위치에서 복귀한다.
+- Gradle `assembleDebug`·`assembleDebugAndroidTest`·`lintDebug` 성공. lint 오류 0, 기존
+  `DataExtractionRules` 경고 1. `zipalign -c -P 16 4` 통과. A3는 Kotlin 셸 변경이며 A2의
+  Rust 코어·native 라이브러리·fixture·trace는 변경하지 않았다.
+- Android 17 / API 37 / 16 KB x86_64 에뮬레이터에서 `PreviewTest`·`CompanionServiceTest`
+  **5개 통과**. 기존 걷기·드래그·회전·픽셀 검사와 Home/다른 앱 유지, 알림 action 실행,
+  숨김/잠금 중 틱 중단, 실제 swipe 잠금 해제 후 복귀, 수동 숨김 유지, 종료·위치 복원,
+  오버레이 권한 회수 시 종료를 확인했다. 홈 전환으로 회전이 바뀌어도 서비스의 현재 창을 검사한다.
+- 잠금 해제 신호가 SystemUI의 별도 UID에서 와서 비공개 receiver에 전달되지 않는 결함을 재현했다.
+  위 흐름의 보호된 시스템 broadcast 수신 설정으로 고친 뒤 최종 5개 검사를 다시 통과했다.
+- 실제 권한 UI에서 알림 거절 시 시작하지 않고, 재요청에서 허용하면 시작됨을 확인했다
+  (`MainActivity.requestShow`·`onRequestPermissionsResult`). 런처 위 보리, 조용한 알림과 펼친
+  숨기기/종료 버튼을 캡처로 확인했고 실제 종료 버튼도 눌러 확인했다.
+- 테스트 후 AVD의 잠금 설정·알림 권한·알림 요청 이력을 복구했다. 기존 overlay 권한 `allow`는
+  유지했다. 창 없는 에뮬레이터를 종료하고 원래 설치본 데스크톱 펫을 다시 실행했다.
+
+재현 명령은 아래 A1 절의 Gradle·`test-android-preview.ps1`과 같다. 계측 스크립트는 명시적인
+에뮬레이터에만 임시 알림 권한과 swipe 잠금을 적용하고 `finally`에서 원복한다.
+로그는 `output/android-setup/a3-{gradle,test-build,instrumentation}.log`, 캡처는
+`a3-preview.png`·`a3-preview-landscape.png`·`a3-home.png`·`a3-notification.png`와 수동 검사의
+`a3-notification-expanded.png`다. APK는 `android/app/build/outputs/apk/debug/app-debug.apk`다.
+이 산출물은 모두 미추적이다.
+
+Samsung/One UI의 장시간 유지·배터리 제한, PIN/생체 인증 잠금, ARM64 실행은 미검증이다.
+A3에서 Windows 전체 게이트나 macOS CI를 새로 실행한 것은 아니다. 사용자 체감 확인 뒤 A4로 간다.
+
+### A3 사용자 확인 순서
+
+기존 `Roamling_API37_1` 에뮬레이터에는 A3 개발 APK가 설치되어 있다. 아래 명령으로 창을 열고
+앱 목록에서 Roamling을 실행한다. 이미 해당 AVD가 실행 중이면 기존 창을 사용한다.
+
+```powershell
+& 'C:\Android\sdk\emulator\emulator.exe' -avd Roamling_API37_1 -memory 2048 -cores 2
+```
+
+1. **보리 보기**를 누르고 알림을 허용한다. 크기·걷기 속도와 손가락으로 잡아 옮기는 느낌을 본다.
+2. 홈으로 나간 뒤 다른 앱을 열어도 보리가 남아 있고, 주변 버튼을 누르는 데 방해되는지 본다.
+3. 알림을 펼쳐 **숨기기 → 다시 보기**를 확인한다. 숨긴 상태에서는 잠금·해제해도 숨김이 유지되어야 한다.
+4. 보리를 표시한 상태에서 에뮬레이터 전원 버튼으로 화면을 끄고 다시 켠다. 잠금화면에는 보리가
+   없고 잠금을 해제하면 돌아오는지 본다. AVD에 잠금이 꺼져 있으면 화면 꺼짐/켜짐만 확인된다.
+5. 알림의 **종료**를 누르면 보리와 알림이 사라지는지, 앱을 다시 열기만 해서는 시작되지 않고
+   **보리 보기**를 눌러야 다시 나오는지 확인한다.
+
+이는 `MainActivity.requestShow`, `CompanionService`의 알림 action·screen receiver·`stopCompanion`,
+`MochiOverlay`의 터치 경로에 대한 체감 확인이다. 자동 검사 통과와 별도로 결과를 받는다.
+Samsung 배터리 제한과 PIN/생체 인증은 이 에뮬레이터 확인으로 완료 처리하지 않는다.
+
 ## Kotlin이 채우는 것 — 첫 판 계획
 
-아래 표는 A3까지 포함한다. A2의 실제 구현은 위 구현 흐름과 `docs/architecture.md`의 표를 따른다.
+아래 표는 A3까지 포함한다. 현재 구현은 위 구현 흐름과 `docs/architecture.md`의 표를 따른다.
 
 런타임이 기계에 닿는 통로는 `PlatformServices` 하나이고(`Sources/RoamlingEngine/
 PlatformServices.swift:54-71`), 자리는 열하나다(`docs/architecture.md:586-629`). Android는 그중
@@ -245,7 +335,7 @@ PlatformServices.swift:54-71`), 자리는 열하나다(`docs/architecture.md:586
 `user_idle_duration < 0.8`이면 쉬던 펫을 깨우므로(`rust/roamling-core/src/pet_runtime.rs:493`),
 0을 주면 영영 못 자고 큰 값을 주면 영영 못 깬다. 오버레이 밖 터치는 `FLAG_WATCH_OUTSIDE_TOUCH`의
 `ACTION_OUTSIDE`(좌표 없이 시각만)와 Activity 터치로 받는다. 화면 켜짐·`USER_PRESENT`에
-같은 시계를 리셋하는 것은 A3 계획이다.
+같은 시계를 리셋하며, 잠금 여부를 확인한 후 재개한다(`CompanionService.reconcileVisibility`).
 **내용은 보지 않고 시각만 본다** — macOS가 `CGEventSource`의 경과 시간 하나만 쓰는 것과 같은 선이다.
 
 **`pointer_is_over_pet`은 View가 곧 hit region이다.** 오버레이 창이 펫 크기라 터치가 그 안에
@@ -281,7 +371,7 @@ PlatformServices.swift:54-71`), 자리는 열하나다(`docs/architecture.md:586
 ## 틱과 생명주기 — A2/A3 계획
 
 A2는 `PreviewRuntime`에서 `PetLoop`를 진행하고 `MochiOverlay`가 주기·창·터치를 연결한다.
-프레임이나 위치가 바뀔 때만 다시 그리거나 창을 옮긴다. 아래의 서비스·장기 저장·잠금 복귀는 A3 계획이다.
+A3는 `CompanionService`가 이를 소유하며 위치를 SharedPreferences에 저장한다. 아래는 현재 흐름이다.
 
 ```text
 Service 시작    PetLoop.new(저장된 자리 또는 화면 중앙, 기본 FfiTuning, seed)   ffi.rs:1609
@@ -302,7 +392,8 @@ USER_PRESENT    set_hidden(false), 창 다시 붙임, 저장된 자리에서 재
 - **터치 뒤의 재예약을 빠뜨리지 않는다.** `InteractionOutput`의 `reschedule_after`
   (`rust/roamling-core/src/ffi.rs:1538`)가 차 있으면 그 시각에 한 번 더 틱한다.
 - 시계는 `SystemClock.elapsedRealtime()`을 초로 바꾼 단조 시각이다. core는 f64 초만 받는다.
-- foreground service는 펫이 보이는 동안만 쓴다("첫 판에 넣을 것"). Android 14+의
+- foreground service는 사용자가 시작한 세션 동안 유지한다. 숨김·잠금은 틱 없는 일시정지이고
+  알림 [종료]가 세션을 끝낸다. Android 14+의
   `foregroundServiceType`은 `specialUse`로 선언하고 사유를 매니페스트에 적는다.
 - 배터리 산술은 `docs/battery.md` 그대로이고, **데스크톱의 지배 항목이 여기엔 아예 없다** —
   62 ms짜리 화면 캡처(`docs/battery.md:11`)를 첫 판이 하지 않는다. 남는 것은 틱 캐던스뿐이고

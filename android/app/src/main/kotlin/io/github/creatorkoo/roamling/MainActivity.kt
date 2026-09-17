@@ -2,15 +2,21 @@
 // SPDX-License-Identifier: GPL-3.0-only
 package io.github.creatorkoo.roamling
 
+import android.Manifest
 import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.content.ComponentName
 import android.content.Intent
+import android.content.ServiceConnection
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.IBinder
 import android.provider.Settings
 import android.util.Log
 import android.view.Gravity
@@ -21,145 +27,132 @@ import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import java.util.concurrent.Executors
 import kotlin.math.roundToInt
-import uniffi.roamling_core.FfiPoint
 
 class MainActivity : Activity() {
-    private val loader = Executors.newSingleThreadExecutor()
-    private var images: MochiImages? = null
-    private var overlay: MochiOverlay? = null
-    private var carriedPosition: FfiPoint? = null
+    private var service: CompanionService? = null
+    private var bound = false
     private var resumed = false
-    private var showRequested = false
     private var awaitingPermission = false
-    private var loadFailed = false
+    private var startWhenConnected = false
     private lateinit var showButton: Button
     private lateinit var hideButton: Button
+    private lateinit var stopButton: Button
     private lateinit var status: TextView
     private lateinit var stage: View
-    internal val previewIsAttached: Boolean get() = overlay?.isShowing == true
-    internal val previewOverlay: MochiOverlay? get() = overlay
+    internal val previewIsAttached: Boolean get() = service?.visible == true
+    internal val previewOverlay: MochiOverlay? get() = service?.overlay
+    internal val companionService: CompanionService? get() = service
+    private val changed: () -> Unit = { refresh() }
+    private val connection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName, binder: IBinder) {
+            service = (binder as CompanionService.LocalBinder).service
+            service?.subscribe(changed)
+            service?.validatePermissions()
+            if (startWhenConnected && resumed) {
+                startWhenConnected = false
+                requestShow()
+            }
+        }
+        override fun onServiceDisconnected(name: ComponentName) { service = null; refresh() }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        showRequested = savedInstanceState?.getBoolean("show_requested") ?: false
         awaitingPermission = savedInstanceState?.getBoolean("awaiting_permission") ?: false
-        savedInstanceState?.getDoubleArray("preview_position")?.takeIf { it.size == 2 }?.let {
-            carriedPosition = FfiPoint(it[0], it[1])
-        }
         buildScreen()
-        loader.execute {
-            val loaded = runCatching { MochiImages.load() }
-            runOnUiThread {
-                if (isDestroyed || isFinishing) {
-                    loaded.getOrNull()?.close()
-                } else {
-                    images = loaded.getOrNull()
-                    loadFailed = loaded.isFailure
-                    loaded.exceptionOrNull()?.let { Log.e("Roamling", "Mochi load failed", it) }
-                    refresh()
-                }
-            }
-        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        bound = bindService(Intent(this, CompanionService::class.java), connection, BIND_AUTO_CREATE)
     }
 
     override fun onResume() {
         super.onResume()
         resumed = true
+        service?.validatePermissions()
         if (awaitingPermission) {
             awaitingPermission = false
-            showRequested = Settings.canDrawOverlays(this)
+            if (Settings.canDrawOverlays(this)) {
+                if (service == null) startWhenConnected = true else requestShow()
+            }
         }
         refresh()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
-        outState.putBoolean("show_requested", showRequested || previewIsAttached)
         outState.putBoolean("awaiting_permission", awaitingPermission)
-        (overlay?.position ?: carriedPosition)?.let { outState.putDoubleArray("preview_position", doubleArrayOf(it.x, it.y)) }
         super.onSaveInstanceState(outState)
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
         if (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_MOVE ||
-            event.actionMasked == MotionEvent.ACTION_UP) overlay?.noteInput()
+            event.actionMasked == MotionEvent.ACTION_UP) service?.overlay?.noteInput()
         return super.dispatchTouchEvent(event)
     }
 
     override fun onStop() {
         resumed = false
-        // On Android P+, state saving can happen after onStop. Keep the
-        // display intent for configuration recreation before removing the view.
-        showRequested = isChangingConfigurations && (showRequested || previewIsAttached)
-        removeOverlay()
+        service?.unsubscribe(changed)
+        service = null
+        if (bound) { unbindService(connection); bound = false }
+        // The explicitly started foreground service retains the companion.
         super.onStop()
     }
 
-    override fun onDestroy() {
-        removeOverlay()
-        images?.close()
-        images = null
-        loader.shutdown()
-        super.onDestroy()
-    }
-
     private fun requestShow() {
+        if (!resumed) return
         if (!Settings.canDrawOverlays(this)) {
             awaitingPermission = true
-            try {
-                startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")))
-            } catch (_: ActivityNotFoundException) {
-                awaitingPermission = false
-                status.setText(R.string.permission_unavailable)
+            try { startActivity(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))) }
+            catch (_: ActivityNotFoundException) { awaitingPermission = false; status.setText(R.string.permission_unavailable) }
+            return
+        }
+        if (!CompanionService.notificationsAllowed(this)) {
+            status.setText(R.string.notification_needed)
+            if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED &&
+                (!getPreferences(MODE_PRIVATE).getBoolean("notification_asked", false) || shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS))) {
+                getPreferences(MODE_PRIVATE).edit().putBoolean("notification_asked", true).apply()
+                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+            } else {
+                // Settings return is deliberately not an automatic start.
+                try {
+                    startActivity(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
+                } catch (_: ActivityNotFoundException) { status.setText(R.string.permission_unavailable) }
             }
-        } else {
-            showRequested = true
-            refresh()
+            return
+        }
+        try {
+            startForegroundService(Intent(this, CompanionService::class.java).setAction(CompanionService.ACTION_SHOW))
+        } catch (failure: RuntimeException) {
+            Log.e("Roamling", "Could not request companion", failure)
+            status.setText(R.string.show_failed)
         }
     }
 
-    private fun removeOverlay() {
-        overlay?.position?.let { carriedPosition = it }
-        overlay?.close()
-        overlay = null
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 1 && grantResults.firstOrNull() == PackageManager.PERMISSION_GRANTED && resumed) requestShow()
+        else refresh()
     }
 
     private fun refresh() {
-        showButton.isEnabled = images != null && !previewIsAttached
-        hideButton.isEnabled = previewIsAttached
+        val session = service
+        showButton.isEnabled = session != null && (!session.running || session.hidden)
+        hideButton.isEnabled = session?.running == true && !session.hidden
+        stopButton.isEnabled = session?.running == true
         status.setText(when {
-            loadFailed -> R.string.load_failed
-            images == null -> R.string.loading
+            session?.error != null -> checkNotNull(session.error)
             !Settings.canDrawOverlays(this) -> R.string.permission_needed
-            previewIsAttached -> R.string.showing
+            !CompanionService.notificationsAllowed(this) -> R.string.notification_needed
+            session?.loading == true -> R.string.loading
+            session?.hidden == true -> R.string.hidden
+            session?.running == true && session.locked -> R.string.locked
+            session?.running == true -> R.string.showing
             else -> R.string.ready
         })
-        if (!resumed || !showRequested || images == null || previewIsAttached) return
-        stage.post {
-            if (!resumed || !showRequested || previewIsAttached || isDestroyed) return@post
-            if (!Settings.canDrawOverlays(this)) {
-                showRequested = false
-                refresh()
-                return@post
-            }
-            val location = IntArray(2)
-            stage.getLocationOnScreen(location)
-            val next = MochiOverlay(this, checkNotNull(images))
-            try {
-                next.show(location[0] + stage.width / 2, location[1] + stage.height / 2, carriedPosition) { refresh() }
-                overlay = next
-                showRequested = false
-                refresh()
-            } catch (failure: RuntimeException) {
-                next.close()
-                showRequested = false
-                Log.e("Roamling", "Overlay attach failed", failure)
-                status.setText(R.string.show_failed)
-            }
-        }
     }
-
     private fun buildScreen() {
         val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
         val root = LinearLayout(this).apply {
@@ -188,10 +181,15 @@ class MainActivity : Activity() {
         }
         hideButton = Button(this).apply {
             id = R.id.hide_mochi; setText(R.string.hide_mochi)
-            setOnClickListener { showRequested = false; removeOverlay(); refresh() }
+            setOnClickListener { service?.hideCompanion() }
         }
         controls.addView(showButton, LinearLayout.LayoutParams(-1, dp(56)))
         controls.addView(hideButton, LinearLayout.LayoutParams(-1, dp(56)))
+        stopButton = Button(this).apply {
+            id = R.id.stop_mochi; setText(R.string.stop_mochi)
+            setOnClickListener { service?.stopCompanion() }
+        }
+        controls.addView(stopButton, LinearLayout.LayoutParams(-1, dp(56)))
         status = label(R.string.loading, 14f).apply { id = R.id.preview_status; setPadding(0, dp(16), 0, dp(16)) }
         controls.addView(status)
         val scroll = ScrollView(this).apply {

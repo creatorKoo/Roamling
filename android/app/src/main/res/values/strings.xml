@@ -2,7 +2,13 @@
 <resources>
     <string name="app_name" translatable="false">Roamling</string>
     <string name="preview_title">Meet Bori</string>
-    <string name="preview_description">Bori walks around and takes quiet breaks. Try dragging Bori to a new spot. This preview ends when you leave this screen.</string>
+    <string name="preview_description">Bori stays with you on your home screen and over other apps. Drag to move, or hide and stop from the notification. Bori rests while your phone is locked.</string>
+    <string name="stop_mochi">Stop Bori</string>
+    <string name="notification_channel">Bori companion</string>
+    <string name="notification_running">Bori is keeping you company.</string>
+    <string name="notification_needed">Allow notifications to keep Bori’s hide and stop controls close by. Tap Show Bori to continue.</string>
+    <string name="hidden">Bori is hidden. Show Bori to bring your companion back.</string>
+    <string name="locked">Bori is resting until you unlock your phone.</string>
     <string name="show_mochi">Show Bori</string>
     <string name="hide_mochi">Hide Bori</string>
     <string name="loading">Bori is getting ready…</string>

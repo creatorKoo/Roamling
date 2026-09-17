@@ -87,13 +87,18 @@ class PreviewTest {
         } finally { bitmap.recycle() }
     }
 
-    @Test fun overlayShowsHidesRecreatesAndLeavesWithTheActivity() {
+    @Test fun overlayShowsHidesRecreatesAndContinuesBeyondTheActivity() {
         assertTrue("Run on the explicitly granted test emulator", Settings.canDrawOverlays(instrumentation.targetContext))
+        var runningSession: CompanionService? = null
+        try {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             lateinit var current: MainActivity
             awaitCondition {
                 var ready = false
-                scenario.onActivity { current = it; ready = it.findViewById<Button>(R.id.show_mochi).isEnabled }
+                scenario.onActivity {
+                    current = it; runningSession = it.companionService
+                    ready = it.findViewById<Button>(R.id.show_mochi).isEnabled
+                }
                 ready
             }
             repeat(2) {
@@ -117,8 +122,9 @@ class PreviewTest {
             } }
             assertSystemDrag(scenario)
             assertCancelAndMultipleContacts(scenario)
-            capture("a2-preview.png")
+            capture("a3-preview.png")
             val old = current
+            val originalOverlay = current.previewOverlay
             scenario.recreate()
             awaitCondition {
                 var attached = false
@@ -127,6 +133,7 @@ class PreviewTest {
             }
             assertNotSame(old, current)
             assertFalse(onMain { old.previewIsAttached })
+            assertSame(originalOverlay, current.previewOverlay)
             scenario.onActivity { it.requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE }
             awaitCondition {
                 var attached = false
@@ -137,12 +144,21 @@ class PreviewTest {
                 attached
             }
             assertWithinSafeScreen(scenario)
-            capture("a2-preview-landscape.png")
+            capture("a3-preview-landscape.png")
+            val session = checkNotNull(current.companionService)
+            val activeOverlay = checkNotNull(current.previewOverlay)
             instrumentation.uiAutomation.executeShellCommand("input keyevent KEYCODE_HOME").use {
                 android.os.ParcelFileDescriptor.AutoCloseInputStream(it).readBytes()
             }
-            awaitCondition { onMain { !current.previewIsAttached } }
+            // Home can rotate the display back to portrait and replace the
+            // landscape window. Follow its service owner, not the old View.
+            awaitCondition { onMain { !current.previewIsAttached && session.visible && session.running } }
+            awaitCondition { instrumentation.uiAutomation.rootInActiveWindow?.packageName?.toString()?.contains("launcher") == true }
+            capture("a3-home.png")
+            instrumentation.runOnMainSync { session.stopCompanion() }
+            assertFalse(onMain { activeOverlay.isShowing })
         }
+        } finally { instrumentation.runOnMainSync { runningSession?.stopCompanion() } }
     }
 
     private fun assertSystemDrag(scenario: ActivityScenario<MainActivity>) {
@@ -227,7 +243,7 @@ class PreviewTest {
 
     private fun assertPreviewAnimates(scenario: ActivityScenario<MainActivity>) {
         val bounds = Rect()
-        scenario.onActivity { it.findViewById<android.view.View>(R.id.mochi_stage).getGlobalVisibleRect(bounds) }
+        scenario.onActivity { bounds.set(checkNotNull(it.previewOverlay).boundsOnScreen) }
         fun frame(): Bitmap {
             val screen = checkNotNull(instrumentation.uiAutomation.takeScreenshot())
             return try {
