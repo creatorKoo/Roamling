@@ -146,3 +146,23 @@
 "palette.hint.pick" = "‘색 고르기…’를 누르면 Windows 색 선택창이 열립니다. 고른 색은 그 부분 음영의 가운데가 되고, 어두운 쪽과 밝은 쪽은 지금 간격을 지킨 채 따라옵니다.";
 "palette.reset" = "처음으로";
 "palette.done" = "닫기";
+
+/* 첫 실행·주요 기능 안내. Windows 네이티브 창도 같은 문구를 사용한다. */
+"menu.usageGuide" = "보리 사용법…";
+"guide.title" = "보리와 친해지기";
+"guide.updates.title" = "보리가 달라졌어요";
+"guide.intro" = "작은 데스크톱 친구와 함께하는 방법을 알려드릴게요.";
+"guide.footer" = "트레이·메뉴 막대의 ‘보리 사용법…’에서 언제든 다시 볼 수 있어요.";
+"guide.done" = "시작하기";
+"guide.modifier.windows" = "왼쪽 Ctrl";
+"guide.modifier.mac" = "왼쪽 ⌘(Command)";
+"guide.catch.title" = "1. 잡아서 놀아 주세요";
+"guide.catch.body" = "%@을 누르고 다가가면 보리가 피하지 않아요. 몸체를 클릭한 채 끌어 옮기고, 버튼을 놓으면 내려놓습니다. 이동하거나 일하는 중에도 잡을 수 있어요.";
+"guide.customize.title" = "2. 내 취향으로 꾸며 보세요";
+"guide.customize.body" = "트레이·메뉴 막대에서 보리의 색과 크기를 바꿀 수 있어요. 움직임 메뉴에서는 돌아다니기, 포인터 피하기, 잡기·끌기를 설정합니다.";
+"guide.work.title" = "3. 함께 일해요";
+"guide.work.body" = "메뉴에서 Codex·Claude Code를 연결하면 작업 상황에 반응해요. 화면 인식은 선택 기능이며, 켜면 글씨에서 떨어진 빈 곳을 찾는 데 도움이 됩니다.";
+"guide.hide.title" = "4. 잠깐 쉬게 해 주세요";
+"guide.hide.body" = "보리가 화면을 가리면 메뉴의 ‘잠깐 숨기기’를 눌러 주세요. 같은 메뉴에서 다시 불러올 수 있어요.";
+"guide.changed.catch.title" = "보리를 더 쉽게 잡을 수 있어요";
+"guide.changed.catch.body" = "이동·작업 중에도 몸체 클릭으로 잡을 수 있어요. %@을 누르고 다가가면 피하지 않습니다. 일반 꼬리 흔들기는 가만히 앉아 있을 때만 해요.";

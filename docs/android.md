@@ -111,7 +111,7 @@ A0에서는 기존 코어의 의존·FFI 표면을 보존하고 Android에 업�
 - `android/core`는 생성된 두 Kotlin 패키지와 두 ABI의 `.so` 및 JNA를 묶는다.
   `android/app`의 최소 Activity가 코어의 `PetLoop`를 만들고 디스플레이를 설정한 뒤
   `begin_tick` → `finish_tick`을 한 번 호출해 유한한 x/y를 검증하고 로그를 남긴 후 종료한다.
-  오버레이 권한·서비스·지속 타이머는 아직 없다.
+  A0에는 오버레이 권한·서비스·지속 타이머가 없었다. 현재 구현은 아래 A1–A3에 있다.
 - 휘도 요청은 캡처 실행 자체가 아니다. 코어의 `request_luminance`는 요청을 반환하고
   Windows도 `refresh_luminance`에서 opt-in 여부를 검사한다. Android A0는 캡처 API를 호출하지
   않으며 반환된 요청은 처리하지 않는다. 권한 false이면 요청 목록도 비어야 한다는 검사는 잘못된 계약이다.
@@ -155,11 +155,11 @@ UI 문구는 `android/app/src/main/res/values{,-ko}/strings.xml`에 같은 키�
 2. `PreviewRuntime.tick`: 단조 시계 → `begin_tick` → `finish_tick`. 포커스·캡처 권한은 false,
    손가락이 없으면 화면 밖 포인터, 실제 마지막 터치 이후 경과를 idle로 준다. 위치와 capability,
    `delta_time * locomotion_rate`를 창과 플레이어에 전달한다. Kotlin에 행동 규칙을 복제하지 않는다.
-3. **직접 터치는 마우스 접근과 다르다.** 기존 `PetRuntime::pointer_down`은 접근 속도로 미리
-   arm된 포인터만 잡는다(`pointer.rs::evaluate`). 가짜 접근 좌표·속도를 만들지 않는다.
-   `PetRuntime::touch_down` / `PetLoop.touch_down`을 추가하여 실제 펫 영역 안 직접 터치를 받는다.
-   hidden/interactions/이미 잡힌 상태를 검사하고 같은 `begin_catch` 본체를 부른다.
-   데스크톱의 `pointer_down` 조건과 기존 트레이스는 유지한다.
+3. **직접 터치에는 가짜 접근 좌표·속도를 만들지 않는다.** `PetRuntime::touch_down` /
+   `PetLoop.touch_down`이 실제 펫 영역 안 접촉을 받고 hidden/interactions/이미 잡힌 상태를
+   검사한 뒤 `begin_catch`를 부른다. 2026-09-18부터 데스크톱 `pointer_down`도 같은 직접 접촉
+   검증을 사용한다. Android의 터치 경로는 그대로이며 마우스의 빠른 접근이 필수라는 설명은
+   더 이상 현재 동작이 아니다(`docs/behavior-flow.md` 4절).
 4. `MochiOverlay.SpriteView.onTouchEvent`: 첫 pointer ID만 소유한다. MOVE는 dp 좌표와 시작점부터
    거리를 기존 `pointer_dragged`에 전달하고, UP/CANCEL/소유 손가락 POINTER_UP은 `pointer_up`으로
    해제한다. 두 번째 손가락으로 소유권을 옮기지 않는다. 드래그 중에도 `set_scale`의 코어 clamp를
@@ -197,7 +197,7 @@ UI 문구는 `android/app/src/main/res/values{,-ko}/strings.xml`에 같은 키�
   최신 개발 APK는 `android/app/build/outputs/apk/debug/app-debug.apk`이며 테스트 AVD에 설치했다.
   이번 변경은 커밋·push·릴리스하지 않았다.
 
-아직 **Activity 화면에서만** 동작한다. Home 유지/서비스/알림/잠금 복귀는 A3이고, 이 A2의
+**A2 완료 당시에는 Activity 화면에서만** 동작했다. 현재 Home 유지/서비스/알림/잠금 복귀는 아래 A3에 구현되어 있다. 이 A2의
 속도·드래그 체감은 사용자 확인을 기다린다. 이번 변경의 macOS 및 Android macOS 호스트 빌드,
 Samsung/One UI 실측은 하지 않았다. 0.6.4의 이전 macOS CI 성공을 이번 변경 검증으로 세지 않는다.
 
@@ -362,7 +362,7 @@ PlatformServices.swift:54-71`), 자리는 열하나다(`docs/architecture.md:586
 - **`Player`** — 위 둘과 `PetAsset.tracks`(`rust/roamling-pet/src/lib.rs:51-65`)를 감싸,
   Kotlin은 capability와 delta를 주고 **시트와 프레임 사각형만** 받는다. A1은 idle capability와
   `Choreographer`의 경과 시간을 사용한다. A2의 이동 틱에서는 `TickOutput.delta_time`에
-  `locomotion_rate`를 곱할 예정이다(`rust/roamling-core/src/pet_runtime.rs:135-144`의 주석).
+  `locomotion_rate`를 곱한다(`PreviewRuntime.tick`).
   **capability→track 해석은 Rust가 한다** —
   Kotlin이 트랙 이름을 알기 시작하면 `docs/state-contract.md`의 층 구조를 셸이 깰 수 있다.
 - `MascotAtlas`는 불변 에셋을 소유한다. `Player`는 `Arc<MascotAtlas>`와 resolver를 보유하고,
@@ -567,7 +567,7 @@ IDE 첫 실행과 실제 창에서의 조작 확인은 남아 있다. macOS 환�
 
 `scripts/build-android-core.ps1`의 최종 경로가 host 바인딩 생성과 ARM64·x86_64 빌드를 모두 통과했다.
 `android/gradlew.bat -p android :app:assembleDebug --no-daemon`으로 debug APK를 만들었다.
-`CoreSmokeActivity`는 debug에만 있고 사용자용 화면·런처·오버레이는 아직 없다.
+당시 `CoreSmokeActivity`만 debug에 있었고 사용자용 화면·런처·오버레이는 없었다. 현재 상태는 A1–A3를 따른다.
 
 - `scripts/test-android.ps1 -Serial emulator-5580`: 설치 성공, 이번 실행 token에 대한
   `A0 PASS ... x=205.71428571428572 y=457.14285714285717 state=0` 확인.

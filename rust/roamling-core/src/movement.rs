@@ -105,6 +105,15 @@ impl MovementController {
         self.has_route().then(|| self.waypoints[self.waypoint_index])
     }
 
+    pub(crate) fn remaining_waypoints(&self) -> &[WorldPoint] {
+        &self.waypoints[self.waypoint_index..]
+    }
+
+    /// Runtime routes use intermediate points for passage, not for stopping.
+    pub(crate) fn update_route(&mut self, raw_delta_time: f64) -> MovementUpdate {
+        self.step(raw_delta_time, true)
+    }
+
     pub fn set_route(&mut self, waypoints: Vec<WorldPoint>) {
         self.waypoints = waypoints;
         self.waypoint_index = 0;
@@ -131,6 +140,10 @@ impl MovementController {
     }
 
     pub fn update(&mut self, raw_delta_time: f64) -> MovementUpdate {
+        self.step(raw_delta_time, false)
+    }
+
+    fn step(&mut self, raw_delta_time: f64, through_waypoints: bool) -> MovementUpdate {
         let delta_time = clamped(raw_delta_time, 0.0, 0.1);
         // Written as `!(x > 0)` so a NaN delta takes the same branch Swift's
         // `guard deltaTime > 0` sends it down.
@@ -154,7 +167,11 @@ impl MovementController {
 
         let stopping_speed =
             swift_max(0.0, 2.0 * self.configuration.deceleration * distance).sqrt();
-        let desired_speed = swift_min(self.configuration.maximum_speed, stopping_speed);
+        let desired_speed = if through_waypoints && self.waypoint_index + 1 < self.waypoints.len() {
+            self.configuration.maximum_speed
+        } else {
+            swift_min(self.configuration.maximum_speed, stopping_speed)
+        };
         let desired_velocity = offset.normalized().scaled(desired_speed);
         self.velocity = self.velocity.moved_toward(
             desired_velocity,

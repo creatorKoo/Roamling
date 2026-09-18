@@ -103,7 +103,7 @@ pub fn language() -> &'static str {
 
 /// The key itself when nothing has that key, which is what `NSLocalizedString`
 /// does and is loud enough to notice in a menu.
-pub fn localized(key: &'static str) -> &'static str {
+pub fn localized(key: &str) -> &str {
     table().get(key).map_or(key, |value| value.as_str())
 }
 
@@ -114,7 +114,7 @@ pub fn localized(key: &'static str) -> &'static str {
 /// in a different order -- which is exactly why `menu.pet.coverage` is written
 /// positionally. Anything not understood is copied through, so a placeholder we
 /// do not handle shows up in the menu rather than eating the rest of the line.
-pub fn localized_format(key: &'static str, arguments: &[&str]) -> String {
+pub fn localized_format(key: &str, arguments: &[&str]) -> String {
     fill(localized(key), arguments)
 }
 

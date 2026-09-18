@@ -35,6 +35,7 @@ public enum MenuAction: Equatable, Sendable {
     case toggleAutomaticUpdates
     case toggleLaunchAtLogin
     case showAbout
+    case showUsageGuide
     case quit
 }
 
@@ -136,6 +137,7 @@ public enum ShellMenu {
         if let stagedUpdateItem { items.append(stagedUpdateItem) }
         items += [
             .separator,
+            MenuItem(localized("menu.usageGuide"), .command(.showUsageGuide)),
             MenuItem(localized("menu.about"), .command(.showAbout)),
             MenuItem(localized("menu.quit"), .command(.quit), shortcut: "q")
         ]

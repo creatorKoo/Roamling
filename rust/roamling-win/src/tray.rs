@@ -44,6 +44,7 @@ pub const CMD_UPDATE_CHECK: usize = 13;
 pub const CMD_UPDATE_AUTO: usize = 14;
 pub const CMD_LAUNCH_AT_LOGIN: usize = 15;
 pub const CMD_HIDE: usize = 16;
+pub const CMD_USAGE_GUIDE: usize = 18;
 /// The colour mixer. Offered only when the menu was opened with Alt held.
 pub const CMD_PALETTE_CUSTOM: usize = 17;
 /// One id per entry in `built_in_mochi_presets`, in menu order.
@@ -643,6 +644,7 @@ unsafe fn build(state: &MenuState) -> Option<HMENU> {
         let _ = separator(menu);
         // "View Source" is not here: it is a button inside About, which is
         // where macOS puts it.
+        command(menu, CMD_USAGE_GUIDE, localized("menu.usageGuide"));
         command(menu, CMD_ABOUT, localized("menu.about"));
         command(menu, CMD_QUIT, localized("menu.quit"));
         Some(menu)
@@ -734,6 +736,7 @@ mod tests {
             CMD_OPEN_PET_FOLDER,
             CMD_COPY_DIAGNOSTICS,
             CMD_ABOUT,
+            CMD_USAGE_GUIDE,
             CMD_QUIT,
             CMD_TUNING,
             CMD_RELOAD_PETS,
@@ -829,8 +832,9 @@ mod tests {
         state.staged = None;
         let menu = unsafe { build(&state) }.expect("the menu did not build");
         let count = unsafe { GetMenuItemCount(menu) };
-        assert_eq!(count, 14, "the ordinary top-level menu changed length");
+        assert_eq!(count, 15, "the ordinary top-level menu changed length");
         assert_eq!(unsafe { GetMenuItemID(menu, 2) } as usize, CMD_HIDE);
+        assert_eq!(unsafe { GetMenuItemID(menu, count - 3) } as usize, CMD_USAGE_GUIDE);
         assert_eq!(
             unsafe { GetMenuItemID(menu, count - 2) } as usize,
             CMD_ABOUT
@@ -887,10 +891,10 @@ mod tests {
         );
 
         // Caption and separators are not choices. The agents live under
-        // Awareness, so the top level has the same eight choices as the
+        // Awareness, so the top level has the same nine choices as the
         // agent-free Swift harness.
-        let choice_positions = [2, 4, 5, 7, 8, 10, 12, 13];
-        assert_eq!(choice_positions.len(), 8);
+        let choice_positions = [2, 4, 5, 7, 8, 10, 12, 13, 14];
+        assert_eq!(choice_positions.len(), 9);
         for index in choice_positions {
             let id = unsafe { GetMenuItemID(menu, index) };
             let submenu = unsafe { GetSubMenu(menu, index) };
@@ -909,7 +913,7 @@ mod tests {
         let state = state();
         let menu = unsafe { build(&state) }.expect("the menu did not build");
         let count = unsafe { GetMenuItemCount(menu) };
-        assert_eq!(count, 15, "the staged alert did not add one top-level row");
+        assert_eq!(count, 16, "the staged alert did not add one top-level row");
         let alert = unsafe { GetMenuState(menu, 11, MF_BYPOSITION) };
         assert_ne!(alert, u32::MAX, "the staged alert is missing");
         assert!(

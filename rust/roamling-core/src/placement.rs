@@ -237,6 +237,8 @@ struct Travel {
 
 #[derive(Debug, Clone)]
 pub struct PlacementDirector {
+    /// Runtime policy; the public constructor retains the ported FFI contract.
+    prefer_clearance: bool,
     configuration: PlacementConfiguration,
     seat: Option<Seat>,
     travel: Option<Travel>,
@@ -269,6 +271,7 @@ impl Default for PlacementDirector {
 impl PlacementDirector {
     pub fn new(configuration: PlacementConfiguration) -> Self {
         Self {
+            prefer_clearance: false,
             configuration,
             seat: Option::None,
             travel: Option::None,
@@ -277,6 +280,20 @@ impl PlacementDirector {
             carried: PlacementIntent::Hold,
             watching_since: Option::None,
         }
+    }
+
+    pub(crate) fn for_runtime() -> Self {
+        Self { prefer_clearance: true, ..Self::default() }
+    }
+
+    fn destination(&self, hint: &LocationHint, situation: &PetSituation) -> Option<InterestDestination> {
+        let choose = if self.prefer_clearance {
+            BasicInterestPositionPlanner::clear_destination
+        } else {
+            BasicInterestPositionPlanner::destination
+        };
+        choose(hint, &situation.world, situation.position, situation.pointer_position,
+            situation.pointer_clearance, situation.object_size)
     }
 
     pub fn configuration(&self) -> PlacementConfiguration {
@@ -422,14 +439,7 @@ impl PlacementDirector {
         if let Some(reason) =
             self.departure_reason(evaluation.as_ref(), saw_capture, is_new, situation)
         {
-            if let Some(destination) = BasicInterestPositionPlanner::destination(
-                hint,
-                &situation.world,
-                situation.position,
-                situation.pointer_position,
-                situation.pointer_clearance,
-                situation.object_size,
-            ) {
+            if let Some(destination) = self.destination(hint, situation) {
                 if self.accepts(
                     &destination,
                     evaluation.as_ref(),
@@ -605,6 +615,19 @@ impl PlacementDirector {
         if !evaluation.watches_region {
             return Some(PlacementTravelReason::FollowedFocus);
         }
+        if self.prefer_clearance && self.dwell_elapsed(situation) {
+            if let (Some(field), Some(hint)) =
+                (situation.world.luminance.as_ref(), situation.activity_hint.as_ref())
+            {
+                if let Some(destination) = self.destination(hint, situation) {
+                    if crate::clearance::ClearanceMap::new(field).improves(
+                        evaluation.point, destination.point, situation.object_size,
+                    ) {
+                        return Some(PlacementTravelReason::CoveringWork);
+                    }
+                }
+            }
+        }
         Option::None
     }
 
@@ -624,6 +647,10 @@ impl PlacementDirector {
         hint: &LocationHint,
         situation: &PetSituation,
     ) -> bool {
+        if self.prefer_clearance && situation.world.luminance.as_ref().is_some_and(|field| {
+            crate::clearance::ClearanceMap::new(field).distance(destination.point, situation.object_size)
+                .is_some_and(|distance| distance < 0.0)
+        }) { return false; }
         if !(situation.position.distance(destination.point)
             > self.configuration.minimum_travel_distance
             && destination.point.distance(judged) > self.configuration.reseat_distance)
@@ -667,6 +694,10 @@ impl PlacementDirector {
                 if !evaluation.watches_region {
                     return true;
                 }
+                if self.prefer_clearance && situation.world.luminance.as_ref().is_some_and(|field| {
+                    crate::clearance::ClearanceMap::new(field).improves(
+                        evaluation.point, destination.point, situation.object_size)
+                }) { return true; }
                 destination.score > evaluation.score + self.configuration.replacement_margin
             }
             PlacementTravelReason::CoveringCaret
@@ -725,6 +756,7 @@ impl PlacementDirector {
                 }
                 Some(ComfortPick::Clear(point)) => PlacementIntent::Stroll(point),
                 Some(ComfortPick::Marginal(point)) => {
+                    if self.prefer_clearance { return self.carried.clone(); }
                     // Nothing on offer is off content. Walking from a clean
                     // spot onto someone's paragraph is worse than not walking,
                     // so the stroll is declined and asked again next tick with
@@ -811,6 +843,12 @@ impl PlacementDirector {
                     .into_iter()
                     .filter(|point| self.path_avoids_pointer(*point, situation)),
             );
+            if self.prefer_clearance {
+                let best = crate::clearance::ClearanceMap::new(field).best(&points, situation.object_size);
+                return best.first().map_or(ComfortPick::Marginal(situation.position), |index| {
+                    ComfortPick::Clear(points[*index])
+                });
+            }
             VisualEmptiness::most_comfortable(
                 &points,
                 situation.object_size,

@@ -23,13 +23,14 @@ Claude / Codex / future game/media      AppKit / AX / ScreenCaptureKit
                  PetCapabilities / Renderer
 ```
 
-`RoamlingCore`의 compile-time dependency에는 OS framework나 product SDK가 없다.
-현재 Swift가 pure core도 담지만, Windows port를 시작할 때 측정 결과가 필요하면 이
-module만 추출할 수 있다. 선행 Rust/C ABI는 만들지 않는다.
+결정 로직의 정본은 `rust/roamling-core`이며 OS framework나 product SDK에 의존하지 않는다.
+macOS는 UniFFI 바인딩과 `RustCore.swift`, Windows는 Rust 직접 링크, Android는
+`roamling-android`의 UniFFI/JNA를 통해 사용한다. `Sources/RoamlingCore`의 Swift 구현은
+포팅 비교 대조군이다. 언어 결정 근거는 `docs/history/windows.md` 3절에 있다.
 
 ## Modules
 
-### RoamlingCore
+### 공유 코어 (`rust/roamling-core`, Swift 대조군 `RoamlingCore`)
 
 - `Geometry`: `WorldPoint`, `WorldVector`, `WorldRect` (Double, top-left/y-down)
 - `DesktopWorld`: immutable display/window/pointer/focus/safe-zone snapshot
@@ -40,6 +41,9 @@ module만 추출할 수 있다. 선행 Rust/C ABI는 만들지 않는다.
 - `BasicSafeZonePlanner`: permission-free rest candidates and destination scoring
 - `BasicInterestPositionPlanner`: coarse window-edge destination scoring for MVP 1
 - `PlacementDirector`: the one decision table for where the pet stands (`docs/placement.md`)
+- `ClearanceMap`: runtime-only content exclusion and distance ranking for roaming, seats and rest
+- `display_policy`: shared-edge placement margins and committed monitor crossings
+- `PetRuntime`: tick orchestration, direct body-click/touch catch, rest rechecks
 - `RestConfiguration`: MVP 0.7 idle/sit/wake timing
 - `CompanionEvent`, `UserContext`, `ActivitySource`
 - `AttentionModel`, `ReactionPolicy`, candidate scoring
@@ -82,7 +86,7 @@ module만 추출할 수 있다. 선행 Rust/C ABI는 만들지 않는다.
 
 ### RoamlingEngine
 
-- `RoamlingRuntime`: main-actor orchestration and the only owner of input gating
+- `RoamlingRuntime`: main-actor shell orchestration; applies input ownership from `PetRuntime`
 - `PlatformServices`: 런타임이 기계에 닿는 유일한 통로. provider 9개와 좌표계 소스를
   한 값으로 받는다
 - `PetOverlayProviding` / `PetOverlayInputHandling`: 런타임이 실제로 부리는 오버레이와,
@@ -95,7 +99,7 @@ module만 추출할 수 있다. 선행 Rust/C ABI는 만들지 않는다.
 ### RoamlingMac
 
 - `MacPlatform.makeServices()`: 아래 provider들을 조립해 `PlatformServices`를 만드는
-  유일한 지점. Windows 포트의 대응물은 같은 서명의 함수 하나다
+  유일한 지점. Windows는 `rust/roamling-win/src/main.rs`에서 Rust 코어와 플랫폼 함수를 조립한다
 - `MacDisplayProvider`: `NSScreen` -> display snapshots and coordinate transform,
   그리고 `NSApplication.didChangeScreenParametersNotification` 구독
 - `MacPointerProvider`: `NSEvent` global point sampling
@@ -409,14 +413,17 @@ distance > 170 pt       ignore
 100...170 pt            look
 50...100 pt             slow evade
 < 50 pt                 faster evade
-fast closing < 74 pt    arm catch for 0.35 s
+fast closing < 74 pt    seated approach reaction for 0.35 s
+body click             catch directly, regardless of approach speed or movement/work
 ```
 
 단순 pointer speed가 아니라 이전 distance와 비교한 closing speed도 사용한다. 따라서
-pet 근처에서 옆으로 빠르게 움직였다고 잡히지 않는다. evade velocity는 pet에서 pointer
+pet 근처에서 옆으로 빠르게 움직였다고 접근 반응이 켜지지 않는다. evade velocity는 pet에서 pointer
 반대 방향이며 cap을 넘지 않는다. 기본 fast-approach threshold는 pointer speed
 380pt/s와 closing speed 약 182pt/s다. catch radius를 fast-evade radius보다 넓게 두어
-trackpad가 sprite에 도착하기 전에 잠깐 멈춰 잡을 기회를 준다.
+앉아 있는 펫의 접근 반응을 구분한다. 이 창은 실제 클릭의 전제가 아니다. `pointer_down`은
+`touch_down`과 같은 직접 접촉 검증을 쓰며, 이동·작업·경계 통과 중에도 클릭으로 잡을 수 있다.
+일반 응시 제한과 숨김·상호작용 끔·이미 잡힌 상태의 처리는 `docs/behavior-flow.md` 4절을 따른다.
 
 연결된 display seam에 계속 밀리면 현재 위치에서 약 320pt 안의 portal을 골라 현재
 display 안전 경계를 따라간 뒤 이웃 display 안쪽까지 짧은 evade route를 만든다. 실제
@@ -424,26 +431,27 @@ gap이 있는 display는 이 경로의 후보에서 제외하므로
 pointer evade가 보이지 않는 공간을 순간이동하지 않는다. 일반 wander만 기존의 연속 gap
 route를 사용할 수 있다.
 
-입력 모드 writer는 `RoamlingRuntime` 하나다.
+입력 소유권은 `PetRuntime::finish_tick`이 결정하고 셸이 창에 적용한다.
 
 ```text
-normal/look/evade  -> window click-through
-catch armed AND pointer in pet ellipse -> interactive
+pointer outside pet -> window click-through
+pointer over pet AND interactions enabled AND visible -> interactive (except click-reaction playback)
 mouseDown          -> caught
 mouseDragged       -> caught intro를 끝낸 뒤 dragged; global pointer point로 panel 이동 + paw cycle 반복
 mouseUp after drag -> nearest visible frame clamp, dropped, click-through
 mouseUp after click -> 즉시 click-through, caught intro + 짧은 네 발 loop 1회, dropped
 ```
 
-window가 sprite 크기이고 hit ellipse가 투명 margin을 제외하므로 interactive 순간에도
-가리는 면적이 작다. 기본 hit ellipse scale은 1.12이며 window bounds보다 커지지 않는다.
+window는 sprite 크기다. macOS는 `PetOverlayView.containsPet`의 ellipse가 투명 margin을
+제외하며 기본 hit scale은 1.12이고 window bounds보다 커지지 않는다. Windows는
+`main.rs::tick`의 몸체 사각형 판정과 layered window의 투명 픽셀 처리를 사용한다.
 향후 alpha-mask hit test를 추가해도 이 ownership은 바뀌지 않는다.
 
 `RuntimeTuning`과 menu bar의 **Behavior Tuning…** 창은 MVP 0/0.5의 체감 검증 값만
 노출한다. walk speed, idle pause, 다른 display 방문 확률, notice/catch thresholds,
-catch window와 hit region이 실행 중 반영되고 `UserDefaults`에 저장된다. MVP 0.7의
-rest timing은 첫 체감 검증 전까지 별도 고정 configuration으로 두며 기존 tuning 값을
-섞지 않는다.
+접근 반응 창과 hit region, 휴식 진입 대기 시간이 실행 중 반영된다. macOS는 `UserDefaults`,
+Windows는 `settings.rs`의 사용자 설정 파일에 저장한다. 잡기 이름이 남은 접근 설정은
+직접 클릭 허용 조건이 아니다. 설정 키의 정본은 `tuning.rs::RuntimeTuningKey`다.
 
 FatMochi의 idle frame을 visual identity의 기준으로 둔다. walk와 caught intro는 frame마다
 alpha silhouette을 독립적으로 중앙 정렬하고, 크기는 idle bounding box에서 2px 이상
@@ -530,10 +538,10 @@ tap이나 input 내용을 수집하지 않고 마지막 local input 이후 경�
 
 - active movement/evade/travel: 약 60 Hz, caught/drop: 약 30 Hz
 - catch가 arm된 짧은 구간: 60 Hz input gate
-- animated idle/look: 약 10–12 Hz 또는 다음 frame deadline
+- idle: 12 Hz, look: 16 Hz (`PetRuntime::preferred_tick_interval`)
 - sleep: 2 Hz (wake input은 최대 약 0.5초 안에 감지)
 - display/AX/window tree: notification/debounce 기반
-- screen capture: placement 시 single shot만
+- screen capture: 활동 창 3초·배회/휴식 6초 간격의 단발 요청; 실패 시한·캐시는 `docs/capture.md`
 - image atlas는 한 번 decode하고 frame crop을 cache
 
 renderer는 event source를 모르고 `frame, position, direction, scale, visibility`만 받는다.
@@ -548,12 +556,13 @@ occlusion/static 상태에서 redraw를 중단할 수 있게 animation clock과 
 **Chosen:** AppKit small panel. macOS의 Spaces/fullscreen/input semantics를 직접 제어하고
 상주 비용을 줄일 수 있다. settings에는 SwiftUI를 나중에 섞을 수 있다.
 
-### Swift core now, extraction later
+### Shared Rust core (2026-09-02 결정)
 
 **Options:** Rust core + FFI 선행, Swift pure module, app code에 직접 구현.
 
-**Chosen:** Swift pure module. boundary와 tests는 얻되 미확인 Windows 요구를 위해 FFI를
-선행하지 않는다.
+**Chosen:** Rust core와 플랫폼별 셸. 최초 Swift pure module 선택은 포팅 대조군으로 남았고,
+현재 동작은 공유 Rust 런타임에서 변경한다. 기존 differential fixture를 재생성해서 차이를
+숨기지 않는다. 선택 비교와 측정 근거는 `docs/history/windows.md`의 언어 결정 절에 보존한다.
 
 ### SpriteKit versus AppKit drawing
 

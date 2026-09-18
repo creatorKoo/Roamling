@@ -21,6 +21,14 @@ tick 로직           3.9 µs · 최대 60 Hz          = 30 Hz 예산의 0.012%
 capture 62 ms는 `docs/history/windows.md` 5절의 실측이고, tick 3.9 µs는
 `output/w-unit5/bench-director.swift`가 잰 값이다.
 
+위 수치는 해당 날짜의 측정이며 현재 런타임 전체의 재측정값은 아니다. 2026-09-17의
+`ClearanceMap` 추가 후 비용을 다시 측정하지 않았다. 캡처 주기는 유지했고 수면 중 내용 검사는
+같은 위치·크기에서 다음 `set_luminance` 호출까지 재사용한다(`PetRuntime::rest_spot_is_busy`).
+macOS `RoamlingRuntime.tick`은 같은 필드도 매 tick 전달하여 이 캐시를 비운다. Windows는 새
+캡처에서 전달한다. 이 차이를 제거하는 것은 `docs/maintenance-review.md`의 후속 후보다.
+2026-09-18 직접 클릭 변경도 틱 주기를 바꾸지 않는다. 빠른 접근의 60Hz 창은 남지만 클릭은
+그 창 없이 허용한다(`finish_tick`, `pointer_down`).
+
 ## 이미 되어 있는 것 — 다시 하지 말 것
 
 - **tick 속도가 상태를 따라 물러난다.** `PetRuntime::preferred_tick_interval`:

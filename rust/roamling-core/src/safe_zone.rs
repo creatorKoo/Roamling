@@ -68,6 +68,56 @@ impl BasicSafeZonePlanner {
         pointer_position: Option<WorldPoint>,
         object_size: WorldSize,
     ) -> Option<RestDestination> {
+        let candidates = Self::candidates(world, current_position, pointer_position, object_size);
+        if let Some(best) = Self::best(&candidates, current_position) {
+            return Some(best);
+        }
+        let display = world.display_containing(current_position)
+            .or_else(|| world.nearest_display(current_position))?;
+        let safe = display.visible_frame
+            .inset_by(object_size.width / 2.0 + 18.0, object_size.height / 2.0 + 14.0);
+        Some(RestDestination {
+            point: WorldPoint::new(safe.max_x(), safe.max_y()),
+            display_id: display.id.clone(), reason: "display-corner-fallback".to_string(), score: 0.0,
+        })
+    }
+
+    pub(crate) fn clear_destination(
+        world: &DesktopWorldSnapshot, current_position: WorldPoint,
+        pointer_position: Option<WorldPoint>, object_size: WorldSize,
+    ) -> Option<RestDestination> {
+        let Some(field) = world.luminance.as_ref() else {
+            return Self::destination(world, current_position, pointer_position, object_size);
+        };
+        let mut candidates = Self::candidates(world, current_position, pointer_position, object_size);
+        // Corners alone cannot find the one clear patch in the middle of a page.
+        if let Some(display) = world.display_containing(current_position)
+            .or_else(|| world.nearest_display(current_position))
+        {
+            let safe = display.visible_frame.inset_by(object_size.width / 2.0 + 18.0,
+                object_size.height / 2.0 + 14.0);
+            if !safe.is_empty() {
+                for row in 0..5 {
+                    for col in 0..7 {
+                        let point = WorldPoint::new(safe.min_x() + safe.size.width * (col as f64 + 0.5) / 7.0,
+                            safe.min_y() + safe.size.height * (row as f64 + 0.5) / 5.0);
+                        candidates.push(RestDestination { point, display_id: display.id.clone(),
+                            reason: "clear-rest-space".into(), score: -current_position.distance(point) / 180.0 });
+                    }
+                }
+            }
+        }
+        let map = crate::clearance::ClearanceMap::new(field);
+        let points: Vec<_> = candidates.iter().map(|candidate| candidate.point).collect();
+        let candidates: Vec<_> = map.best(&points, object_size).into_iter()
+            .map(|index| candidates[index].clone()).collect();
+        Self::best(&candidates, current_position)
+    }
+
+    fn candidates(
+        world: &DesktopWorldSnapshot, current_position: WorldPoint,
+        pointer_position: Option<WorldPoint>, object_size: WorldSize,
+    ) -> Vec<RestDestination> {
         let owned;
         let zones: &[SafeZone] = if world.safe_zones.is_empty() {
             owned = Self::safe_zones(world);
@@ -81,7 +131,7 @@ impl BasicSafeZonePlanner {
             .or_else(|| world.nearest_display(current_position));
         let current_display_id = current_display.map(|display| display.id.clone());
 
-        let candidates: Vec<RestDestination> = zones
+        zones
             .iter()
             .filter_map(|zone| {
                 let center = zone.frame.center();
@@ -103,31 +153,20 @@ impl BasicSafeZonePlanner {
                     score: zone.score + same_display_bonus - travel_penalty - pointer_penalty,
                 })
             })
-            .collect();
+            .collect()
+    }
 
+    fn best(candidates: &[RestDestination], current_position: WorldPoint) -> Option<RestDestination> {
         // Swift's `max(by:)` keeps the last of equal elements, and the
         // comparator falls back to distance when scores tie.
-        let best = last_maximum(&candidates, |lhs, rhs| {
+        let best = last_maximum(candidates, |lhs, rhs| {
             if lhs.score == rhs.score {
                 current_position.distance(lhs.point) > current_position.distance(rhs.point)
             } else {
                 lhs.score < rhs.score
             }
         });
-        if let Some(best) = best {
-            return Some(best.clone());
-        }
-
-        let display = current_display?;
-        let safe = display
-            .visible_frame
-            .inset_by(object_size.width / 2.0 + 18.0, object_size.height / 2.0 + 14.0);
-        Some(RestDestination {
-            point: WorldPoint::new(safe.max_x(), safe.max_y()),
-            display_id: display.id.clone(),
-            reason: "display-corner-fallback".to_string(),
-            score: 0.0,
-        })
+        best.cloned()
     }
 
     fn safe_zones_on(display: &DisplaySnapshot) -> Vec<SafeZone> {

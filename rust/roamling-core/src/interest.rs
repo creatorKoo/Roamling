@@ -4,6 +4,7 @@
 //! Ported from `Sources/RoamlingCore/InterestPlacement.swift`.
 
 use crate::emptiness::{LuminanceField, VisualEmptiness};
+use crate::clearance::ClearanceMap;
 use crate::geometry::{swift_max, swift_min, WorldPoint, WorldRect, WorldSize, WorldVector};
 use crate::world::{last_maximum, DesktopWorldSnapshot, DisplaySnapshot, FocusSnapshot, LocationHint};
 
@@ -112,6 +113,23 @@ impl BasicInterestPositionPlanner {
         pointer_clearance: f64,
         object_size: WorldSize,
     ) -> Option<InterestDestination> {
+        Self::choose_destination(hint, world, current_position, pointer_position,
+            pointer_clearance, object_size, false)
+    }
+
+    pub(crate) fn clear_destination(
+        hint: &LocationHint, world: &DesktopWorldSnapshot, current_position: WorldPoint,
+        pointer_position: Option<WorldPoint>, pointer_clearance: f64, object_size: WorldSize,
+    ) -> Option<InterestDestination> {
+        Self::choose_destination(hint, world, current_position, pointer_position,
+            pointer_clearance, object_size, true)
+    }
+
+    fn choose_destination(
+        hint: &LocationHint, world: &DesktopWorldSnapshot, current_position: WorldPoint,
+        pointer_position: Option<WorldPoint>, pointer_clearance: f64, object_size: WorldSize,
+        prefer_clearance: bool,
+    ) -> Option<InterestDestination> {
         let plan = Self::make_plan(
             hint,
             world,
@@ -123,11 +141,21 @@ impl BasicInterestPositionPlanner {
         // A seat under the cursor is not a worse seat, it is not a seat: the
         // glance band stops the pet short of it every time. Left in the pool
         // with a penalty it still won whenever the window was small.
-        let evaluations: Vec<SeatEvaluation> = Self::candidates(&plan)
+        let mut evaluations: Vec<SeatEvaluation> = Self::candidates(&plan)
             .into_iter()
             .map(|(point, outside)| Self::evaluate(point, outside, &plan))
             .filter(|evaluation| !evaluation.pointer_blocked)
+            .filter(|evaluation| !prefer_clearance || !evaluation.covers_caret)
             .collect();
+
+        if prefer_clearance {
+            if let Some(field) = plan.field {
+                let map = ClearanceMap::new(field);
+                let points: Vec<_> = evaluations.iter().map(|candidate| candidate.point).collect();
+                evaluations = map.best(&points, object_size).into_iter()
+                    .map(|index| evaluations[index].clone()).collect();
+            }
+        }
 
         // Swift's `max(by:)` keeps the last of equal elements, and on a tied
         // score the comparator prefers the nearer seat.

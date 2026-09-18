@@ -7,41 +7,44 @@
 
 ## 지금 도는 것
 
-| 묻는 것 | 문서 | 줄 |
-|---|---|---|
-| 사용자가 원한다고 말했는데 아직 없는 것 | [`requests.md`](requests.md) | ~100 |
-| 모듈이 어떻게 갈리고 의존이 어디로 흐르나 | [`architecture.md`](architecture.md) | ~630 |
-| 어떤 상황에 펫이 어떤 그림을 입나, 얼마나 오래 | [`behavior-flow.md`](behavior-flow.md) | ~560 |
-| 펫이 **어디에 설지**를 어떻게 정하나 | [`placement.md`](placement.md) | ~510 |
-| 활동 source가 두 종류인 이유, 상태 낱말 | [`state-sources.md`](state-sources.md) | ~160 |
-| Petdex 어휘를 어떻게 아래에 두나 | [`state-contract.md`](state-contract.md) | ~290 |
-| capability 16종 ↔ Petdex 9종, 무엇을 빌리나 | [`pets.md`](pets.md) | ~380 |
-| 지금 시트에 무엇이 그려져 있나 | [`art/mochi-sheet.md`](art/mochi-sheet.md) | ~70 |
-| 프레임을 새로 그릴 때의 불변식 | [`art/mochi-animation-handoff.md`](art/mochi-animation-handoff.md) | ~140 |
-| 도구 없이 손으로 프레임을 만들 때의 프롬프트 | [`art/mochi-animation-prompts-ko.md`](art/mochi-animation-prompts-ko.md) | ~150 |
-| Windows에서 지금 유효한 것, 남은 게이트(W8) | [`windows.md`](windows.md) | ~300 |
-| Android를 어떻게 붙이고 어떤 순서로 만드나 | [`android.md`](android.md) | ~300 |
-| 서명·dmg·배포를 어떻게 하나 | [`release.md`](release.md) | ~90 |
-| 고양이 색을 어떻게 바꾸나 | [`palette.md`](palette.md) | ~400 |
-| 숨기기와 메뉴가 왜 그 모양인가 | [`hiding.md`](hiding.md) | ~150 |
-| 무엇이 실제로 배터리를 먹나 | [`battery.md`](battery.md) | ~90 |
-| 화면의 글자를 어떻게 보고, 못 보게 되면 어떻게 되나 | [`capture.md`](capture.md) | ~160 |
+| 묻는 것 | 문서 |
+|---|---|
+| 사용자 요청과 처리 상태 | [`requests.md`](requests.md) |
+| 모듈이 어떻게 갈리고 의존이 어디로 흐르나 | [`architecture.md`](architecture.md) |
+| 어떤 상황에 펫이 어떤 그림을 입나, 얼마나 오래 | [`behavior-flow.md`](behavior-flow.md) |
+| 펫이 **어디에 설지**를 어떻게 정하나 | [`placement.md`](placement.md) |
+| 활동 source가 두 종류인 이유, 상태 낱말 | [`state-sources.md`](state-sources.md) |
+| Petdex 어휘를 어떻게 아래에 두나 | [`state-contract.md`](state-contract.md) |
+| capability 16종 ↔ Petdex 9종, 무엇을 빌리나 | [`pets.md`](pets.md) |
+| 지금 시트에 무엇이 그려져 있나 | [`art/mochi-sheet.md`](art/mochi-sheet.md) |
+| 프레임을 새로 그릴 때의 불변식 | [`art/mochi-animation-handoff.md`](art/mochi-animation-handoff.md) |
+| 도구 없이 손으로 프레임을 만들 때의 프롬프트 | [`art/mochi-animation-prompts-ko.md`](art/mochi-animation-prompts-ko.md) |
+| Windows에서 지금 유효한 것, 남은 게이트(W8) | [`windows.md`](windows.md) |
+| Android를 어떻게 붙이고 어떤 순서로 만드나 | [`android.md`](android.md) |
+| 서명·dmg·배포를 어떻게 하나 | [`release.md`](release.md) |
+| 고양이 색을 어떻게 바꾸나 | [`palette.md`](palette.md) |
+| 숨기기와 메뉴가 왜 그 모양인가 | [`hiding.md`](hiding.md) |
+| 첫 사용·업데이트 안내를 언제 보여주고 릴리스 때 어떻게 쓰나 | [`usage-guide.md`](usage-guide.md) |
+| 무엇이 실제로 배터리를 먹나 | [`battery.md`](battery.md) |
+| 화면의 글자를 어떻게 보고, 못 보게 되면 어떻게 되나 | [`capture.md`](capture.md) |
+
+현재 동작·문서 점검과 리팩터링 후보는 [2026-09-18 유지보수 검토](maintenance-review.md)에 있다.
 
 ## 닫힌 기록 — [`history/`](history/)
 
 **지우지 않는다.** `CLAUDE.md`가 여러 곳에서 "이 실측을 다시 재지 마라"며 이것들을 가리킨다.
 평소에 읽을 것은 아니고, **결정을 뒤집으려 할 때** 읽는다.
 
-| 무엇 | 문서 | 줄 |
-|---|---|---|
-| Windows 게이트 W0~W7, 언어 선택, 스파이크 실측 | [`history/windows.md`](history/windows.md) | ~2410 |
-| MVP 0~4 — 전부 닫힘 (2026-09-07) | [`history/mvp.md`](history/mvp.md) | ~430 |
-| 일하는 앱이 사건형이던 때의 구조와 우회 코드 | [`history/focus-activity-flow.md`](history/focus-activity-flow.md) | ~670 |
-| Mochi v3를 만들기 전의 진단과 계획 | [`history/mochi-v3-plan.md`](history/mochi-v3-plan.md) | ~500 |
-| upstream 조사 (Petdex · Codex · macOS API) | [`history/research.md`](history/research.md) | ~470 |
-| 맥 수정 A~F — 전부 닫힘 | [`history/mac-fixes.md`](history/mac-fixes.md) | ~80 |
-| 팔레트를 어떻게 만들었나 — 정답지 측정과 뒤집힌 계획 | [`history/palette-making.md`](history/palette-making.md) | ~600 |
-| v2 시트의 기록 | [`history/mochi-v2-animation-spec.md`](history/mochi-v2-animation-spec.md) | ~280 |
+| 무엇 | 문서 |
+|---|---|
+| Windows 게이트 W0~W7, 언어 선택, 스파이크 실측 | [`history/windows.md`](history/windows.md) |
+| MVP 0~4 — 전부 닫힘 (2026-09-07) | [`history/mvp.md`](history/mvp.md) |
+| 일하는 앱이 사건형이던 때의 구조와 우회 코드 | [`history/focus-activity-flow.md`](history/focus-activity-flow.md) |
+| Mochi v3를 만들기 전의 진단과 계획 | [`history/mochi-v3-plan.md`](history/mochi-v3-plan.md) |
+| upstream 조사 (Petdex · Codex · macOS API) | [`history/research.md`](history/research.md) |
+| 맥 수정 A~F — 전부 닫힘 | [`history/mac-fixes.md`](history/mac-fixes.md) |
+| 팔레트를 어떻게 만들었나 — 정답지 측정과 뒤집힌 계획 | [`history/palette-making.md`](history/palette-making.md) |
+| v2 시트의 기록 | [`history/mochi-v2-animation-spec.md`](history/mochi-v2-animation-spec.md) |
 
 ## 이 지도의 규칙
 

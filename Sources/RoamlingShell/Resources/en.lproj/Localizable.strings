@@ -146,3 +146,23 @@
 "palette.hint.pick" = "“Pick a colour…” opens the Windows colour picker. What you choose becomes the middle of that part's shading; the dark and light ends follow it, keeping the spread they have now.";
 "palette.reset" = "Start over";
 "palette.done" = "Close";
+
+/* First-run and feature guide; shared with the Windows native window. */
+"menu.usageGuide" = "Bori User Guide…";
+"guide.title" = "Meet Bori";
+"guide.updates.title" = "What's new with Bori";
+"guide.intro" = "A few ways to enjoy your desktop companion.";
+"guide.footer" = "You can reopen this guide from the tray or menu bar → Bori User Guide….";
+"guide.done" = "Got it";
+"guide.modifier.windows" = "Left Ctrl";
+"guide.modifier.mac" = "Left ⌘ (Command)";
+"guide.catch.title" = "1. Catch and play";
+"guide.catch.body" = "Hold %@ as you move toward Bori to stop it dodging. Click and drag its body to pick it up; release to put it down. Moving or working pets can be caught too.";
+"guide.customize.title" = "2. Make it yours";
+"guide.customize.body" = "Open the tray or menu bar menu to change Bori's colour and size. Movement settings control roaming, pointer avoidance and catching.";
+"guide.work.title" = "3. Keep you company at work";
+"guide.work.body" = "Connect Codex or Claude Code from the menu for activity reactions. Visual awareness is optional: it helps Bori choose space away from text.";
+"guide.hide.title" = "4. Take a little break";
+"guide.hide.body" = "Choose Hide for a while from the menu to get Bori out of the way, then use the same menu to bring it back.";
+"guide.changed.catch.title" = "An easier way to catch Bori";
+"guide.changed.catch.body" = "A body click now works while Bori is moving or working. Hold %@ when approaching to stop it dodging. Ordinary tail wags happen only when seated.";

@@ -31,6 +31,7 @@ public enum ShellEffect: Sendable {
     case present(AlertModel)
     case presentThenRebuild(AlertModel)
     case openTuningPanel
+    case openUsageGuide
     /// Open the sliders. One window per platform, not shared: this is widgets.
     case openPaletteMixer
     case reveal(URL)
@@ -305,6 +306,8 @@ public enum ShellController {
             return .setLaunchAtLogin(!ShellMenu.launchAtLogin)
         case .showAbout:
             return .present(ShellPrompt.about(version: version))
+        case .showUsageGuide:
+            return .openUsageGuide
         case .quit:
             return .quit
         }

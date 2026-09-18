@@ -30,6 +30,7 @@ mod strings;
 mod tray;
 mod tuning;
 mod update;
+mod usage_guide;
 
 use roamling_agent::{installer, Agent, Receiver};
 use roamling_core::{
@@ -437,9 +438,15 @@ fn main() -> Result<()> {
     println!("\ntray icon registered: {tray_ok}   (Windows 11 files new ones behind the chevron)");
     println!("roaming. right-click the tray icon for the menu.");
 
+    if std::env::var("ROAMLING_SMOKE_TEST").as_deref() != Ok("1") {
+        let seen = APP.with(|slot| slot.borrow().as_ref().map_or(0, |app| guide_seen(&app.settings)));
+        usage_guide::show(seen, false);
+    }
+
     let mut message = MSG::default();
     unsafe {
         while GetMessageW(&mut message, None, 0, 0).as_bool() {
+            if usage_guide::handle_message(&message) { continue; }
             let _ = TranslateMessage(&message);
             DispatchMessageW(&message);
         }
@@ -454,6 +461,7 @@ fn main() -> Result<()> {
     // them was never pinned down, which is the reason for the `exit` below
     // rather than an excuse for skipping this.
     if let Some(mut app) = APP.with(|slot| slot.borrow_mut().take()) {
+        remember_guide(&mut app.settings);
         app.capturer.release();
         drop(app);
     }
@@ -639,6 +647,7 @@ fn tick(hwnd: HWND, app: &mut App) {
 
     // Anything the tuning panel changed. It runs in this thread's message
     // loop but never reaches into the runtime -- see `tuning.rs`.
+    remember_guide(&mut app.settings);
     if let Some(tuning) = tuning::take_pending() {
         app.pet.apply_tuning(tuning, now);
         remember_tuning(app, tuning);
@@ -799,6 +808,21 @@ fn tuning_key(key: RuntimeTuningKey) -> String {
         }
     }
     format!("{}{out}", settings::TUNING_PREFIX)
+}
+
+fn guide_seen(settings: &Settings) -> u32 {
+    settings
+        .text(usage_guide::SEEN_KEY)
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0)
+}
+
+fn remember_guide(settings: &mut Settings) {
+    if let Some(revision) = usage_guide::take_acknowledged() {
+        if std::env::var("ROAMLING_SMOKE_TEST").as_deref() != Ok("1") {
+            settings.set(usage_guide::SEEN_KEY, guide_seen(settings).max(revision));
+        }
+    }
 }
 
 /// Saves only what the user moved away from the authored value.
@@ -1257,6 +1281,7 @@ unsafe fn perform(hwnd: HWND, chosen: usize, app: &mut App, now: f64) {
             }
         }
         tray::CMD_ABOUT => shell::about(hwnd),
+        tray::CMD_USAGE_GUIDE => usage_guide::show(guide_seen(&app.settings), true),
         // Exactly two agent blocks live from 100 through 119. The work-app
         // ids start at 200, so claiming the whole gap would route every app
         // checkmark to the hook installer.

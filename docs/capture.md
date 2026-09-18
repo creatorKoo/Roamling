@@ -14,7 +14,7 @@
      ↓        MacCaptureProvider.captureLuminanceField()       SCShareableContent → SCScreenshotManager
 셸이 캐시     RoamlingRuntime.cachedLuminance                  한 칸. 화면이 셋이어도 한 칸
      ↓        judgeableLuminance → PetInput.luminance
-코어가 판정   placement.rs · emptiness.rs                       필드 없으면 "모름"
+코어가 판정   placement.rs · clearance.rs · emptiness.rs        필드 없으면 "모름"
 ```
 
 **필드가 없으면 코어는 글자를 못 본다.** 세 자리가 그렇다:
@@ -30,6 +30,15 @@
 **필드 범위 밖은 "모름"이다.** `emptiness.rs`가 사각형을 격자에 맞춰 자르는데, 완전히 밖이면
 span이 퇴화해 `None`을 돌려준다(`last_column - first_column < 1`). 다른 화면 필드를 들고
 있으면 틀린 답이 아니라 **답이 없는** 것이다 — 확인했다.
+
+2026-09-17부터 런타임의 `ClearanceMap::distance`는 펫 몸체 전체가 필드 안에 들어와야
+관측된 후보로 인정한다. 내용과 겹치는 후보를 제외하고 몸체와 내용 셀 사이 거리를 24pt
+구간으로 비교한다. 배회·작업·휴식이 이 기준을 공유하며 하단 선호는 그다음이다.
+휴식 도착 후와 수면 중 새 필드도 재검사한다. 선택·미관측 후보·수면 보류 규칙은
+`docs/placement.md` 3.2.3과 `docs/behavior-flow.md` 3.1이 정본이다.
+
+이 격자는 OCR이 아니다. 사진·아이콘도 내용으로 잡히며 축소 과정에서 작은 글씨를 놓칠 수 있다.
+후보 중 더 멀리 떨어진 곳을 찾는 구현이며, 화면 전체에서 수학적인 최장 거리를 보장하지 않는다.
 
 ## 2. 2026-09-15의 장애 — 확정된 것과 아닌 것
 
@@ -134,7 +143,7 @@ Swift 취소는 협력적이라 SCK 호출은 안 멈춘다. `withTaskGroup` + `
 
 ### ② 실패가 캐시를 지우지 않게 한다 — 단, 기한이 있다
 
-지금은 실패 한 번이 직전의 멀쩡한 필드를 nil로 덮는다. 그러나 **무기한 보존은 더 나쁘다.**
+수정 전에는 실패 한 번이 직전의 멀쩡한 필드를 nil로 덮었다. 그러나 **무기한 보존은 더 나쁘다.**
 `LuminanceField`에 시각이 없고 소비 쪽에 나이 검사가 없어서, 두 시간 전 화면을 지금 화면처럼
 쓰게 된다. 배치는 필드가 *있으면* 본 것으로 치고(`saw_capture`), 옛 필드가 지금 글자 자리를
 "비었다"고 하면 거기 앉는다 — **`None`보다 나쁜 결정이 실제로 가능하다.**
@@ -142,8 +151,8 @@ Swift 취소는 협력적이라 SCK 호출은 안 멈춘다. `withTaskGroup` + `
 - **마지막 시도 시각과 마지막 성공 시각을 따로 든다.**
 - 코어에 넘기는 것은 **마지막 성공이 12초 안**일 때만이다. 지나면 보관 여부와 무관하게 `None`.
   12초는 갱신 주기(3~6초)의 두 배쯤이고, 검증할 정책값이지 증명된 안전 한계가 아니다.
-- **화면 배치가 바뀌면 캐시를 버린다.** 지금 `handleDisplayChange`가 좌표계와 world는 바꾸면서
-  캐시는 안 지운다. 권한이 빠져도 같다(`judgeableLuminance`가 이미 그렇게 한다).
+- **화면 배치가 바뀌면 캐시를 버린다.** `handleDisplayChange`는 좌표계와 world를 바꾸면서
+  진행 중 요청과 캐시도 무효화한다. 권한이 빠져도 필드를 사용하지 않는다(`judgeableLuminance`).
 
 ## 4. 이번에 안 하는 것
 

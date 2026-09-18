@@ -14,6 +14,10 @@ pub mod attention;
 pub mod behavior;
 pub mod capability;
 pub mod coordinate_space;
+mod clearance;
+#[cfg(test)]
+mod clearance_tests;
+mod display_policy;
 pub mod emptiness;
 pub mod ffi;
 pub mod focus_activity;

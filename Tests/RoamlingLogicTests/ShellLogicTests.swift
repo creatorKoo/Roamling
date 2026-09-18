@@ -12,6 +12,41 @@ import RoamlingShell
 /// tests it has ever had.
 func shellLogicTests() -> [LogicTest] {
     [
+        LogicTest(name: "usage guide selects basics or unseen changes independently of app version") {
+            let guide = try require(UsageGuide(text: "revision|3\nbasic|current\n1|old\n2|second\n3|third"))
+            try expect(guide.page(seen: 0)?.keys == ["current"])
+            try expect(guide.page(seen: 1)?.keys == ["second", "third"])
+            try expect(guide.page(seen: 2)?.keys == ["third"])
+            try expect(guide.page(seen: 3) == nil)
+            try expect(guide.page(seen: 4) == nil)
+            try expect(guide.page(seen: 4, manual: true)?.isBasics == true)
+            try expect(UsageGuide(text: "revision|1\nbasic|x\n2|future") == nil)
+            let unchanged = try require(UsageGuide(text: "revision|3\nbasic|current\n1|old"))
+            try expect(unchanged.page(seen: 1) == nil)
+        },
+        LogicTest(name: "bundled usage guide resolves its content and is reachable from the menu") {
+            let guide = try require(UsageGuide.bundled())
+            let page = try require(guide.page(seen: 0))
+            try expect(!page.title.isEmpty && !page.body.isEmpty)
+            for key in guide.basics + guide.changes.map(\.key) {
+                for suffix in ["title", "body"] {
+                    try expect(localized(key + "." + suffix) != key + "." + suffix)
+                }
+            }
+            try MainActor.assumeIsolated {
+                let harness = try RuntimeHarness()
+                defer { harness.tearDown() }
+                let row = try require(ShellMenu.items(for: harness.runtime).first {
+                    $0.title == localized("menu.usageGuide")
+                })
+                guard case .command(.showUsageGuide) = row.content else {
+                    throw LogicTestFailure(message: "usage guide is not a command", file: #filePath, line: #line)
+                }
+                guard case .openUsageGuide = ShellController.perform(.showUsageGuide, runtime: harness.runtime, version: "test") else {
+                    throw LogicTestFailure(message: "usage guide does not open", file: #filePath, line: #line)
+                }
+            }
+        },
         LogicTest(name: "the update row says what it is doing") {
             try MainActor.assumeIsolated {
                 let harness = try RuntimeHarness()
@@ -322,7 +357,7 @@ func shellLogicTests() -> [LogicTest] {
                     .toggleHidden, .toggleRoaming, .togglePointerAvoidance, .toggleInteractions,
                     .showTuning, .reloadPets, .copyDiagnostics, .openPetFolder,
                     .testAgentReaction(id: "claude-code"), .testAgentReaction(id: "codex"),
-                    .showAbout, .quit,
+                    .showAbout, .showUsageGuide, .quit,
                     .setScale(1.0)
                 ]
                 for action in doesNotAsk {
@@ -418,7 +453,7 @@ func shellLogicTests() -> [LogicTest] {
                 }
             }
         },
-        LogicTest(name: "an agent-free menu has eight top-level choices and Quit is eighth") {
+        LogicTest(name: "an agent-free menu has nine top-level choices and Quit is ninth") {
             try MainActor.assumeIsolated {
                 let harness = try RuntimeHarness()
                 defer { harness.tearDown() }
@@ -433,20 +468,20 @@ func shellLogicTests() -> [LogicTest] {
                 }
                 let expectedTitles = [
                     "menu.hide", "menu.pet", "menu.size", "menu.movement",
-                    "menu.awareness", "menu.advanced", "menu.about", "menu.quit"
+                    "menu.awareness", "menu.advanced", "menu.usageGuide", "menu.about", "menu.quit"
                 ].map { localized($0) }
                 try expect(
                     choices.map(\.title) == expectedTitles,
                     "the top-level choices are \(choices.map(\.title))"
                 )
-                try expect(choices.count == 8, "expected 8 top-level choices, got \(choices.count)")
-                guard case .command(.quit) = choices[7].content else {
+                try expect(choices.count == 9, "expected 9 top-level choices, got \(choices.count)")
+                guard case .command(.quit) = choices[8].content else {
                     throw LogicTestFailure(
-                        message: "the eighth choice is not Quit: \(choices[7].content)",
+                        message: "the ninth choice is not Quit: \(choices[8].content)",
                         file: #filePath, line: #line
                     )
                 }
-                try expect(choices[6].title == localized("menu.about"))
+                try expect(choices[7].title == localized("menu.about"))
             }
         },
         LogicTest(name: "every menu command carries a title and a shortcut that is one key") {

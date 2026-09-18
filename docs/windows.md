@@ -124,6 +124,9 @@ macOS도 같은 이유로 `CGEventSource.secondsSinceLastEventType(_:eventType:)
 
 ### 릴리스할 때 사람이 지켜야 하는 것
 
+주요 조작·기능 변화가 있으면 [사용 안내 절차](usage-guide.md)에 따라 공통 `UsageGuide.txt`의
+안내 revision과 한영 문구를 같은 빌드에 넣는다. 앱 버전과 독립적이며 오류 수정만이면 유지한다.
+
 버전을 올리고 같은 번호로 태그를 민다. **세 곳이 태그와 같아야 하고, 워크플로가 대조해서
 다르면 실패시킨다.**
 

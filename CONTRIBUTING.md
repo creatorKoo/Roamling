@@ -28,7 +28,9 @@ Before opening a pull request:
 
 1. Keep the change focused and explain the behavior it changes.
 2. Add or update pure-logic tests where applicable.
-3. Run `./scripts/test.sh`.
+3. Run `./scripts/test.sh` on macOS or `.\scripts\test.ps1` on Windows.
+   Stop the running pet before building and restore it afterward. Keep existing
+   differential fixtures and recorded traces unchanged; investigate mismatches.
 4. Include screenshots or a short recording for visible behavior changes.
 5. Identify every third-party dependency or asset and its license.
 6. Do not submit secrets, proprietary source, prompts, or unlicensed pet assets.

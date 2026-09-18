@@ -14,6 +14,7 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
     private var paletteWindowController: PaletteWindowController?
     private var statusItem: NSStatusItem?
     private var tuningWindowController: RuntimeTuningWindowController?
+    private var usageGuideWindowController: UsageGuideWindowController?
 
     public override init() {
         super.init()
@@ -33,6 +34,9 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         offerLaunchAtLoginOnce()
         setupMenuBar()
         scheduleUpdateChecks()
+        if ProcessInfo.processInfo.environment["ROAMLING_SMOKE_TEST"] != "1" {
+            showUsageGuide(manual: false)
+        }
 
         // Starts the complete AppKit lifecycle for automated packaging checks,
         // then exits cleanly without needing a synthetic user interaction.
@@ -46,6 +50,7 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
     }
 
     public func applicationWillTerminate(_ notification: Notification) {
+        usageGuideWindowController?.prepareForTermination()
         runtime?.stop()
     }
 
@@ -261,6 +266,20 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         controller.present()
     }
 
+    private func showUsageGuide(manual: Bool) {
+        let defaults = UserDefaults.standard
+        guard let guide = UsageGuide.bundled(),
+              let page = guide.page(seen: defaults.integer(forKey: UsageGuide.seenKey), manual: manual)
+        else { return }
+        let controller = usageGuideWindowController ?? UsageGuideWindowController()
+        usageGuideWindowController = controller
+        controller.present(page, manual: manual) {
+            guard ProcessInfo.processInfo.environment["ROAMLING_SMOKE_TEST"] != "1" else { return }
+            defaults.set(max(defaults.integer(forKey: UsageGuide.seenKey), page.revision),
+                         forKey: UsageGuide.seenKey)
+        }
+    }
+
     private func apply(_ effect: ShellEffect) {
         switch effect {
         case .none:
@@ -274,6 +293,8 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
             rebuildMenu()
         case .openTuningPanel:
             showBehaviorTuning()
+        case .openUsageGuide:
+            showUsageGuide(manual: true)
         case .openPaletteMixer:
             showPaletteMixer()
         case let .reveal(folder):

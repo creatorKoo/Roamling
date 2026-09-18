@@ -22,9 +22,9 @@ use crate::activity_director::{ActivityDirector, ActivityEffect};
 use crate::behavior::BehaviorController;
 use crate::behavior::{BehaviorInput, BehaviorState};
 use crate::capability::{capability_for, PetCapability};
+use crate::display_policy::{crossing, placement_frame, placement_world};
 use crate::emptiness::LuminanceField;
 use crate::geometry::{swift_max, swift_min, WorldPoint, WorldRect, WorldSize, WorldVector};
-use crate::interest::BasicInterestPositionPlanner;
 use crate::movement::{MovementConfiguration, MovementController};
 use crate::placement::{PetSituation, PlacementDirector, PlacementIntent, PlacementTravelReason};
 use crate::pointer::{PointerDecision, PointerInteractionModel, PointerProximity};
@@ -206,9 +206,13 @@ pub struct PetRuntime {
     /// The current walk is one the pet owes the user: it is standing on their
     /// work and leaving. Cleared as soon as the route is gone, however it went.
     escape_route_active: bool,
+    /// Once at a shared edge, keep walking until the whole pet is inside.
+    crossing_clear: Option<WorldPoint>,
     /// The affection key is held and the cursor is on the pet: see `TickInput`.
     is_petted: bool,
     rest_destination: Option<RestDestination>,
+    rest_retry_at: f64,
+    rest_content_check: Option<(WorldPoint, WorldSize, bool)>,
     caught_transition_duration: f64,
     dragged_cycle_duration: f64,
 
@@ -227,7 +231,7 @@ impl PetRuntime {
             ),
             behavior: BehaviorController::default(),
             pointer_model: PointerInteractionModel::new(tuning.pointer_configuration()),
-            placement: PlacementDirector::default(),
+            placement: PlacementDirector::for_runtime(),
             activity: ActivityDirector::default(),
             tuning,
             rng: Aimlessness::new(seed),
@@ -253,8 +257,11 @@ impl PetRuntime {
             last_pointer_decision: None,
             is_evade_transitioning: false,
             escape_route_active: false,
+            crossing_clear: None,
             is_petted: false,
             rest_destination: None,
+            rest_retry_at: 0.0,
+            rest_content_check: None,
             caught_transition_duration: 0.0,
             dragged_cycle_duration: 0.4,
             diagnostics: Vec::new(),
@@ -318,12 +325,16 @@ impl PetRuntime {
     // --------------------------------------------------------------- setters
 
     pub fn set_displays(&mut self, displays: Vec<DisplaySnapshot>) {
+        if self.displays != displays {
+            self.crossing_clear = None;
+        }
         self.displays = displays.clone();
         self.world = DesktopWorldSnapshot::new(displays, Vec::new());
     }
 
     pub fn set_luminance(&mut self, field: Option<LuminanceField>) {
         self.luminance = field;
+        self.rest_content_check = None;
     }
 
     pub fn set_object_size(&mut self, size: WorldSize) {
@@ -501,6 +512,16 @@ impl PetRuntime {
 
         if !self.movement.has_route() {
             self.escape_route_active = false;
+            self.crossing_clear = None;
+        }
+        if self.crossing_clear.is_none() && !self.behavior.state().is_held() {
+            if let Some((clear, route)) = crossing(
+                &self.displays, self.movement.position(),
+                self.movement.remaining_waypoints(), self.object_size,
+            ) {
+                self.crossing_clear = Some(clear);
+                self.movement.set_route(route);
+            }
         }
 
         let decision = self
@@ -514,8 +535,21 @@ impl PetRuntime {
         // Only a hand actually on the pet is petting it. Beside it, the pet
         // just watches as it would any cursor -- minus the stepping away.
         self.is_petted = is_adored && input.pointer_is_over_pet;
+        let allows_pointer_glance = is_adored
+            || (self.activity.sustained_reaction() != Some(CompanionReaction::Work)
+                && matches!(self.behavior.state(),
+                    BehaviorState::Idle | BehaviorState::Sit | BehaviorState::LookAtPointer)
+                && !self.movement.has_route()
+                && self.movement.velocity().length() <= 1.0);
         let proximity = if is_adored {
             PointerProximity::Watching
+        } else if !allows_pointer_glance
+            && matches!(decision.proximity, PointerProximity::Watching | PointerProximity::Catchable)
+        {
+            // A passing cursor gets a tail wag only from a seated pet. Work,
+            // walks and one-shot reactions keep their motion; close evasion
+            // and an actual click still use the unmodified pointer decision.
+            PointerProximity::Far
         } else {
             decision.proximity
         };
@@ -538,8 +572,14 @@ impl PetRuntime {
             // something else owns the pet, so the seat verdict is never stale
             // by the time placement is allowed to act on it.
             let was_travelling = self.placement.is_travelling();
-            let situation = self.make_situation(now, input, proximity, is_adored, catch_is_armed);
-            let intent = self.placement.decide(&situation);
+            let situation = self.make_situation(
+                now, input, proximity, is_adored, catch_is_armed && allows_pointer_glance,
+            );
+            let intent = if self.crossing_clear.is_some() {
+                PlacementIntent::None
+            } else {
+                self.placement.decide(&situation)
+            };
             // Arriving is an event, and this is where it happens: the director
             // stops travelling on the tick it decides the walk is over, whether
             // the pet reached the seat or the trip timed out. Guarded on still
@@ -579,14 +619,21 @@ impl PetRuntime {
             };
             self.record("agent", &agent);
 
-            if catch_is_armed {
+            if catch_is_armed && self.crossing_clear.is_none() && allows_pointer_glance {
                 self.is_evade_transitioning = false;
                 self.movement.cancel_route(false);
                 self.behavior
                     .handle(BehaviorInput::Pointer(PointerProximity::Catchable), now);
                 self.movement.set_maximum_speed(self.tuning.walking_speed);
-                self.movement.update(delta_time);
+                self.movement.update_route(delta_time);
                 self.next_wander_at = swift_max(self.next_wander_at, now + 1.0);
+            } else if let Some(clear) = self.crossing_clear {
+                // Arming remains live for an actual click, but a passing
+                // cursor cannot park the panel astride two macOS displays.
+                self.movement.update_route(delta_time);
+                if !self.movement.remaining_waypoints().contains(&clear) {
+                    self.crossing_clear = None;
+                }
             } else if self.is_evade_transitioning {
                 self.update_evade_transition(now, delta_time);
             } else if intent.travel_reason().is_some() && self.behavior.state().is_resting() {
@@ -596,7 +643,9 @@ impl PetRuntime {
                 wore_arrival_reaction = self.apply_intent(&intent, now, delta_time);
             } else if self.update_rest_lifecycle(
                 input.user_idle_duration,
-                proximity,
+                // Suppressing a tail wag does not make the nearby hand absent
+                // for waking up or deciding whether it is time to sleep.
+                if is_adored { PointerProximity::Watching } else { decision.proximity },
                 input.pointer,
                 intent == PlacementIntent::SleepInPlace,
                 now,
@@ -619,7 +668,7 @@ impl PetRuntime {
                     PointerProximity::Watching | PointerProximity::Catchable => {
                         self.movement.cancel_route(false);
                         self.movement.set_maximum_speed(self.tuning.walking_speed);
-                        self.movement.update(delta_time);
+                        self.movement.update_route(delta_time);
                         self.next_wander_at = swift_max(self.next_wander_at, now + 0.8);
                     }
                     PointerProximity::Far => {
@@ -655,7 +704,10 @@ impl PetRuntime {
             }
         }
 
-        let catch_is_live = catch_is_armed && input.pointer_is_over_pet;
+        // A direct click is intent on its own. The fast-approach window still
+        // drives anticipation, but must not gate the shell's mouse events.
+        let catch_is_live = self.are_interactions_enabled
+            && !self.is_click_reaction_pending && input.pointer_is_over_pet;
         let owns_pointer = self.behavior.state().is_held() && !self.is_click_reaction_pending;
 
         TickOutput {
@@ -679,14 +731,12 @@ impl PetRuntime {
     // ------------------------------------------------------------ the pointer
 
     pub fn pointer_down(&mut self, pointer: WorldPoint, now: f64) -> InteractionOutput {
-        if self.is_hidden || !self.are_interactions_enabled || now > self.catch_armed_until {
-            return self.interaction(now, Some(false), false);
-        }
-        self.begin_catch(pointer, now)
+        self.touch_down(pointer, now)
     }
 
-    /// Direct contact has no preceding cursor approach. Only a contact inside
-    /// the pet may begin the same catch used by an armed desktop pointer.
+    /// Mouse clicks and touch both express direct intent without a preceding
+    /// fast approach. The shell handles artwork hit testing; core also rejects
+    /// stale or out-of-bounds contacts and duplicate presses while held.
     pub fn touch_down(&mut self, pointer: WorldPoint, now: f64) -> InteractionOutput {
         let position = self.movement.position();
         let inside = pointer.x >= position.x - self.object_size.width / 2.0
@@ -704,6 +754,7 @@ impl PetRuntime {
     }
 
     fn begin_catch(&mut self, pointer: WorldPoint, now: f64) -> InteractionOutput {
+        self.crossing_clear = None;
         self.drag_offset = self.movement.position().vector_from(pointer);
         self.click_reaction_until = 0.0;
         self.is_click_reaction_pending = false;
@@ -860,7 +911,11 @@ impl PetRuntime {
                 ActivityEffect::SettleInPlace { source_id } => {
                     self.placement.settle_in_place(Some(&source_id), now)
                 }
-                ActivityEffect::CancelRoute => self.movement.cancel_route(false),
+                ActivityEffect::CancelRoute => {
+                    if self.crossing_clear.is_none() {
+                        self.movement.cancel_route(false);
+                    }
+                }
                 ActivityEffect::SetNextWanderAt { timestamp } => self.next_wander_at = timestamp,
                 ActivityEffect::ApplyReaction { reaction } => {
                     self.behavior.handle(BehaviorInput::Reaction(reaction), now);
@@ -919,7 +974,8 @@ impl PetRuntime {
     ) -> PetSituation {
         let pointer = input.pointer;
         let is_watching = self.activity.is_watching_window();
-        let is_roaming = self.is_roaming_enabled && !is_watching;
+        let is_roaming = self.is_roaming_enabled && !is_watching
+            && self.activity.sustained_reaction() != Some(CompanionReaction::Work);
         let is_stroll_due = is_roaming && !self.movement.has_route() && now >= self.next_wander_at;
 
         if is_watching {
@@ -958,7 +1014,7 @@ impl PetRuntime {
             self.cached_focus.clone()
         };
 
-        let mut world = self.world.clone();
+        let mut world = placement_world(&self.world);
         world.focus = focus;
         world.luminance = self.luminance.clone();
 
@@ -1038,7 +1094,9 @@ impl PetRuntime {
             // pointer came close, or the state machine was mid-transition. The
             // seat is kept either way.
             PlacementIntent::Hold | PlacementIntent::SleepInPlace | PlacementIntent::None => {
-                if self.activity.is_watching_window() {
+                if self.activity.is_watching_window()
+                    || self.activity.sustained_reaction() == Some(CompanionReaction::Work)
+                {
                     self.hold_seat(now, delta_time)
                 } else {
                     self.update_roaming(now, delta_time);
@@ -1067,7 +1125,7 @@ impl PetRuntime {
             .handle(BehaviorInput::BeginInterestTravel, now);
         self.movement.set_maximum_speed(self.tuning.walking_speed);
         self.next_wander_at = f64::INFINITY;
-        self.movement.update(delta_time);
+        self.movement.update_route(delta_time);
         false
     }
 
@@ -1076,7 +1134,7 @@ impl PetRuntime {
     fn hold_seat(&mut self, now: f64, delta_time: f64) -> bool {
         self.movement.cancel_route(false);
         self.movement.set_maximum_speed(self.tuning.walking_speed);
-        self.movement.update(delta_time);
+        self.movement.update_route(delta_time);
         if self.activity.has_arrival_reaction() {
             let effects = self
                 .activity
@@ -1124,7 +1182,7 @@ impl PetRuntime {
         match self.behavior.state() {
             BehaviorState::Sit => {
                 self.movement.cancel_route(false);
-                self.movement.update(delta_time);
+                self.movement.update_route(delta_time);
                 if now - self.behavior.entered_at() >= SITTING_DURATION {
                     self.behavior.handle(BehaviorInput::SeekSleepSpot, now);
                     self.begin_rest_travel(pointer, may_nap_on_seat, now);
@@ -1135,7 +1193,7 @@ impl PetRuntime {
                 self.movement
                     .set_maximum_speed(swift_max(24.0, self.tuning.walking_speed * 0.75));
                 if self.movement.has_route() {
-                    if self.movement.update(delta_time).reached_destination {
+                    if self.movement.update_route(delta_time).reached_destination {
                         self.enter_sleep(now);
                     }
                 } else {
@@ -1144,8 +1202,12 @@ impl PetRuntime {
                 return true;
             }
             BehaviorState::Sleep => {
+                if self.rest_spot_is_busy() {
+                    self.defer_rest(now);
+                    return true;
+                }
                 self.movement.cancel_route(false);
-                self.movement.update(delta_time);
+                self.movement.update_route(delta_time);
                 return true;
             }
             _ => {}
@@ -1170,6 +1232,7 @@ impl PetRuntime {
         self.record("rest", &blocked);
 
         if !(user_idle_duration >= self.tuning.idle_before_rest
+            && now >= self.rest_retry_at
             && !self.placement.is_travelling()
             && (!self.activity.is_watching_window() || may_nap_on_seat)
             && proximity == PointerProximity::Far
@@ -1182,46 +1245,54 @@ impl PetRuntime {
         self.movement.cancel_route(false);
         self.behavior.handle(BehaviorInput::BeginRest, now);
         self.next_wander_at = f64::INFINITY;
-        self.movement.update(delta_time);
+        self.movement.update_route(delta_time);
         true
     }
 
     fn begin_rest_travel(&mut self, pointer: WorldPoint, nap_in_place: bool, now: f64) {
-        // A pet that dozed off beside a working agent is already on a vetted
-        // seat. Walking it to a display corner would throw that away.
-        if nap_in_place {
+        let away_from_seam = self.world.display_containing(self.movement.position())
+            .is_some_and(|display| placement_frame(display, &self.displays)
+                .inset_by(self.object_size.width / 2.0, self.object_size.height / 2.0)
+                .contains(self.movement.position()));
+        // Without a field, retain the permission-free behaviour. A measured
+        // field, however, judges every sleep spot including an agent's seat.
+        if nap_in_place && away_from_seam && self.luminance.is_none() {
             self.record("rest", "sleeping in place, on a vetted seat");
             self.enter_sleep(now);
             return;
         }
-
-        // Away from an agent, the spot has to answer for itself. Standing on a
-        // clear patch of desktop is the ordinary case, and getting up to walk to
-        // a corner from it is the trip the user actually sees.
-        if BasicSafeZonePlanner::naps_in_place(
-            self.movement.position(),
-            self.object_size,
-            self.luminance.as_ref(),
-            BasicInterestPositionPlanner::HOLD_EMPTINESS,
-        ) {
-            self.record("rest", "sleeping in place, spot reads clear");
-            self.enter_sleep(now);
-            return;
+        if self.luminance.is_none() {
+            self.record("rest", "tucking into a safe zone, spot unvetted");
         }
-        self.record("rest", "tucking into a safe zone, spot unvetted");
 
-        let mut rest_world = self.world.clone();
-        rest_world.safe_zones = BasicSafeZonePlanner::safe_zones(&self.world);
+        let mut rest_world = placement_world(&self.world);
+        rest_world.safe_zones = BasicSafeZonePlanner::safe_zones(&rest_world);
         rest_world.focus = self.world.focus.clone();
-        self.rest_destination = BasicSafeZonePlanner::destination(
+        rest_world.luminance = self.luminance.clone();
+        self.rest_destination = BasicSafeZonePlanner::clear_destination(
             &rest_world,
             self.movement.position(),
             Some(pointer),
             self.object_size,
         );
 
+        if away_from_seam {
+            if let Some(field) = self.luminance.as_ref() {
+                let map = crate::clearance::ClearanceMap::new(field);
+                let position = self.movement.position();
+                if map.distance(position, self.object_size).is_some_and(|distance| distance >= 0.0)
+                    && !self.rest_destination.as_ref().is_some_and(|destination| {
+                        map.improves(position, destination.point, self.object_size)
+                    })
+                {
+                    self.enter_sleep(now);
+                    return;
+                }
+            }
+        }
+
         let Some(destination) = self.rest_destination.clone() else {
-            self.enter_sleep(now);
+            self.defer_rest(now);
             return;
         };
         if !self.is_roaming_enabled {
@@ -1239,10 +1310,41 @@ impl PetRuntime {
     }
 
     fn enter_sleep(&mut self, now: f64) {
+        if self.rest_spot_is_busy() {
+            self.defer_rest(now);
+            return;
+        }
         self.movement.cancel_route(true);
         self.behavior.handle(BehaviorInput::SleepSpotReached, now);
         self.next_wander_at = f64::INFINITY;
         self.persist_position = true;
+    }
+
+    fn rest_spot_is_busy(&mut self) -> bool {
+        let position = self.movement.position();
+        if let Some((point, size, busy)) = self.rest_content_check {
+            if point == position && size == self.object_size {
+                return busy;
+            }
+        }
+        // Sleeping has no movement: only a new field, position or size needs
+        // another content check, not every animation tick.
+        let busy = self.luminance.as_ref().is_some_and(|field| {
+            crate::clearance::ClearanceMap::new(field)
+                .distance(position, self.object_size)
+                .is_some_and(|distance| distance < 0.0)
+        });
+        self.rest_content_check = Some((position, self.object_size, busy));
+        busy
+    }
+
+    fn defer_rest(&mut self, now: f64) {
+        self.movement.cancel_route(true);
+        self.rest_destination = None;
+        self.behavior.handle(BehaviorInput::Reaction(CompanionReaction::Calm), now);
+        self.rest_retry_at = now + 30.0;
+        self.next_wander_at = now + WAKE_WANDER_DELAY;
+        self.record("rest", "no clear sleep spot, staying awake");
     }
 
     fn cancel_rest_for_activity(&mut self, now: f64) {
@@ -1261,14 +1363,14 @@ impl PetRuntime {
         self.movement.set_maximum_speed(self.tuning.walking_speed);
         if !self.is_roaming_enabled {
             self.movement.cancel_route(false);
-            self.movement.update(delta_time);
+            self.movement.update_route(delta_time);
             return;
         }
         if !self.movement.has_route() {
-            self.movement.update(delta_time);
+            self.movement.update_route(delta_time);
             return;
         }
-        if self.movement.update(delta_time).reached_destination {
+        if self.movement.update_route(delta_time).reached_destination {
             self.behavior.handle(BehaviorInput::Arrived, now);
             let roll = self.rng.unit();
             self.next_wander_at = now + self.tuning.wander_delay(roll);
@@ -1291,7 +1393,7 @@ impl PetRuntime {
         // running on the spot in the session this was found in.
         if !self.movement.has_route() {
             self.next_wander_at = now + 2.0;
-            self.movement.update(delta_time);
+            self.movement.update_route(delta_time);
             return;
         }
 
@@ -1303,10 +1405,10 @@ impl PetRuntime {
         if self.behavior.handle(BehaviorInput::BeginWander, now).to != BehaviorState::Wander {
             self.movement.cancel_route(false);
             self.next_wander_at = now + 2.0;
-            self.movement.update(delta_time);
+            self.movement.update_route(delta_time);
             return;
         }
-        self.movement.update(delta_time);
+        self.movement.update_route(delta_time);
     }
 
     /// Offering the director a handful of destinations to reject is the
@@ -1366,7 +1468,7 @@ impl PetRuntime {
             }
         };
 
-        let safe = target.visible_frame.inset_by(
+        let safe = placement_frame(&target, &self.displays).inset_by(
             self.object_size.width / 2.0 + 18.0,
             self.object_size.height / 2.0 + 12.0,
         );
@@ -1409,20 +1511,28 @@ impl PetRuntime {
 
     fn apply_evade(&mut self, desired_velocity: WorldVector, delta_time: f64, now: f64) {
         let topology = DisplayTopology::new(self.displays.clone());
-        if let Some(transition) = topology.evade_transition(
+        if let Some(mut transition) = topology.evade_transition(
             self.movement.position(),
             desired_velocity,
             self.object_size,
             320.0,
             1.0,
         ) {
+            if let Some(target) = transition.display_ids.last()
+                .and_then(|id| self.displays.iter().find(|display| &display.id == id))
+            {
+                if let Some(destination) = transition.waypoints.last_mut() {
+                    *destination = placement_frame(target, &self.displays)
+                        .clamped_center(*destination, self.object_size);
+                }
+            }
             self.is_evade_transitioning = true;
             self.movement.set_maximum_speed(swift_max(
                 self.tuning.walking_speed,
                 desired_velocity.length(),
             ));
             self.movement.set_route(transition.waypoints);
-            self.movement.update(delta_time);
+            self.movement.update_route(delta_time);
             self.next_wander_at = now + 1.5;
             return;
         }
@@ -1484,7 +1594,7 @@ impl PetRuntime {
             self.tuning.walking_speed,
             self.tuning.pointer_configuration().fast_evade_speed,
         ));
-        if !self.movement.update(delta_time).reached_destination {
+        if !self.movement.update_route(delta_time).reached_destination {
             return;
         }
         self.is_evade_transitioning = false;
@@ -1607,6 +1717,296 @@ fn empty_hint() -> LocationHint {
 }
 
 #[cfg(test)]
+mod movement_policy_tests {
+    use super::*;
+    use crate::activity::CompanionEventKind;
+
+    fn display(id: &str, x: f64, y: f64) -> DisplaySnapshot {
+        DisplaySnapshot {
+            id: id.into(),
+            name: id.into(),
+            frame: WorldRect::new(x, y, 1000.0, 800.0),
+            visible_frame: WorldRect::new(x, y, 1000.0, 800.0),
+            scale: 1.0,
+        }
+    }
+
+    fn input(now: f64, pointer: WorldPoint) -> TickInput {
+        TickInput {
+            now,
+            pointer,
+            primary_button_down: false,
+            user_idle_duration: 0.0,
+            capture_authorized: false,
+            focus_authorized: false,
+            did_query_focus: false,
+            queried_focus: None,
+            pointer_is_over_pet: false,
+            affection_held: false,
+        }
+    }
+
+    #[test]
+    fn body_click_catches_walk_and_work_without_an_approach_then_drags_and_drops() {
+        for working in [false, true] {
+            let mut pet = PetRuntime::new(WorldPoint::new(500.0, 400.0), RuntimeTuning::default(), 7);
+            pet.set_displays(vec![display("main", 0.0, 0.0)]);
+            // Avoidance is independently configurable; direct clicks must not
+            // depend on either avoidance or the fast-approach reaction.
+            pet.set_flags(true, false, true);
+            if working {
+                pet.handle_activity_event(CompanionEvent::new(
+                    "work", "codex:turn", 10.0, CompanionEventKind::HighIntensity, 1.0, None,
+                ), 10.0);
+            } else {
+                pet.begin_stroll(WorldPoint::new(750.0, 400.0), 10.0, 0.0);
+            }
+            let contact = pet.position();
+            let mut sample = input(10.1, contact);
+            sample.pointer_is_over_pet = true;
+            let out = pet.finish_tick(&sample);
+            assert!(out.interaction_enabled, "the shell must receive the unarmed click");
+            assert_eq!(pet.catch_armed_until, 0.0);
+            assert_eq!(out.state, if working { BehaviorState::Work } else { BehaviorState::Wander });
+            let origin = pet.position();
+            pet.pointer_down(contact, 10.11);
+            assert_eq!(pet.state(), BehaviorState::Caught);
+            assert!(!pet.movement.has_route());
+            let dragged_pointer = contact.offset(WorldVector::new(100.0, 50.0));
+            pet.pointer_dragged(dragged_pointer, 112.0, 10.2);
+            assert_eq!(pet.state(), BehaviorState::Dragged);
+            assert_eq!(pet.position(), origin.offset(WorldVector::new(100.0, 50.0)));
+            let dropped = pet.pointer_up(dragged_pointer, true, 10.3);
+            assert!(dropped.persist_position);
+            assert!(!pet.state().is_held());
+        }
+    }
+
+    #[test]
+    fn a_stationary_cursor_can_click_an_evading_pet() {
+        let mut pet = PetRuntime::new(WorldPoint::new(500.0, 400.0), RuntimeTuning::default(), 7);
+        pet.set_displays(vec![display("main", 0.0, 0.0)]);
+        let contact = pet.position();
+        let mut sample = input(10.0, contact);
+        sample.pointer_is_over_pet = true;
+        let out = pet.finish_tick(&sample);
+        assert_eq!(pet.catch_armed_until, 0.0);
+        assert_eq!(out.state, BehaviorState::EvadePointer);
+        assert!(out.interaction_enabled);
+        pet.pointer_down(contact, 10.01);
+        assert_eq!(pet.state(), BehaviorState::Caught);
+    }
+
+    #[test]
+    fn direct_mouse_click_respects_body_visibility_and_interaction_gates() {
+        let mut pet = PetRuntime::new(WorldPoint::new(500.0, 400.0), RuntimeTuning::default(), 7);
+        pet.set_displays(vec![display("main", 0.0, 0.0)]);
+        let contact = pet.position();
+        assert!(!pet.finish_tick(&input(10.0, WorldPoint::new(800.0, 700.0))).interaction_enabled);
+        pet.pointer_down(WorldPoint::new(800.0, 700.0), 10.01);
+        assert!(!pet.state().is_held());
+        let mut sample = input(10.1, contact);
+        sample.pointer_is_over_pet = true;
+        pet.set_hidden(true);
+        assert!(!pet.finish_tick(&sample).interaction_enabled);
+        pet.pointer_down(contact, 10.11);
+        assert!(!pet.state().is_held());
+        pet.set_hidden(false);
+        pet.set_flags(true, false, false);
+        sample.now = 10.2;
+        assert!(!pet.finish_tick(&sample).interaction_enabled);
+        pet.pointer_down(contact, 10.21);
+        assert!(!pet.state().is_held());
+        pet.set_flags(true, false, true);
+        pet.pointer_down(pet.position(), 10.3);
+        assert_eq!(pet.state(), BehaviorState::Caught);
+        let origin = pet.position();
+        pet.pointer_down(origin.offset(WorldVector::new(20.0, 0.0)), 10.31);
+        pet.pointer_dragged(origin.offset(WorldVector::new(100.0, 0.0)), 100.0, 10.4);
+        assert_eq!(pet.position(), origin.offset(WorldVector::new(100.0, 0.0)),
+            "duplicate down must not reset the grab offset");
+    }
+
+    #[test]
+    fn codex_work_ignores_glance_but_not_affection_or_close_evasion() {
+        let mut pet = PetRuntime::new(WorldPoint::new(500.0, 400.0), RuntimeTuning::default(), 7);
+        pet.set_displays(vec![display("main", 0.0, 0.0)]);
+        pet.handle_activity_event(
+            CompanionEvent::new(
+                "work",
+                "codex:turn",
+                10.0,
+                CompanionEventKind::HighIntensity,
+                1.0,
+                None,
+            ),
+            10.0,
+        );
+        assert_eq!(pet.state(), BehaviorState::Work);
+        for i in 0..90 {
+            let now = 10.0 + f64::from(i) / 30.0;
+            pet.begin_tick(now);
+            let out = pet.finish_tick(&input(now, WorldPoint::new(635.0, 400.0)));
+            assert_eq!(out.state, BehaviorState::Work);
+            assert_eq!(out.capability, PetCapability::Work);
+        }
+        let mut affection = input(13.1, WorldPoint::new(635.0, 400.0));
+        affection.affection_held = true;
+        assert_eq!(
+            pet.finish_tick(&affection).state,
+            BehaviorState::LookAtPointer
+        );
+        // Work without a window hint must also recover after explicit affection.
+        assert_eq!(
+            pet.finish_tick(&input(13.2, WorldPoint::new(635.0, 400.0)))
+                .state,
+            BehaviorState::Work
+        );
+        // An armed catch exposes the hit target without starting a tail wag.
+        pet.catch_armed_until = 14.0;
+        assert_eq!(
+            pet.finish_tick(&input(13.3, WorldPoint::new(635.0, 400.0)))
+                .state,
+            BehaviorState::Work
+        );
+        pet.pointer_down(pet.position(), 13.4);
+        assert_eq!(pet.state(), BehaviorState::Caught);
+
+        let mut evading =
+            PetRuntime::new(WorldPoint::new(500.0, 400.0), RuntimeTuning::default(), 7);
+        evading.set_displays(vec![display("main", 0.0, 0.0)]);
+        evading.handle_activity_event(
+            CompanionEvent::new(
+                "work",
+                "codex:turn",
+                10.0,
+                CompanionEventKind::HighIntensity,
+                1.0,
+                None,
+            ),
+            10.0,
+        );
+        assert_eq!(
+            evading
+                .finish_tick(&input(10.0, WorldPoint::new(580.0, 400.0)))
+                .state,
+            BehaviorState::EvadePointer
+        );
+    }
+
+    #[test]
+    fn a_wandering_pet_only_wags_after_arriving_and_sitting_still() {
+        let mut pet = PetRuntime::new(WorldPoint::new(500.0, 400.0), RuntimeTuning::default(), 7);
+        pet.set_displays(vec![display("main", 0.0, 0.0)]);
+        pet.begin_stroll(WorldPoint::new(750.0, 400.0), 10.0, 0.0);
+        pet.catch_armed_until = 100.0;
+        let mut arrived = false;
+        for i in 1..600 {
+            let now = 10.0 + f64::from(i) / 30.0;
+            pet.begin_tick(now);
+            let pointer = pet.position().offset(WorldVector::new(135.0, 0.0));
+            let out = pet.finish_tick(&input(now, pointer));
+            assert_ne!(out.state, BehaviorState::LookAtPointer);
+            if !pet.movement.has_route() {
+                assert_eq!(out.state, BehaviorState::Idle);
+                assert_eq!(pet.position(), WorldPoint::new(750.0, 400.0));
+                let seated = pet.finish_tick(&input(now + 0.1, pointer));
+                assert_eq!(seated.state, BehaviorState::LookAtPointer);
+                arrived = true;
+                break;
+            }
+        }
+        assert!(arrived);
+    }
+
+    #[test]
+    fn shared_edge_crossings_finish_in_one_direction_despite_a_nearby_cursor() {
+        for (dx, dy) in [(1000.0, 0.0), (-1000.0, 0.0), (0.0, 800.0), (0.0, -800.0)] {
+            let centre = WorldPoint::new(500.0, 400.0);
+            let direction = WorldVector::new(dx, dy).normalized();
+            let start = centre.offset(direction.scaled(if dx != 0.0 { 400.0 } else { 300.0 }));
+            let destination = centre.offset(WorldVector::new(dx, dy));
+            let mut pet = PetRuntime::new(start, RuntimeTuning::default(), 7);
+            pet.set_displays(vec![display("a", 0.0, 0.0), display("b", dx, dy)]);
+            pet.begin_stroll(destination, 0.0, 0.0);
+            let mut previous = start;
+            let mut committed = false;
+            let mut finished = false;
+            for i in 1..900 {
+                let now = f64::from(i) / 30.0;
+                pet.begin_tick(now);
+                let previous_speed = pet.movement.velocity().length();
+                let out =
+                    pet.finish_tick(&input(now, pet.position().offset(direction.scaled(135.0))));
+                committed |= pet.crossing_clear.is_some();
+                assert!(out.position.vector_from(previous).dot(direction) >= -0.001);
+                assert_ne!(out.state, BehaviorState::LookAtPointer);
+                let seam = centre.offset(direction.scaled(if dx != 0.0 { 500.0 } else { 400.0 }));
+                if out.position.distance(seam) < 20.0 {
+                    assert!(
+                        pet.movement.velocity().length() + 0.001 >= previous_speed,
+                        "slowed down on the display seam"
+                    );
+                }
+                if committed && pet.crossing_clear.is_none() {
+                    let target = &pet.displays[1];
+                    assert!(placement_frame(target, &pet.displays)
+                        .inset_by(48.0, 52.0)
+                        .contains(out.position));
+                    finished = true;
+                    break;
+                }
+                previous = out.position;
+            }
+            assert!(finished, "crossing did not finish: {dx}, {dy}");
+        }
+    }
+
+    #[test]
+    fn wander_and_sleep_destinations_leave_shared_edges_clear() {
+        let mut pet = PetRuntime::new(WorldPoint::new(990.0, 400.0), RuntimeTuning::default(), 7);
+        pet.set_displays(vec![
+            display("left", 0.0, 0.0),
+            display("right", 1000.0, 0.0),
+        ]);
+        for _ in 0..500 {
+            let point = pet.random_wander_point().unwrap();
+            assert!((point.x - 1000.0).abs() >= 168.0);
+        }
+        pet.begin_rest_travel(WorldPoint::new(0.0, 0.0), false, 10.0);
+        assert!((pet.rest_destination.as_ref().unwrap().point.x - 1000.0).abs() >= 168.0);
+        let world = placement_world(&pet.world);
+        let seat = crate::interest::BasicInterestPositionPlanner::destination(
+            &LocationHint::new(Some(WorldRect::new(650.0, 0.0, 350.0, 800.0)), 1.0),
+            &world,
+            pet.position(),
+            None,
+            0.0,
+            pet.object_size,
+        )
+        .unwrap();
+        assert!((seat.point.x - 1000.0).abs() >= 168.0);
+    }
+
+    #[test]
+    fn a_direct_catch_can_interrupt_a_committed_crossing() {
+        let mut pet = PetRuntime::new(WorldPoint::new(900.0, 400.0), RuntimeTuning::default(), 7);
+        pet.set_displays(vec![
+            display("left", 0.0, 0.0),
+            display("right", 1000.0, 0.0),
+        ]);
+        pet.begin_stroll(WorldPoint::new(1300.0, 400.0), 0.0, 0.0);
+        pet.finish_tick(&input(0.1, WorldPoint::new(500.0, 400.0)));
+        assert!(pet.crossing_clear.is_some());
+        assert_eq!(pet.catch_armed_until, 0.0);
+        pet.pointer_down(pet.position(), 0.2);
+        assert_eq!(pet.state(), BehaviorState::Caught);
+        assert!(pet.crossing_clear.is_none());
+        assert!(!pet.movement.has_route());
+    }
+}
+
+#[cfg(test)]
 mod hidden_tests {
     use super::*;
     use crate::activity::CompanionEventKind;
@@ -1621,8 +2021,6 @@ mod hidden_tests {
             visible_frame: WorldRect::new(0.0, 20.0, 400.0, 750.0), scale: 1.0,
         }]);
         let contact = WorldPoint::new(140.0, 150.0);
-        pet.pointer_down(contact, 10.0);
-        assert!(!pet.state().is_held(), "desktop still requires an approach");
         pet.touch_down(WorldPoint::new(51.0, 150.0), 10.0);
         assert!(!pet.state().is_held());
         pet.set_hidden(true);

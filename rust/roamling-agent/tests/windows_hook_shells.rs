@@ -36,6 +36,9 @@ fn check_shell(executable: PathBuf, args: &[&str]) {
                 Err(error) => panic!("accept: {error}"),
             }
         };
+        // accept is polled, but the request reader below intentionally waits
+        // for headers/body. Do not inherit the listener's nonblocking mode.
+        stream.set_nonblocking(false).unwrap();
         stream
             .set_read_timeout(Some(Duration::from_secs(3)))
             .unwrap();

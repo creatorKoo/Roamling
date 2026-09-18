@@ -360,8 +360,9 @@ macOS는 `roamling-core`만 링크하므로 팔레트가 uniffi를 건너야 했
 - **시트 바이트는 호출자가 준다.** 셸이 이미 갖고 있고(맥은 번들 리소스), 인자 하나를 아끼려고
   2 MB를 라이브러리에 또 넣을 이유가 없다.
 - **FFI는 완성된 펫이 아니라 "다시 칠한 시트 두 장"을 준다.** 맥은 마스코트를 Swift가
-  조립하고(`MascotPetFactory`) Rust 조립기는 아직 포팅 중이라, 통째로 건네면 끝나지 않은
-  포팅을 경계 너머로 끌고 가게 된다. W2b가 디코딩에 낸 것과 같은 seam이다.
+  조립한다(`MascotPetFactory`). 현재 Rust 조립기도 `roamling-pet::built_in_mochi`로 구현되어
+  Windows·Android에서 사용하지만, macOS 팔레트 FFI는 계속 시트 두 장을 반환하는 경계를 쓴다.
+  W2b가 디코딩에 낸 것과 같은 seam이다.
 - **Rust 타입은 `RoamlingEngine`을 안 나간다.** `RoamlingShell`은 `PaletteOption`·
   `PaletteRGB`·`PalettePart` 같은 평범한 Swift만 본다.
 

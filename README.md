@@ -6,8 +6,8 @@
 
 Roamling is a native companion runtime for macOS and Windows. Petdex-compatible
 creatures roam across your monitors, avoid your pointer, let you catch and drag
-them, and will eventually react to coding, games, media, and the rest of your
-desktop life.
+them, and react to coding agents and configured work apps. Game and media
+reactions remain future work.
 
 The decisions a pet makes live in one Rust core that both platforms share; each
 platform brings its own window, tray, and input. See `docs/windows.md`.
@@ -16,7 +16,7 @@ platform brings its own window, tray, and input. See `docs/windows.md`.
 
 ## Current status
 
-This repository contains the first working vertical slice:
+The current desktop implementation includes:
 
 - a native AppKit menu-bar app and transparent, non-activating overlay;
 - Codex/Petdex v1 (8×9) and v2 (8×11) pet loading, plus custom animation
@@ -28,34 +28,41 @@ This repository contains the first working vertical slice:
   continuous cross-display paths;
 - calmer wandering with visible idle pauses, shorter local trips, and more
   noticeable multi-display exploration;
-- pointer awareness, capped evasion, fast-approach catching, click, drag, drop,
+- pointer awareness, capped evasion, direct body-click catching, drag, drop,
   cross-monitor dragging, and connected-edge escape when gently cornered;
 - a live **Behavior Tuning…** panel for MVP 0/0.5 movement, pointer, catch,
   and hit-region values, with persistent settings and one-click reset;
 - permission-free idle detection plus sit, safe sleep-spot travel, sleep,
   wake, and stretch behavior at a reduced sleeping cadence;
-- basic corner/Dock-adjacent placement that stays inside each display's
-  visible frame and avoids the pointer;
+- shared text-clearance ranking for roaming, work seats, and sleep spots when
+  visual awareness is enabled; permission-free placement remains available;
+- shared-edge margins and continuous monitor crossings; ordinary pointer tail
+  wags only while seated, with working-agent reactions preserved;
 - an opt-in Claude Code hook integration with a token-authenticated local
   receiver, coarse permission-free work-window placement, and start,
   attention, completion, and failure reactions;
 - an opt-in Codex 0.147+ hook integration that preserves existing hooks and
   `notify`, plus shared multi-source attention, hysteresis, and reaction policy;
-- a sprite-sized overlay whose input region is enabled only while a catch is
-  armed, leaving the underlying app alone during normal operation;
+- a sprite-sized overlay that accepts a body click without a fast approach,
+  including while moving or working; clicks outside the pet pass through;
+- a native first-run guide, with one-time notices for meaningful usage changes
+  and **Bori User Guide…** in the menu to reopen the basics;
 - pure-logic tests for geometry, display paths, movement, pointer interaction,
   behavior transitions, attention, reactions, and pet animation fallback.
 
-Accessibility/caret tracking and visual placement remain behind the next
-milestones; the core event vocabulary is not coding-specific.
+Accessibility/caret tracking and visual placement are implemented behind their
+platform permissions/settings. Coarse visual sampling cannot identify every
+glyph. See [behavior](docs/behavior-flow.md) and [capture](docs/capture.md).
+Android service/overlay development and remaining device checks are tracked
+separately in [the Android guide](docs/android.md).
 
 ## Build and run
 
-Requirements: macOS 13 or newer and Swift 6. Building the command-line target
-works with Apple Command Line Tools; creating a signed distributable app will
-eventually require full Xcode.
+Requirements: macOS 13 or newer, Swift 6, and the Rust toolchain. Build the shared
+Rust library and generated bindings before building Swift.
 
 ```sh
+./scripts/build-rust-core.sh
 swift build
 ./scripts/test.sh
 swift run Roamling
@@ -68,12 +75,12 @@ Create a local `.app` bundle:
 open build/Roamling.app
 ```
 
-The bundle is signed ad-hoc by default, which makes macOS treat every rebuild as
-a different app and forget granted permissions. To keep those grants across
-builds, copy `scripts/signing.env.example` to `scripts/signing.env` (git-ignored)
+The bundle build requires a signing identity; it refuses ad-hoc signing by
+default because that resets permissions across rebuilds. Copy
+`scripts/signing.env.example` to `scripts/signing.env` (git-ignored)
 and set `ROAMLING_CODESIGN_IDENTITY` to a code signing identity. A free
 self-signed certificate works; the example file has the steps. The same variable
-can be exported in the environment instead.
+can be exported in the environment instead. See [release instructions](docs/release.md).
 
 The tests use a dependency-free executable harness so they also run on minimal
 Command Line Tools installations that do not ship a compatible XCTest runner.
@@ -128,9 +135,12 @@ installer, so the warning appears once, on first install.
 ### Updates
 
 Roamling checks for a new version at startup and once a day, downloads it in the
-background, and puts it in place. **There is no dialog and no restart prompt**:
+background, and puts it in place. **Downloading needs no dialog or restart prompt**:
 the new version is simply the one that runs the next time Roamling starts. The
 tray menu says so quietly when one is waiting.
+
+A short guide appears on first launch and after meaningful usage changes, once per
+guide revision. Bug-fix releases do not repeat it. See [guide maintenance](docs/usage-guide.md).
 
 Every release is signed with an Ed25519 key whose public half is compiled into
 the app, and both the version feed and the executable are checked against it
@@ -164,22 +174,26 @@ There is no Swift here; the Windows build is Rust all the way down. Requires the
 ## Repository guide
 
 ```text
-Sources/RoamlingCore/   OS-independent geometry, world, behavior, events
+Sources/RoamlingCore/   Swift reference implementation for differential tests
 Sources/RoamlingPet/    Petdex/Codex manifests, atlas runtime, fallbacks
 Sources/RoamlingSources/ activity adapters and local hook transport
-Sources/RoamlingMac/    AppKit display, pointer, overlay, and app runtime
+Sources/RoamlingEngine/ macOS orchestration and Rust binding adapters
+Sources/RoamlingMac/    AppKit display, pointer, overlay, and platform providers
 Sources/RoamlingApp/    executable entry point
-rust/roamling-core/     the pet's decisions, shared by both platforms
+rust/roamling-core/     shared decisions, image decoding and palette logic
 rust/roamling-agent/    Claude Code and Codex hooks, normalization, receiver
-rust/roamling-pet/      sheet decoding, the built-in mascot, pet packages
+rust/roamling-pet/      built-in mascots and pet packages
 rust/roamling-update/   version feed parsing and release signature checking
 rust/roamling-win/      the Windows shell: window, tray, input, tick loop
+rust/roamling-android/  Android bindings for the shared core and player
+android/               Android app, overlay, service, and device tests
 installer/roamling.iss  the Windows installer
 Tests/                  pure and loader tests
-docs/research.md        upstream/API research with source locations
+docs/README.md          documentation map and current maintenance review
+docs/history/research.md upstream/API research history
 docs/architecture.md    boundaries, decisions, and milestone architecture
-docs/mvp.md             current MVP gate, scope, and acceptance criteria
-docs/windows.md         Windows port measurement, decisions, and gates
+docs/history/mvp.md     completed MVP gates and acceptance records
+docs/windows.md         current Windows operation and remaining checks
 ```
 
 Roamling is an independent project and is not affiliated with OpenAI,
