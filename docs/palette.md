@@ -377,6 +377,24 @@ macOS는 `roamling-core`만 링크하므로 팔레트가 uniffi를 건너야 했
 것, 그리고 **색을 고르면 그 펫이 선택된다**는 것. 마지막이 없으면 서브메뉴가 된 Mochi 줄은
 고를 방법이 사라진다.
 
+#### 색 기억 — 저장만 하고 입히지 않았다 (고침 2026-09-18)
+
+맥도 고른 색을 즉시 기억한다: `UserDefaults`의 `roamling.palette`에 전체 팔레트를 적고, 기본색이면
+키를 지운다(`RoamlingRuntime.swift`의 `apply(palette:)`). **그런데 첫 판은 다시 켰을 때 그 색을
+입히지 않았다** — `init`이 첫 그림을 `loadInitialAsset`으로 번들의 원본 색으로 만든 **뒤에** 저장된
+색을 읽어 `palette`에만 넣었다. 메뉴의 체크는 `palette`로 정해지니 선택은 맞게 보였고, 펫만 보리
+보리였다. 체크된 색을 다시 눌러도 `apply(palette:)`가 "바뀐 것 없음"으로 돌아가 고쳐지지 않았다
+(`docs/requests.md` B5).
+
+지금은 `init`의 끝에서 저장된 색이 기본색이 아니면 `reinstallBuiltInPetForPalette()`를 한 번
+부른다. 그 함수는 패키지 펫이 선택돼 있거나 내장이 Mochi가 아니면 아무것도 하지 않으므로, Windows와
+같이 **기억된 보리 색을 다른 펫 위에 덮지 않는다.** 기본색 사용자의 시작 경로는 그대로다.
+
+붙어 있는 테스트는 `a colour picked before quitting is the colour the pet comes back in`
+(`TuningPersistenceTests.swift`)이고, **저장된 키가 아니라 오버레이에 닿은 픽셀을 비교한다** —
+키만 읽는 테스트는 이 결함 내내 초록이었다. 고치기 전 런타임에서 "the pet came back in the bundle's
+colours"로 떨어지는 것을 확인했다.
+
 **그 작업 중에 기존 테스트가 두 번 막았고 둘 다 옳았다.** 색을 최상위에 뒀을 때는
 "Quit이 여덟 번째"가 걸렸고(R3 결정), Mochi를 서브메뉴로 바꿨을 때는 "정확히 한 펫이
 표시된다"가 걸렸다 — 서브메뉴 줄에 체크가 안 붙어서다. 뒤엣것이 `submenu(_, isOn:)`을 낳았다.

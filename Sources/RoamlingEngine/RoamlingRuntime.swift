@@ -275,6 +275,11 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             dragged: Self.draggedCycleDuration(of: initialAsset)
         )
         core.setNextWanderAt(now() + 2.2)
+        // The first asset was made before the stored colour was read, in the
+        // bundle's own colours. Without this the menu ticked the remembered
+        // colour over a pet that was not wearing it -- and picking it again
+        // did nothing, because `apply(palette:)` saw no change.
+        if !isPaletteDefault { reinstallBuiltInPetForPalette() }
     }
 
     /// Brings the pet up. `drivingTicks` is false for a caller that owns the

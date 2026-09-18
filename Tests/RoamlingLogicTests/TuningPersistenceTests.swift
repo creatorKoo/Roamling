@@ -114,8 +114,65 @@ func tuningPersistenceLogicTests() -> [LogicTest] {
                 "encoded \(object.keys.sorted()) but the keys are "
                     + "\(RuntimeTuningKey.allCases.map(\.rawValue).sorted())"
             )
+        },
+        LogicTest(name: "a colour picked before quitting is the colour the pet comes back in") {
+            // The Mac remembered the colour and did not wear it: the menu
+            // ticked the right row over a pet in the bundle's own colours. A
+            // test that only read the stored key back was green throughout, so
+            // this one compares what reaches the overlay.
+            try MainActor.assumeIsolated {
+                let suite = try makeTestDefaults()
+                defer { suite.discard() }
+
+                let (untouched, untouchedOverlay) = makePaletteRuntime(on: suite)
+                untouched.start(drivingTicks: false)
+                let original = try require(untouchedOverlay.lastFrame?.pixels, "nothing was drawn")
+                untouched.stop()
+
+                let (picking, pickingOverlay) = makePaletteRuntime(on: suite)
+                picking.start(drivingTicks: false)
+                let choice = try require(
+                    picking.paletteOptions.firstIndex { !$0.isSelected },
+                    "there is no second colour to pick"
+                )
+                picking.selectPalettePreset(at: choice)
+                let picked = try require(pickingOverlay.lastFrame?.pixels, "the colour drew nothing")
+                try expect(picked != original, "picking a colour changed no pixel")
+                picking.stop()
+
+                let (back, backOverlay) = makePaletteRuntime(on: suite)
+                back.start(drivingTicks: false)
+                try expect(
+                    back.paletteOptions.firstIndex(where: \.isSelected) == choice,
+                    "the menu forgot the colour"
+                )
+                let restored = try require(backOverlay.lastFrame?.pixels, "nothing was drawn")
+                try expect(restored != original, "the pet came back in the bundle's colours")
+                try expect(restored == picked, "the pet came back in some other colour")
+                back.stop()
+            }
         }
     ]
+}
+
+@MainActor
+private func makePaletteRuntime(on suite: TestDefaults) -> (RoamlingRuntime, FakeOverlay) {
+    let platform = FakePlatform(
+        display: DisplaySnapshot(
+            id: "1", name: "test",
+            frame: WorldRect(x: 0, y: 0, width: 1440, height: 900),
+            visibleFrame: WorldRect(x: 0, y: 25, width: 1440, height: 850),
+            scale: 2
+        ),
+        worldTop: 900
+    )
+    let runtime = RoamlingRuntime(
+        services: platform.services,
+        defaults: suite.defaults,
+        catalog: PetCatalog(roots: []),
+        clock: { 0 }
+    )
+    return (runtime, platform.overlay)
 }
 
 /// A runtime on a given defaults suite and nothing else -- the tuning is the

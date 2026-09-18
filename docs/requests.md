@@ -485,6 +485,33 @@
 - **남은 것** `runtime.start()`를 `drivingTicks: false` 없이 부르는 두 테스트의 타이머 끼어들기는
   그대로다(위 "곁가지"). 지금까지 실패를 낸 적은 없다.
 
+### B5. 맥에서 껐다 켜면 고른 색이 사라진다 (2026-09-18)
+
+- **누가·언제** 사용자, 2026-09-18, 맥.
+- **원문** "맥에서 껏다가 다시 켜면 색 유지가 안돼 선택창은 잘 선택되어 있는데 기본색인 보리 보리로
+  돌아가."
+- **원인 (코드로 확인, 미재현)** 저장은 된다. **시작할 때 읽은 색을 그림에 입히지 않는다.**
+  - `RoamlingRuntime.init`은 `loadInitialAsset(...)`로 첫 그림을 먼저 만든다. 그 함수의 내장 펫 경로는
+    `MascotPetFactory.make(builtInPet, images:)` — `sheets:` 없이, 즉 원본 색이다
+    (`RoamlingRuntime.swift` `loadInitialAsset`).
+  - 저장된 색은 그 **뒤에** 읽어 `palette`에만 넣는다(`init`의 `DefaultsKey.palette` 절). 메뉴의 체크는
+    `paletteOptions`가 `preset.palette == palette`로 정하므로 선택은 맞게 보인다.
+  - 다시 칠하는 `reinstallBuiltInPetForPalette()`를 부르는 곳은 `apply(palette:)` 하나뿐이고, 그
+    함수는 `newPalette != palette`일 때만 나아간다. 그래서 **재실행 뒤 이미 체크된 같은 색을 다시 눌러도
+    아무 일도 없다** — 다른 색을 거쳐야 돌아온다.
+  - Windows는 시작할 때 복원한다(`rust/roamling-win/src/main.rs` 시작 시 팔레트 복원 절:
+    `built_in_mochi_recolored(palette)`). 맥에만 그 절이 없다.
+- **상태** 고침(2026-09-18, 사용자 "응 고쳐줘"). 서명 빌드(`build/Roamling.app`)를 다시 켜서 사용자가
+  확인했다 — "잘 된다".
+- **고친 것** `RoamlingRuntime.init`의 끝에서 저장된 색이 기본색이 아니면
+  `reinstallBuiltInPetForPalette()`를 한 번 부른다. 패키지 펫이나 Mochi가 아닌 내장 펫 위에는 덮지
+  않는다(그 함수의 guard). 기본색 사용자의 시작 경로와 저장 형식은 그대로다. 설명은
+  `docs/palette.md` "색 기억 — 저장만 하고 입히지 않았다".
+- **확인** 새 테스트 `a colour picked before quitting is the colour the pet comes back in`
+  (`TuningPersistenceTests.swift`)이 오버레이에 닿은 픽셀을 비교한다. 고치기 전 런타임에서 "the pet
+  came back in the bundle's colours"로 실패, 고친 뒤 통과. 하네스 198개와 `scripts/test.sh` 전체 통과,
+  `RuntimeTrace.txt`는 그대로.
+
 ## 거절·보류
 
 ### 하늘 보리 — 밝은 파랑 프리셋 (드랍 2026-09-18)
