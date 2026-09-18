@@ -5,6 +5,7 @@
 
 use crate::emptiness::{LuminanceField, VisualEmptiness};
 use crate::clearance::ClearanceMap;
+use crate::placement::PlacementPolicy;
 use crate::geometry::{swift_max, swift_min, WorldPoint, WorldRect, WorldSize, WorldVector};
 use crate::world::{last_maximum, DesktopWorldSnapshot, DisplaySnapshot, FocusSnapshot, LocationHint};
 
@@ -114,7 +115,7 @@ impl BasicInterestPositionPlanner {
         object_size: WorldSize,
     ) -> Option<InterestDestination> {
         Self::choose_destination(hint, world, current_position, pointer_position,
-            pointer_clearance, object_size, false)
+            pointer_clearance, object_size, PlacementPolicy::PortedContract)
     }
 
     pub(crate) fn clear_destination(
@@ -122,14 +123,15 @@ impl BasicInterestPositionPlanner {
         pointer_position: Option<WorldPoint>, pointer_clearance: f64, object_size: WorldSize,
     ) -> Option<InterestDestination> {
         Self::choose_destination(hint, world, current_position, pointer_position,
-            pointer_clearance, object_size, true)
+            pointer_clearance, object_size, PlacementPolicy::ClearOfContent)
     }
 
     fn choose_destination(
         hint: &LocationHint, world: &DesktopWorldSnapshot, current_position: WorldPoint,
         pointer_position: Option<WorldPoint>, pointer_clearance: f64, object_size: WorldSize,
-        prefer_clearance: bool,
+        policy: PlacementPolicy,
     ) -> Option<InterestDestination> {
+        let prefer_clearance = policy == PlacementPolicy::ClearOfContent;
         let plan = Self::make_plan(
             hint,
             world,

@@ -122,7 +122,10 @@ fn situation(world: DesktopWorldSnapshot, position: WorldPoint) -> PetSituation 
 fn runtime_roaming_uses_the_shared_clearance_and_rejects_all_busy_candidates() {
     let world = world(Some(field(|col, _| col < 20)));
     let mut scene = situation(world, WorldPoint::new(600.0, 400.0));
-    let mut director = PlacementDirector::for_runtime();
+    let mut director = PlacementDirector::new(
+        PlacementPolicy::ClearOfContent,
+        PlacementConfiguration::default(),
+    );
     let PlacementIntent::Stroll(point) = director.decide(&scene) else {
         panic!("expected a stroll");
     };
@@ -139,7 +142,10 @@ fn an_improved_agent_seat_is_kept_after_arrival_and_dwell() {
     let mut scene = situation(world, WorldPoint::new(1222.0, 734.0));
     scene.activity_source_id = Some("codex:turn".into());
     scene.activity_hint = Some(hint);
-    let mut director = PlacementDirector::for_runtime();
+    let mut director = PlacementDirector::new(
+        PlacementPolicy::ClearOfContent,
+        PlacementConfiguration::default(),
+    );
     let PlacementIntent::Travel(destination, _) = director.decide(&scene) else {
         panic!("expected a safer seat");
     };

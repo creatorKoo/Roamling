@@ -27,9 +27,9 @@
 
 | 우선순위 | 추천 | 근거·범위 |
 |---|---|---|
-| 1 | 접근 반응과 직접 클릭의 이름 분리 | `catch_armed_until`, `CatchArmDistance`, `CatchApproachSpeed`, `CatchWindow`가 이제 클릭 허용 조건이 아니라 접근 반응·틱 속도를 뜻한다. 내부 이름·설정 표시 설명부터 정리하되 저장 키와 공개 FFI는 호환을 유지한다. 실제 잡기 경로는 이번에 `touch_down`과 공유했다 |
+| 1 (완료 2026-09-18, 아래 "리팩터 1 실행") | 접근 반응과 직접 클릭의 이름 분리 | `catch_armed_until`, `CatchArmDistance`, `CatchApproachSpeed`, `CatchWindow`가 이제 클릭 허용 조건이 아니라 접근 반응·틱 속도를 뜻한다. 내부 이름·설정 표시 설명부터 정리하되 저장 키와 공개 FFI는 호환을 유지한다. 실제 잡기 경로는 이번에 `touch_down`과 공유했다 |
 | 2 | 휘도 갱신과 평가 캐시의 수명 정리 | macOS `RoamlingRuntime.tick`은 `core.setLuminance`를 매 tick 호출하고 `PetRuntime::set_luminance`는 수면 검사 캐시를 매번 비운다. Windows `refresh_luminance`는 새 캡처 때만 전달한다. 동일 필드 재전달과 새 캡처를 구분하고, 이후 같은 평가에서 반복 생성되는 `ClearanceMap`을 공유하는 순서가 적절하다. 성능 이득은 측정 후 판단한다 |
-| 3 | 포팅 대조 계약과 현재 배치 정책을 명시적으로 구분 | `PlacementDirector::new`와 `for_runtime`, 플래너의 `destination`과 `clear_destination`이 공존한다. 현재 정책 선택을 명시하는 내부 타입과 테스트 구성이 호출 실수를 줄인다. 기존 fixture를 바꾸거나 두 정책을 무작정 합치지 않는다 |
+| 3 (완료 2026-09-18, 아래 "리팩터 3 실행") | 포팅 대조 계약과 현재 배치 정책을 명시적으로 구분 | `PlacementDirector::new`와 `for_runtime`, 플래너의 `destination`과 `clear_destination`이 공존한다. 현재 정책 선택을 명시하는 내부 타입과 테스트 구성이 호출 실수를 줄인다. 기존 fixture를 바꾸거나 두 정책을 무작정 합치지 않는다 |
 | 4 | `PetRuntime`의 입력·휴식·경계 이동 코드를 기능별 파일로 분리 | 한 파일에 상태 조정과 회귀 테스트가 함께 늘었다. 먼저 테스트 모듈을 분리하고, 상태 소유자는 하나로 유지한 채 내부 helper를 추출한다. 동작·타이밍 변경과 함께 진행하지 않는다 |
 
 큰 구조 변경은 이번에 실행하지 않았다. 우선 1번은 용어 혼동을 줄이는 작은 정리이고,
@@ -161,3 +161,36 @@ Windows는 `roamling-win/src/main.rs` `tuning_key`가 **`format!("{key:?}")`로 
 리팩터 게이트라 **동작·기본값·범위는 바꾸지 않는다.** `tuning_differential` fixture와 `RuntimeTrace`가
 그대로 통과해야 한다. `docs/architecture.md`와 `docs/placement.md`의 `catchArmedUntil`·"catch arm"
 표현도 같은 작업에서 고친다.
+
+## 리팩터 3 실행 — 배치 정책에 이름을 붙인다 (2026-09-18)
+
+R16. 코드를 바꾸기 전의 흐름이다.
+
+### 지금
+
+- `placement.rs` `PlacementDirector`는 정책 둘을 **불리언 하나**(`prefer_clearance`)로 가른다.
+  - `PlacementDirector::new(configuration)`과 `Default` → `false`. Swift 원본에서 포팅한 규칙이고
+    `tests/placement_differential.rs`가 `fixtures/placement.txt`로 비트 단위까지 잡는다. FFI의
+    `Placement` 객체(`ffi.rs` `Placement::new`)도 이것이다 — Swift 쪽 대조 테스트가 부른다.
+  - `PlacementDirector::for_runtime()` → `true`. 실제 펫(`pet_runtime.rs` `PetRuntime::new`)이 쓰는
+    "화면의 내용에서 떨어져 앉는다" 규칙(R10). `clearance_tests.rs`가 이것을 검사한다.
+- 그 불리언이 갈라 놓는 곳: `placement.rs`의 `destination`(플래너 함수 선택), 도착 후 더 나은 자리
+  재평가, 도착 직전 내용 덮임 확인, 떠날지 판단, 휴식 자리 고르기 — 여섯 군데. 플래너
+  (`interest.rs` `choose_destination`)도 같은 불리언을 인자로 받는다.
+- **함정** `Default`가 옛 정책이다. 새 코드나 테스트가 `PlacementDirector::default()`를 쓰면 실제 펫과
+  다른 규칙으로 조용히 돈다. 컴파일러도 테스트도 못 잡는다.
+
+### 바꾸는 것
+
+- `pub enum PlacementPolicy { PortedContract, ClearOfContent }`를 `placement.rs`에 둔다.
+- 생성자는 하나: `PlacementDirector::new(policy, configuration)`. `Default`와 `for_runtime`은 없앤다 —
+  **정책을 말하지 않고는 만들 수 없게 한다.**
+- 필드 `prefer_clearance: bool` → `policy: PlacementPolicy`. 여섯 분기는
+  `self.policy == PlacementPolicy::ClearOfContent` 하나의 helper(`keeps_clear()`)로 읽는다.
+- `interest.rs` `choose_destination`의 마지막 인자도 같은 enum을 받는다. 공개 함수 `destination`
+  (포팅 계약, `interest` fixture)과 `clear_destination`의 이름·시그니처는 그대로다.
+- 호출부: `pet_runtime.rs`(ClearOfContent), `ffi.rs` `Placement::new`와
+  `placement_differential.rs`(PortedContract), `clearance_tests.rs`(ClearOfContent).
+- FFI의 모양(`Placement` 객체와 그 메서드)은 바뀌지 않는다. 두 정책을 합치지 않고 fixture도 그대로다.
+
+**결과.** 코어 77개와 differential 열 묶음이 그대로 통과했다. `placement.txt` fixture는 건드리지 않았다.

@@ -26,7 +26,10 @@ use crate::display_policy::{crossing, placement_frame, placement_world};
 use crate::emptiness::LuminanceField;
 use crate::geometry::{swift_max, swift_min, WorldPoint, WorldRect, WorldSize, WorldVector};
 use crate::movement::{MovementConfiguration, MovementController};
-use crate::placement::{PetSituation, PlacementDirector, PlacementIntent, PlacementTravelReason};
+use crate::placement::{
+    PetSituation, PlacementConfiguration, PlacementDirector, PlacementIntent, PlacementPolicy,
+    PlacementTravelReason,
+};
 use crate::pointer::{PointerDecision, PointerInteractionModel, PointerProximity};
 use crate::safe_zone::{BasicSafeZonePlanner, RestDestination};
 use crate::source_state::StateDeclaration;
@@ -231,7 +234,10 @@ impl PetRuntime {
             ),
             behavior: BehaviorController::default(),
             pointer_model: PointerInteractionModel::new(tuning.pointer_configuration()),
-            placement: PlacementDirector::for_runtime(),
+            placement: PlacementDirector::new(
+                PlacementPolicy::ClearOfContent,
+                PlacementConfiguration::default(),
+            ),
             activity: ActivityDirector::default(),
             tuning,
             rng: Aimlessness::new(seed),

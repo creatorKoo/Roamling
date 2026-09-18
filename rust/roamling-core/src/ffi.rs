@@ -908,7 +908,10 @@ impl Behavior {
 
 // -------------------------------------------------------------- the director
 
-use crate::placement::{PetSituation, PlacementDirector, PlacementIntent, PlacementTravelReason};
+use crate::placement::{
+    PetSituation, PlacementConfiguration as CorePlacementConfiguration, PlacementDirector,
+    PlacementIntent, PlacementPolicy, PlacementTravelReason,
+};
 
 const TRAVEL_REASONS: [PlacementTravelReason; 6] = [
     PlacementTravelReason::NewActivity,
@@ -986,7 +989,12 @@ impl Placement {
     #[uniffi::constructor]
     pub fn new() -> std::sync::Arc<Self> {
         std::sync::Arc::new(Self {
-            director: Mutex::new(PlacementDirector::default()),
+            // The Swift side compares itself against this object, so it is the
+            // ported rules and not the ones the shipping pet follows.
+            director: Mutex::new(PlacementDirector::new(
+                PlacementPolicy::PortedContract,
+                CorePlacementConfiguration::default(),
+            )),
             displays: Mutex::new(Vec::new()),
             field: Mutex::new(None),
         })

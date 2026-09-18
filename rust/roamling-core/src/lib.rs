@@ -62,7 +62,7 @@ pub use pet_runtime::{
     Aimlessness, InteractionOutput, LuminanceRequest, PetRuntime, TickInput, TickOutput,
 };
 pub use placement::{
-    PetSituation, PlacementConfiguration, PlacementDirector, PlacementIntent,
+    PetSituation, PlacementConfiguration, PlacementDirector, PlacementIntent, PlacementPolicy,
     PlacementTravelReason,
 };
 pub use pointer::{

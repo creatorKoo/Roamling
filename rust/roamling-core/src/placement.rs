@@ -235,10 +235,24 @@ struct Travel {
     saw_capture: bool,
 }
 
+/// Which set of seat rules a director follows. There is no default: a
+/// director built without saying which would quietly be the wrong one for
+/// half its callers, and nothing downstream can tell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlacementPolicy {
+    /// The rules ported from Swift. `tests/placement_differential.rs` holds
+    /// them bit for bit against `fixtures/placement.txt`, and the FFI
+    /// `Placement` object is this director, for the Swift side's comparison.
+    PortedContract,
+    /// What the shipping pet follows: the ported rules, plus keeping clear of
+    /// whatever is drawn on screen -- seats, strolls and rest spots are ranked
+    /// by their distance from content, and a seat is re-examined on arrival.
+    ClearOfContent,
+}
+
 #[derive(Debug, Clone)]
 pub struct PlacementDirector {
-    /// Runtime policy; the public constructor retains the ported FFI contract.
-    prefer_clearance: bool,
+    policy: PlacementPolicy,
     configuration: PlacementConfiguration,
     seat: Option<Seat>,
     travel: Option<Travel>,
@@ -262,16 +276,10 @@ const GLANCE_PATIENCE: f64 = 7.0;
 /// the same margin again beyond it.
 const BORED_DISTANCE_SCALE: f64 = 2.0;
 
-impl Default for PlacementDirector {
-    fn default() -> Self {
-        Self::new(PlacementConfiguration::default())
-    }
-}
-
 impl PlacementDirector {
-    pub fn new(configuration: PlacementConfiguration) -> Self {
+    pub fn new(policy: PlacementPolicy, configuration: PlacementConfiguration) -> Self {
         Self {
-            prefer_clearance: false,
+            policy,
             configuration,
             seat: Option::None,
             travel: Option::None,
@@ -282,12 +290,17 @@ impl PlacementDirector {
         }
     }
 
-    pub(crate) fn for_runtime() -> Self {
-        Self { prefer_clearance: true, ..Self::default() }
+    pub fn policy(&self) -> PlacementPolicy {
+        self.policy
+    }
+
+    /// Every place the two policies part company reads this.
+    fn keeps_clear(&self) -> bool {
+        self.policy == PlacementPolicy::ClearOfContent
     }
 
     fn destination(&self, hint: &LocationHint, situation: &PetSituation) -> Option<InterestDestination> {
-        let choose = if self.prefer_clearance {
+        let choose = if self.keeps_clear() {
             BasicInterestPositionPlanner::clear_destination
         } else {
             BasicInterestPositionPlanner::destination
@@ -615,7 +628,7 @@ impl PlacementDirector {
         if !evaluation.watches_region {
             return Some(PlacementTravelReason::FollowedFocus);
         }
-        if self.prefer_clearance && self.dwell_elapsed(situation) {
+        if self.keeps_clear() && self.dwell_elapsed(situation) {
             if let (Some(field), Some(hint)) =
                 (situation.world.luminance.as_ref(), situation.activity_hint.as_ref())
             {
@@ -647,7 +660,7 @@ impl PlacementDirector {
         hint: &LocationHint,
         situation: &PetSituation,
     ) -> bool {
-        if self.prefer_clearance && situation.world.luminance.as_ref().is_some_and(|field| {
+        if self.keeps_clear() && situation.world.luminance.as_ref().is_some_and(|field| {
             crate::clearance::ClearanceMap::new(field).distance(destination.point, situation.object_size)
                 .is_some_and(|distance| distance < 0.0)
         }) { return false; }
@@ -694,7 +707,7 @@ impl PlacementDirector {
                 if !evaluation.watches_region {
                     return true;
                 }
-                if self.prefer_clearance && situation.world.luminance.as_ref().is_some_and(|field| {
+                if self.keeps_clear() && situation.world.luminance.as_ref().is_some_and(|field| {
                     crate::clearance::ClearanceMap::new(field).improves(
                         evaluation.point, destination.point, situation.object_size)
                 }) { return true; }
@@ -756,7 +769,7 @@ impl PlacementDirector {
                 }
                 Some(ComfortPick::Clear(point)) => PlacementIntent::Stroll(point),
                 Some(ComfortPick::Marginal(point)) => {
-                    if self.prefer_clearance { return self.carried.clone(); }
+                    if self.keeps_clear() { return self.carried.clone(); }
                     // Nothing on offer is off content. Walking from a clean
                     // spot onto someone's paragraph is worse than not walking,
                     // so the stroll is declined and asked again next tick with
@@ -843,7 +856,7 @@ impl PlacementDirector {
                     .into_iter()
                     .filter(|point| self.path_avoids_pointer(*point, situation)),
             );
-            if self.prefer_clearance {
+            if self.keeps_clear() {
                 let best = crate::clearance::ClearanceMap::new(field).best(&points, situation.object_size);
                 return best.first().map_or(ComfortPick::Marginal(situation.position), |index| {
                     ComfortPick::Clear(points[*index])

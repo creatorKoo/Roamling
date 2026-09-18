@@ -15,7 +15,7 @@
 
 use roamling_core::{
     DesktopWorldSnapshot, DisplaySnapshot, FocusSnapshot, LocationHint, LuminanceField,
-    PetSituation, PlacementConfiguration, PlacementDirector, PlacementIntent,
+    PetSituation, PlacementConfiguration, PlacementDirector, PlacementIntent, PlacementPolicy,
     PlacementTravelReason, WorldPoint, WorldRect, WorldSize,
 };
 
@@ -161,7 +161,10 @@ fn situation(input: &[f64], scene: &Scene) -> PetSituation {
 #[test]
 fn matches_the_swift_original_bit_for_bit() {
     let fixture = include_str!("fixtures/placement.txt");
-    let mut director = PlacementDirector::default();
+    let mut director = PlacementDirector::new(
+        PlacementPolicy::PortedContract,
+        PlacementConfiguration::default(),
+    );
     let mut scene: Option<Scene> = None;
     let mut checked = 0usize;
     let mut operations = std::collections::BTreeSet::new();
@@ -192,7 +195,7 @@ fn matches_the_swift_original_bit_for_bit() {
                     input[0], input[1], input[2], input[3], input[4], input[5], input[6],
                     input[7],
                 );
-                director = PlacementDirector::new(configuration);
+                director = PlacementDirector::new(PlacementPolicy::PortedContract, configuration);
                 vec![
                     configuration.hold_emptiness,
                     configuration.abandon_emptiness,
