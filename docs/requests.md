@@ -59,6 +59,9 @@
   올라와 틱을 돌았다), 계측 5개 통과. 계측은 첫 실행에서 1개가 떨어졌다: 콜드 부팅 직후 **Android 설정
   앱**이 15초 안에 앞으로 오지 않았다(`CompanionServiceTest.kt` 37번 줄, 우리 코드가 아닌 조건). 데워진
   뒤 다시 돌려 5개 통과. 검사 뒤 에뮬레이터는 껐다.
+  push 뒤 [Check macOS](https://github.com/creatorKoo/Roamling/actions/runs/35349316497) · Windows ·
+  Android 셋이 통과했다 — 맥 쪽은 새로 뽑은 바인딩으로 Swift 하네스와 `RuntimeTrace` 바이트 비교, 서명
+  빌드와 실행까지다.
 - **사용자가 해 줄 것**
   - **맥 (서명 빌드로)** ① `git pull` 뒤 `./scripts/build-app.sh release`로 만든 앱을 켜서 평소처럼
     걷고·잡히고·일하는 앱 옆에 앉는지. ② **잠든 보리 밑에 글자가 있는 창을 가져다 놓으면 몇 초 안에 깨어
