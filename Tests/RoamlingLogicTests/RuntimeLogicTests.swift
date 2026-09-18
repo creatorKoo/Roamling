@@ -184,6 +184,10 @@ func runtimeLogicTests() -> [LogicTest] {
                 platform.pointer.position = runtime.position
 
                 for _ in 0..<600 {
+                    // Keep the promised input on the pet as it evades. A
+                    // cursor left at the initial position eventually becomes
+                    // far away and legitimately allows the pet to rest.
+                    platform.pointer.position = runtime.position
                     clock.advance(1.0 / 30)
                     runtime.tick()
                     try expect(

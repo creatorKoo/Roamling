@@ -1747,6 +1747,21 @@ mod movement_policy_tests {
     }
 
     #[test]
+    fn a_pointer_kept_on_the_pet_prevents_rest_despite_idle_desktop() {
+        let mut pet = PetRuntime::new(WorldPoint::new(500.0, 400.0), RuntimeTuning::default(), 7);
+        pet.set_displays(vec![display("main", 0.0, 0.0)]);
+        for tick in 1..=600 {
+            let now = 1000.0 + f64::from(tick) / 30.0;
+            pet.begin_tick(now);
+            let mut sample = input(now, pet.position());
+            sample.pointer_is_over_pet = true;
+            sample.user_idle_duration = 600.0;
+            let output = pet.finish_tick(&sample);
+            assert!(!output.state.is_resting(), "resting with a pointer on the pet: {:?}", output.state);
+        }
+    }
+
+    #[test]
     fn body_click_catches_walk_and_work_without_an_approach_then_drags_and_drops() {
         for working in [false, true] {
             let mut pet = PetRuntime::new(WorldPoint::new(500.0, 400.0), RuntimeTuning::default(), 7);

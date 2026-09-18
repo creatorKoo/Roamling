@@ -1,0 +1,29 @@
+# SPDX-FileCopyrightText: 2026 GooBeom Jeoung
+# SPDX-License-Identifier: GPL-3.0-only
+name: Record runtime trace for review
+
+# Explicitly dispatched only after approval of a behavior-baseline change.
+# Produces a review artifact; never replaces a fixture or publishes a release.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  record:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/swift-toolchain
+      - name: Run contracts and record the proposed trace
+        env:
+          ROAMLING_WRITE_TRACE: ${{ runner.temp }}/RuntimeTrace-proposed.txt
+        run: ./scripts/test.sh
+      - name: Save the proposed trace for review
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: runtime-trace-proposed
+          path: ${{ runner.temp }}/RuntimeTrace-proposed.txt
+          if-no-files-found: error
