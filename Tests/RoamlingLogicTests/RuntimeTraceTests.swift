@@ -9,7 +9,7 @@ import RoamlingPet
 /// A recorded session, replayed tick by tick.
 ///
 /// Every other gate in this suite states a rule. This one states nothing: it is
-/// forty seconds of the real runtime standing on fakes -- roaming, a cursor
+/// about seventy-six seconds of the real runtime standing on fakes -- roaming, a cursor
 /// closing in, a catch, a drag, an agent turn, and a nap -- recorded once and
 /// required back byte for byte.
 ///
@@ -17,6 +17,10 @@ import RoamlingPet
 /// Rust, and the only honest way to show that the Rust runtime behaves like
 /// this one is to record what this one does and demand the same answer. A
 /// transcription of the Swift original would only prove the transcription.
+/// Approved behavior changes can establish a new reviewed baseline while the
+/// pre-0.6.5 port recording stays in Tests/Fixtures/runtime. Ordinary test and
+/// release runs always compare; the manual recording workflow only proposes
+/// an artifact and never replaces this fixture.
 ///
 /// Regenerate deliberately, never to make it pass:
 ///
@@ -153,14 +157,13 @@ private func recordTraceSession() throws -> String {
         )
     }
 
-    // 3. A hand shoots across the desk for it. Only a fast, closing approach
-    // arms the catch -- an ambling cursor never does, which is the point.
+    // 3. A hand shoots across the desk for it. The fast approach still drives
+    // anticipation, but direct body clicks no longer need to arm a catch.
     // Back off first. The cursor ended the last phase alongside the pet, and a
     // hand already touching it has nowhere to accelerate from.
     platform.pointer.position = platform.overlay.position - WorldVector(dx: 520, dy: 0)
     // Closes until it is on the pet, then grabs on that tick rather than after
-    // a fixed number of them: the catch window is 0.35 s wide, so arming it and
-    // then ticking on is the same as never arming it at all.
+    // a fixed number of them, so the click follows the actual body hit target.
     for _ in 0..<90 {
         let pet = platform.overlay.position
         let gap = pet - platform.pointer.position
