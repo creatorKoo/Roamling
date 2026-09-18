@@ -332,15 +332,15 @@ PlatformServices.swift:54-71`), 자리는 열하나다(`docs/architecture.md:586
 남아 있지만 손가락은 사라진다. 남겨 두면 펫이 있지도 않은 손을 계속 피한다.
 
 **userIdle은 `lastTouchAt`에서 재고 상수로 주지 않는다.** `finish_tick`은
-`user_idle_duration < 0.8`이면 쉬던 펫을 깨우므로(`rust/roamling-core/src/pet_runtime.rs:493`),
+`user_idle_duration < 0.8`이면 쉬던 펫을 깨우므로(`rust/roamling-core/src/pet_runtime.rs` `finish_tick`),
 0을 주면 영영 못 자고 큰 값을 주면 영영 못 깬다. 오버레이 밖 터치는 `FLAG_WATCH_OUTSIDE_TOUCH`의
 `ACTION_OUTSIDE`(좌표 없이 시각만)와 Activity 터치로 받는다. 화면 켜짐·`USER_PRESENT`에
 같은 시계를 리셋하며, 잠금 여부를 확인한 후 재개한다(`CompanionService.reconcileVisibility`).
 **내용은 보지 않고 시각만 본다** — macOS가 `CGEventSource`의 경과 시간 하나만 쓰는 것과 같은 선이다.
 
 **`pointer_is_over_pet`은 View가 곧 hit region이다.** 오버레이 창이 펫 크기라 터치가 그 안에
-들어왔는지가 곧 답이다. Windows가 펫의 반쪽 크기를 만들어(`main.rs:659-660`) 포인터와의 거리를
-재는 계산(`main.rs:673-674`)이 이쪽에는 필요 없다.
+들어왔는지가 곧 답이다. Windows가 펫의 반쪽 크기를 만들어(`main.rs` `tick`의 `half_width` · `half_height`) 포인터와의 거리를
+재는 계산(같은 함수의 `pointer_is_over_pet`)이 이쪽에는 필요 없다.
 
 **길게 누름을 애정으로 볼지는 A2 뒤에 사용자가 정한다.** 그때까지 `affection_held`는 상수 false다.
 
@@ -387,10 +387,10 @@ USER_PRESENT    set_hidden(false), 창 다시 붙임, 저장된 자리에서 재
 ```
 
 - **틱 간격은 셸이 고르지 않는다.** `preferred_tick_interval`
-  (`rust/roamling-core/src/pet_runtime.rs:298-316`)이 걷는 중 1/60, 잡힌 중 1/30,
-  포인터를 보는 중 1/16(`pet_runtime.rs:312`), 자는 중 1/2, 그 외 1/12을 준다. 1/60일 때만 `Choreographer` 프레임 콜백, 그 외에는 `Handler.postDelayed`.
+  (`rust/roamling-core/src/pet_runtime.rs`)이 걷는 중 1/60, 잡힌 중 1/30,
+  포인터를 보는 중 1/16(`pet_runtime.rs` `preferred_tick_interval`), 자는 중 1/2, 그 외 1/12을 준다. 1/60일 때만 `Choreographer` 프레임 콜백, 그 외에는 `Handler.postDelayed`.
 - **터치 뒤의 재예약을 빠뜨리지 않는다.** `InteractionOutput`의 `reschedule_after`
-  (`rust/roamling-core/src/ffi/runtime.rs`의 `FfiTickOutput`)가 차 있으면 그 시각에 한 번 더 틱한다.
+  (`rust/roamling-core/src/ffi/runtime.rs`의 `FfiInteractionOutput`)가 차 있으면 그 시각에 한 번 더 틱한다.
 - 시계는 `SystemClock.elapsedRealtime()`을 초로 바꾼 단조 시각이다. core는 f64 초만 받는다.
 - foreground service는 사용자가 시작한 세션 동안 유지한다. 숨김·잠금은 틱 없는 일시정지이고
   알림 [종료]가 세션을 끝낸다. Android 14+의
