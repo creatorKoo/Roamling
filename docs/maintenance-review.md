@@ -49,7 +49,7 @@ nonblocking이고 받은 stream의 `read`는 바로 unwrap했다. 수신 stream�
 대신 기존 진단 계약을 복구했으며, Swift 테스트를 Windows에서 실행한 것은 아니다.
 
 문서 검사: Markdown 51개에서 로컬 링크 49개를 검사해 누락 0개. 코드·문서·스크립트의
-`docs/...md` 참조 27개도 누락 0개. README에 남아 있던 이동 전 `mvp`·`research` 경로를
+docs 디렉터리의 Markdown 참조 27개도 누락 0개. README에 남아 있던 이동 전 `mvp`·`research` 경로를
 현재 `history/` 경로로 고쳤다. fixture와 `RuntimeTrace.txt`는 변경하지 않았다.
 
 최종 Windows 검증: 코어 단위 75개, 기존 differential 비교, 셸 51개 통과(기존 네트워크
