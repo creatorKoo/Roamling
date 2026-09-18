@@ -48,8 +48,14 @@
   `2b7481b`로 push했고 [Check macOS](https://github.com/creatorKoo/Roamling/actions/runs/35312849337)·
   Windows·Android 세 검사가 통과했다(Swift 하네스 197개 포함).
 - **B4 (맥에서, 수정됨)** 인수인계의 타이머 가설은 틀렸고 원인은 agent 이벤트의 미배달이었다.
-  실측·수정·확인은 아래 B4 항목. 남은 것은 서명 빌드와 macOS 실사용 확인(실제 클릭 전달, 다중
-  모니터 경계 깜박임).
+  실측·수정·확인은 아래 B4 항목.
+- **0.6.7 발행 (2026-09-18, 사용자 "잘 된다 커밋하고 버전 발행해줘")** B4 `fc8f573`, B5 `8e1f8ad`,
+  버전 `055ddb6`. 조작·기능 변화가 없어 사용 안내 revision은 유지했다. push 뒤 Check macOS·Windows·
+  Android 셋이 통과한 다음 태그를 밀었고, 릴리스 워크플로의 macos·windows·publish 잡이 **다시 돌리지
+  않고 한 번에** 통과했다 — 0.6.6에서 B4로 떨어졌던 macOS Test 잡 포함(하네스 198개).
+  [v0.6.7](https://github.com/creatorKoo/Roamling/releases/tag/v0.6.7)에 공개 파일 6개가 올라갔고
+  `latest` 피드가 0.6.7 두 플랫폼 URL을 가리킨다. **남은 것은 R15의 macOS 실사용 확인 둘**(실제 클릭
+  전달, 다중 모니터 경계 깜박임)과, 설치판(`/Applications/Roamling.app`)이 업데이트로 0.6.7을 받는지다.
 
 ### R6. Android에서 돌아다니는 Roamling
 
