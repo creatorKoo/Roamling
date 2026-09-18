@@ -273,3 +273,31 @@ R16. 옮기기만 한다. 줄 하나의 뜻도 바꾸지 않는다.
 모듈 선언 · SPDX 머리 · `use super::*;` · `impl PetRuntime {` 와 닫는 중괄호 · `pub(super)`뿐이다.
 코어 78개와 differential 열 묶음 통과. 이 문서의 앞 절들이 `pet_runtime.rs`의 함수라고 적은
 `rest_spot_is_busy`는 이제 `pet_runtime/rest.rs`에 있다.
+
+## Windows 셸 — 설정 파일 드나드는 것을 한 파일로 (2026-09-18)
+
+R16. 리팩터 1에서 저장 키가 enum 이름에서 유도되고 있던 곳이 `roamling-win/src/main.rs` 한가운데였다.
+1,570줄짜리 파일의 `tick`과 `adopt` 사이에 끼어 있어서 "여기가 디스크와의 계약"이라는 것이 안 보였다.
+
+### 지금
+
+`settings.rs`는 파일 형식과 키 상수, 그리고 색·일하는 앱 목록의 읽기/쓰기를 갖는다. 그런데 나머지
+절반은 `main.rs`에 자유 함수로 있다.
+
+- 튜닝: `tuning_key` · `remember_tuning` · `stored_tuning`
+- 사용 안내 revision: `guide_seen` · `remember_guide`
+- 마지막 위치: `remember`
+- 일하는 앱 라벨: `is_work_app` · `persist_work_app_label`
+- 그 테스트 넷(`main.rs`의 `mod tests`)
+
+### 바꾸는 것
+
+`roamling-win/src/persistence.rs`를 만들어 위 여덟 함수와 테스트를 옮긴다. `settings.rs`는 "파일이 어떻게
+생겼나", `persistence.rs`는 "런타임의 무엇을 어떤 키로 남기나"다.
+
+- `remember_tuning`과 `remember`는 `&mut App`을 받았지만 실제로 쓰는 것은 `app.settings`뿐이다. 새
+  파일에서는 `&mut Settings`를 받는다 — 호출부 네 곳이 `&mut app.settings`를 넘긴다. 이것이 유일한
+  시그니처 변경이고, 그래서 이 함수들을 창 없이 테스트할 수 있게 된다.
+- 본문·주석·키 이름·저장 순서는 그대로다. 설정 파일에 쓰이는 바이트는 달라지지 않는다.
+
+**결과.** `main.rs` 1,568줄 → 1,412줄, `persistence.rs` 181줄. 테스트 셋이 같이 옮겨 갔고 셸 테스트 54개 통과.
