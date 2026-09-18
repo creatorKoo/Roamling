@@ -45,7 +45,8 @@
   enum 이름에서 유도하고 있어 이름을 바꾸면 사용자의 튠 값이 조용히 초기화될 뻔했다 —
   `RuntimeTuningKey::storage_name` 표와 코어·셸 테스트 둘로 고정했다. 패널 문구(en/ko)를 접근 반응
   설명으로 고쳤다. `scripts/test.ps1` 통과(코어 77, 셸 54, differential·릴리스 빌드), 펫 재실행.
-  Swift 컴파일은 push 뒤 Check macOS로 확인한다.
+  `2b7481b`로 push했고 [Check macOS](https://github.com/creatorKoo/Roamling/actions/runs/35312849337)·
+  Windows·Android 세 검사가 통과했다(Swift 하네스 197개 포함).
 - **B4 (맥에서)** 계획은 아래 B4 항목.
 
 ### R6. Android에서 돌아다니는 Roamling
