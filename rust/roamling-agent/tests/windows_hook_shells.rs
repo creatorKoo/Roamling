@@ -25,7 +25,10 @@ fn check_shell(executable: PathBuf, args: &[&str]) {
     let address = listener.local_addr().unwrap();
     listener.set_nonblocking(true).unwrap();
     let server = std::thread::spawn(move || {
-        let deadline = Instant::now() + Duration::from_secs(10);
+        // This includes cold shell startup, not just curl's request. Hosted
+        // Windows runners can take over 20 seconds to start PowerShell after
+        // a clean build. Keep the shorter request-read timeout below separate.
+        let deadline = Instant::now() + Duration::from_secs(60);
         let mut stream = loop {
             match listener.accept() {
                 Ok((stream, _)) => break stream,

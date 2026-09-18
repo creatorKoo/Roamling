@@ -44,6 +44,10 @@ nonblocking이고 받은 stream의 `read`는 바로 unwrap했다. 수신 stream�
 훅 명령은 그대로다. 테스트 수신기의 경합이며 제품 훅 실패가 확인된 것은 아니다.
 보완 뒤 두 셸 테스트를 10회 연속 실행해 모두 통과했고 최종 `scripts/test.ps1`도 통과했다.
 
+0.6.5 발행 전 Windows CI에서는 PowerShell 첫 실행을 포함한 테스트가 약 24초 걸려 수신 대기
+10초를 넘겼다. 셸 시작을 포함한 최초 연결 대기만 60초로 늘렸고, 연결 후 요청 읽기 3초와
+제품 훅 명령·payload·출력·파일 검사 조건은 유지했다. 검증 러너의 시작 지연과 요청 지연을 구분한다.
+
 이전 잠자리 수정에서 빠진 무캡처 진단 문구 `tucking into a safe zone, spot unvetted`도
 복구했다. `RuntimeLogicTests.swift`가 이 문구로 무권한 휴식 경로를 확인한다. 기대값을 바꾸는
 대신 기존 진단 계약을 복구했으며, Swift 테스트를 Windows에서 실행한 것은 아니다.
