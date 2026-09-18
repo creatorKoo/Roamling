@@ -75,3 +75,8 @@ macOS에서는 실제 클릭 전달, 다중 모니터 경계의 깜박임, Swift
 수동 `record-runtime-trace.yml`에서 검토용 녹화를 산출하고, 원본 보존·차이 검토 후에만
 0.6.5 기준을 갱신한다. 일반 검증·릴리스 워크플로는 계속 녹화를 비교하며 자동 재생성하지 않는다.
 원본 해시·산출 근거·전체 구간별 차이 검토는 [0.6.5 녹화 검토](runtime-trace-review-0.6.5.md)에 있다.
+
+최종 [0.6.5 릴리스 검증](https://github.com/creatorKoo/Roamling/actions/runs/35296443724)은
+Windows·macOS 모두 통과했다. Swift 197개·새 녹화 비교, Rust 코어 76개·기존 differential,
+Windows 셸 53개(네트워크 1개 제외), Mac 서명·패키지 실행과 발행을 확인했다.
+공개 파일 6개의 해시와 피드·업데이트 파일 서명도 검증했다. 승인 전 원본 녹화는 보존했다.

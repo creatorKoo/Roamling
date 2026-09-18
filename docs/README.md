@@ -25,6 +25,7 @@
 | 고양이 색을 어떻게 바꾸나 | [`palette.md`](palette.md) |
 | 숨기기와 메뉴가 왜 그 모양인가 | [`hiding.md`](hiding.md) |
 | 첫 사용·업데이트 안내를 언제 보여주고 릴리스 때 어떻게 쓰나 | [`usage-guide.md`](usage-guide.md) |
+| 0.6.5 녹화 기준을 왜 바꿨고 이전 기준은 어디 있나 | [`runtime-trace-review-0.6.5.md`](runtime-trace-review-0.6.5.md) |
 | 무엇이 실제로 배터리를 먹나 | [`battery.md`](battery.md) |
 | 화면의 글자를 어떻게 보고, 못 보게 되면 어떻게 되나 | [`capture.md`](capture.md) |
 

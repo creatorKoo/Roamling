@@ -36,3 +36,9 @@
 그 정책은 `clearance_tests`가, 커서가 실제로 펫 위에 머무는 조건은 Rust의 600틱 검사와
 수정한 `RuntimeLogicTests` 입력이 별도로 검사한다. 일반 테스트·릴리스 실행은 새 기준을
 바이트 단위로 비교하며, 원본 녹화를 다시 만들거나 비교를 생략하지 않는다.
+
+## 재현성 확인
+
+[정식 릴리스 검증](https://github.com/creatorKoo/Roamling/actions/runs/35296443724)에서
+`ROAMLING_WRITE_TRACE` 없이 Swift 197개 검사와 새 녹화의 바이트 단위 비교가 통과했다.
+Rust 코어 76개와 기존 differential 검사도 통과했다. `v0.6.5`는 커밋 `7d39433`에서 발행됐다.

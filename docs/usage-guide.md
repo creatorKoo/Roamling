@@ -53,6 +53,11 @@ Ctrl/Command로 회피를 멈추고 잡는 방법을 첫 항목으로 설명한�
 테스트·패키징·실행·DLL 의존성까지 통과했다.
 [macOS 검사](https://github.com/creatorKoo/Roamling/actions/runs/35295558933)는 Swift 197개와
 승인된 새 녹화 비교를 통과했지만, 앱 빌드에서 안내 창의 `greatestFiniteMagnitude` 타입 추론이
-모호해 중단됐다. `CGFloat`를 명시했으며 최종 서명 빌드·실행은 양 플랫폼 성공 후에만 공개하는
-릴리스 워크플로에서 확인한다. 실제 Mac의 팝업·포커스 사용감은 CI 실행과 별개다.
+모호해 중단됐다. `CGFloat`를 명시한 뒤
+[최종 릴리스 실행](https://github.com/creatorKoo/Roamling/actions/runs/35296443724)에서
+양 플랫폼 테스트·빌드·Mac 서명·패키징·패키지 실행·공개 단계가 모두 통과했다.
+공개 ZIP에 안내 revision 1과 앱·빌드 버전 0.6.5가 포함된 것도 확인했다.
+공개 파일 6개의 SHA-256, appcast와 Windows exe·Mac ZIP의 Ed25519 서명을 별도로 검증했다.
+[v0.6.5](https://github.com/creatorKoo/Roamling/releases/tag/v0.6.5)는 정식 최신 릴리스다.
+실제 Mac의 팝업·포커스 사용감은 CI 실행과 별개다.
 녹화 보존과 변경 근거는 [녹화 검토](runtime-trace-review-0.6.5.md)에 있다.
