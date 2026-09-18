@@ -31,34 +31,6 @@
 
 ## 진행
 
-### R14. 색 프리셋 이름에 보리를 붙이기 (2026-09-18)
-
-- **누가·언제** 사용자, 2026-09-18.
-- **원문** "이거 이름을 바꾸고 싶은데 설계해줄래? 기본 : 보리 보리 / 검정: 검은 보리 / 하양: 하얀 보리",
-  "대안안이 훨씬 귀엽고 웃기다 다만 보라 보리 핑크는 핫핑크 보리로 해줘 영어도 색을 대안 색으로 해줘",
-  "파란 보리로 하자 그럼 하늘 보리는 나중에 추가하고 그리고 한번에 해서 발행까지 해줘".
-- **결정** 아홉 프리셋의 표시 이름만 바꾼다. 키·프리셋 값·저장 형식은 그대로다.
-
-  | 키 | ko | en |
-  |---|---|---|
-  | `palette.default` | 보리 보리 | Bori Bori |
-  | `palette.black` | 흑보리 | Black Bori |
-  | `palette.white` | 흰 보리 | White Bori |
-  | `palette.red` | 붉은 보리 | Crimson Bori |
-  | `palette.hotpink` | 핫핑크 보리 | Hot Pink Bori |
-  | `palette.yellow` | 황금 보리 | Golden Bori |
-  | `palette.blue` | 파란 보리 | Blue Bori |
-  | `palette.purple` | 보라 보리 | Purple Bori |
-  | `palette.rainbow` | 알록달록 보리 | Motley Bori |
-
-  R8의 "새 색상별 이름은 만들지 않는다"는 이 결정으로 뒤집혔다. 파랑은 실제 프리셋 명도가
-  22–78로 하늘색보다 진해서 "파란 보리"로 두고, **하늘 보리는 밝은 파랑 프리셋을 새로 만들 때
-  붙일 이름으로 남겨 둔다.**
-- **범위** ko/en `Localizable.strings`의 `palette.*` 아홉 키와 팔레트 창 footer의 "펫 › 보리 › 기본"
-  문구. Windows 트레이는 같은 키를 읽으므로 따로 고칠 것이 없다. 사용 안내 revision은 조작·기능
-  변화가 아니라 유지한다(`docs/usage-guide.md`).
-- **상태** 진행. 0.6.6으로 발행한다.
-
 ### R6. Android에서 돌아다니는 Roamling
 
 - **누가·언제** 사용자, 2026-09-12. 첫 사용 대상은 아내분의 Android 휴대전화.
@@ -112,6 +84,40 @@
 ---
 
 ## 완료
+
+### R14. 색 프리셋 이름에 보리를 붙이기 (2026-09-18)
+
+- **누가·언제** 사용자, 2026-09-18.
+- **원문** "이거 이름을 바꾸고 싶은데 설계해줄래? 기본 : 보리 보리 / 검정: 검은 보리 / 하양: 하얀 보리",
+  "대안안이 훨씬 귀엽고 웃기다 다만 보라 보리 핑크는 핫핑크 보리로 해줘 영어도 색을 대안 색으로 해줘",
+  "파란 보리로 하자 그럼 하늘 보리는 나중에 추가하고 그리고 한번에 해서 발행까지 해줘".
+- **결정** 아홉 프리셋의 표시 이름만 바꾼다. 키·프리셋 값·저장 형식은 그대로다.
+
+  | 키 | ko | en |
+  |---|---|---|
+  | `palette.default` | 보리 보리 | Bori Bori |
+  | `palette.black` | 흑보리 | Black Bori |
+  | `palette.white` | 흰 보리 | White Bori |
+  | `palette.red` | 붉은 보리 | Crimson Bori |
+  | `palette.hotpink` | 핫핑크 보리 | Hot Pink Bori |
+  | `palette.yellow` | 황금 보리 | Golden Bori |
+  | `palette.blue` | 파란 보리 | Blue Bori |
+  | `palette.purple` | 보라 보리 | Purple Bori |
+  | `palette.rainbow` | 알록달록 보리 | Motley Bori |
+
+  R8의 "새 색상별 이름은 만들지 않는다"는 이 결정으로 뒤집혔다. 파랑은 실제 프리셋 명도가
+  22–78로 하늘색보다 진해서 "파란 보리"로 두고, **하늘 보리는 밝은 파랑 프리셋을 새로 만들 때
+  붙일 이름으로 남겨 둔다.**
+- **범위** ko/en `Localizable.strings`의 `palette.*` 아홉 키와 팔레트 창 footer의 "펫 › 보리 › 기본"
+  문구. Windows 트레이는 같은 키를 읽으므로 따로 고칠 것이 없다. 사용 안내 revision은 조작·기능
+  변화가 아니라 유지한다(`docs/usage-guide.md`).
+- **상태** 완료. `scripts/test.ps1` 통과, Windows 라이브 트레이 메뉴(HMENU)에서 아홉 이름과
+  저장돼 있던 흑보리 체크가 그대로인 것을 읽어 확인했다. `9b442f8`로 커밋, 세 검사 워크플로
+  통과 뒤 [v0.6.6](https://github.com/creatorKoo/Roamling/releases/tag/v0.6.6)을 발행했다.
+  공개 파일 6개가 올라갔고 `latest` 피드가 0.6.6 두 플랫폼 URL을 가리킨다. 릴리스의 macOS
+  Test 잡이 한 번 B4로 떨어져 실패 잡만 다시 돌렸다. 사용자의 실제 UI 확인은 별개다.
+
+---
 
 ### R13. 첫 사용·주요 기능 변경 시 짧은 사용 안내 (2026-09-18)
 
@@ -397,6 +403,20 @@
   설정해 기존 3초 읽기 제한으로 데이터를 기다리게 했다. 제품 훅 명령은 변경하지 않았다.
 - 최종 검증: 훅 셸 테스트 10회 연속 통과 뒤 전체 게이트 통과. Markdown 51개·로컬 링크 49개와
   코드·문서의 문서 경로 참조 27개를 검사하여 누락 0개. `git diff --check` 통과.
+
+### B4. CI에서 한 번씩 떨어지는 Swift 하네스 테스트 (2026-09-18)
+
+- **어디서** v0.6.6 릴리스의 macOS Test 잡. 같은 커밋 `9b442f8`이 몇 분 전 Check macOS에서는
+  197개 전부 통과했고, 실패한 잡만 다시 돌리자 통과했다.
+- **무엇이** `FocusActivityLogicTests.swift`의 "when the agent finishes, the work app takes the
+  seat: walk, hop, then work" — `the pet never walked to the editor: [work]`.
+- **왜로 보이는 것** 이 테스트는 agent 이벤트를 넘긴 뒤 `drainActivityEvents()`
+  (`RuntimeLogicTests.swift`)로 실제 메인 run loop를 400번 돌린다. 그 함수의 주석대로 런타임의
+  tick 타이머가 같은 run loop에 있어서 러너 속도에 따라 **몇 틱이 실제로 지나가는지가 달라진다.**
+  느린 러너에서 그 사이에 자리 인수인계가 이미 끝나 버리면 이어지는 `run(seconds: 30)` 녹화에
+  걷기가 안 잡힌다. 문자열만 바꾼 커밋이라 이번 변경과는 무관하다.
+- **상태** 미수정. 고치려면 drain을 tick과 분리하거나(가짜 시계로 이벤트만 배달) 테스트가
+  drain 동안의 착용 기록도 보게 해야 한다 — 하네스 층 변경이라 문서 먼저(작업 방식 규칙).
 
 ## 거절·보류
 
