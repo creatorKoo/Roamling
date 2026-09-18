@@ -21,11 +21,19 @@ struct RoamlingLogicTestMain {
         for test in tests {
             do {
                 try test.body()
+                // A drain that gave up is the test's failure, whatever the
+                // assertions after it made of the missing event.
+                if let undelivered = DeliveryLedger.shared.takeUndelivered() {
+                    throw LogicTestFailure(message: undelivered, file: #filePath, line: #line)
+                }
                 print("✓ \(test.name)")
             } catch {
                 failures += 1
                 print("✗ \(test.name)")
                 print("  \(error)")
+                if let undelivered = DeliveryLedger.shared.takeUndelivered() {
+                    print("  \(undelivered)")
+                }
             }
         }
 

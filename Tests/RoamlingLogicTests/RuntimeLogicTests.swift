@@ -897,32 +897,135 @@ final class FakeAgent: AgentIntegration {
 
     private let stream: AsyncStream<CompanionEvent>
     private let continuation: AsyncStream<CompanionEvent>.Continuation
+    private let delivery = DeliveryCount()
 
     init() {
         let pair = AsyncStream<CompanionEvent>.makeStream()
         stream = pair.stream
         continuation = pair.continuation
+        DeliveryLedger.shared.follow(delivery)
     }
 
-    func makeEventStream() -> AsyncStream<CompanionEvent> { stream }
+    deinit { delivery.close() }
+
+    /// The same events, handed over through a closure that counts each time
+    /// the runtime comes back for the next one. It only comes back once it has
+    /// handled the last, which is the one thing a test can see of a delivery
+    /// that happens inside the runtime.
+    func makeEventStream() -> AsyncStream<CompanionEvent> {
+        let events = EventIterator(stream.makeAsyncIterator())
+        let delivery = delivery
+        delivery.open()
+        return AsyncStream(unfolding: {
+            delivery.asked()
+            guard let event = await events.next() else {
+                // The runtime stopped and its task was cancelled. Nothing said
+                // after this is owed to anyone.
+                delivery.close()
+                return nil
+            }
+            return event
+        })
+    }
     func startReceiving() throws {}
     func stopReceiving() {}
     func install() -> Result<Void, Error> { .success(()) }
     func remove() -> Result<Void, Error> { .success(()) }
 
-    func emit(_ event: CompanionEvent) { continuation.yield(event) }
+    func emit(_ event: CompanionEvent) {
+        delivery.said()
+        continuation.yield(event)
+    }
+}
+
+/// `AsyncStream.Iterator` is not `Sendable`; the runtime's one task is its
+/// only caller.
+private final class EventIterator: @unchecked Sendable {
+    private var iterator: AsyncStream<CompanionEvent>.Iterator
+    init(_ iterator: AsyncStream<CompanionEvent>.Iterator) { self.iterator = iterator }
+    func next() async -> CompanionEvent? { await iterator.next() }
+}
+
+/// How many events one `FakeAgent` has said, and how many times the runtime has
+/// asked it for the next. Asked from the cooperative pool, read from the main
+/// thread.
+final class DeliveryCount: @unchecked Sendable {
+    private let lock = NSLock()
+    private var saidCount = 0
+    private var askedCount = 0
+    private var listening = false
+
+    func said() { lock.withLock { saidCount += 1 } }
+    func asked() { lock.withLock { askedCount += 1 } }
+    func open() { lock.withLock { listening = true } }
+    func close() { lock.withLock { listening = false } }
+
+    /// Events said and not yet handled. The runtime asks once before the first
+    /// event and once after each, so asking `said + 1` times is having handled
+    /// them all. An agent no runtime listens to is owed nothing.
+    var owed: Int {
+        lock.withLock { listening ? max(saidCount + 1 - askedCount, 0) : 0 }
+    }
+}
+
+/// Every live `FakeAgent`'s count, so `drainActivityEvents()` can stay a free
+/// function, and the delivery that never came, for the harness to report
+/// against the test it happened in.
+final class DeliveryLedger: @unchecked Sendable {
+    static let shared = DeliveryLedger()
+
+    private final class Entry { weak var count: DeliveryCount?; init(_ count: DeliveryCount) { self.count = count } }
+    private let lock = NSLock()
+    private var entries: [Entry] = []
+    private var undelivered: String?
+
+    func follow(_ count: DeliveryCount) {
+        lock.withLock {
+            entries.removeAll { $0.count == nil }
+            entries.append(Entry(count))
+        }
+    }
+
+    var owed: Int { lock.withLock { entries.reduce(0) { $0 + ($1.count?.owed ?? 0) } } }
+
+    func noteUndelivered(_ message: String) { lock.withLock { undelivered = undelivered ?? message } }
+
+    /// What went undelivered since the last call, if anything did.
+    func takeUndelivered() -> String? {
+        lock.withLock {
+            defer { undelivered = nil }
+            return undelivered
+        }
+    }
 }
 
 /// The runtime reads agent events off an `AsyncStream` in a `Task`, so a test
-/// that only calls `tick()` never sees them. Turning the main run loop briefly
-/// is what lets that task deliver.
+/// that only calls `tick()` never sees them. Turning the main run loop is what
+/// lets that task deliver.
 @MainActor
-func drainActivityEvents() {
-    // Deliberately not `before:` a future date. The runtime's own tick timer is
-    // on this run loop, so pumping it for real time lets an unpredictable
-    // number of ticks happen -- which is invisible to a test that only asserts
-    // a state, and fatal to one that records a session tick by tick. A deadline
-    // already past still drains the main queue, which is where the delivery is.
+func drainActivityEvents(file: StaticString = #filePath, line: UInt = #line) {
+    // An agent event comes back to the main queue by way of the cooperative
+    // pool, so how long it takes is the scheduler's business. Turning the loop
+    // a fixed number of times without waiting passed on an idle machine and
+    // lost the event on a busy one -- and the ticks that follow never turn the
+    // loop, so a late event stayed lost for the rest of the test. Wait for
+    // what is owed, in real time, and say so if it never comes.
+    let deadline = Date().addingTimeInterval(10)
+    while DeliveryLedger.shared.owed > 0 {
+        guard Date() < deadline else {
+            DeliveryLedger.shared.noteUndelivered(
+                "\(file):\(line): an agent event was still undelivered after 10 seconds"
+            )
+            break
+        }
+        RunLoop.main.run(mode: .default, before: Date().addingTimeInterval(0.001))
+    }
+    // Everything else -- the capture task, the runtime's own hops -- stays on
+    // the main actor, and a deadline already past still drains the main queue.
+    // Deliberately not a future date here: a runtime driving its own ticks has
+    // its timer on this run loop, and pumping it for real time lets an
+    // unpredictable number of ticks happen -- invisible to a test that only
+    // asserts a state, fatal to one that records a session tick by tick.
     for _ in 0..<400 {
         RunLoop.main.run(mode: .default, before: Date())
     }

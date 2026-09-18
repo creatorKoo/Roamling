@@ -47,7 +47,9 @@
   설명으로 고쳤다. `scripts/test.ps1` 통과(코어 77, 셸 54, differential·릴리스 빌드), 펫 재실행.
   `2b7481b`로 push했고 [Check macOS](https://github.com/creatorKoo/Roamling/actions/runs/35312849337)·
   Windows·Android 세 검사가 통과했다(Swift 하네스 197개 포함).
-- **B4 (맥에서)** 계획은 아래 B4 항목.
+- **B4 (맥에서, 수정됨)** 인수인계의 타이머 가설은 틀렸고 원인은 agent 이벤트의 미배달이었다.
+  실측·수정·확인은 아래 B4 항목. 남은 것은 서명 빌드와 macOS 실사용 확인(실제 클릭 전달, 다중
+  모니터 경계 깜박임).
 
 ### R6. Android에서 돌아다니는 Roamling
 
@@ -428,38 +430,60 @@
   197개 전부 통과했고, 실패한 잡만 다시 돌리자 통과했다.
 - **무엇이** `FocusActivityLogicTests.swift`의 "when the agent finishes, the work app takes the
   seat: walk, hop, then work" — `the pet never walked to the editor: [work]`.
-- **왜로 보이는 것** 이 테스트는 agent 이벤트를 넘긴 뒤 `drainActivityEvents()`
-  (`RuntimeLogicTests.swift`)로 실제 메인 run loop를 400번 돌린다. 그 함수의 주석대로 런타임의
-  tick 타이머가 같은 run loop에 있어서 러너 속도에 따라 **몇 틱이 실제로 지나가는지가 달라진다.**
-  느린 러너에서 그 사이에 자리 인수인계가 이미 끝나 버리면 이어지는 `run(seconds: 30)` 녹화에
-  걷기가 안 잡힌다. 문자열만 바꾼 커밋이라 이번 변경과는 무관하다.
-- **상태** 미수정. 맥에서 진행한다(R15). 아래는 맥 세션을 위한 인수인계다.
-- **코드 위치**
-  - 테스트: `Tests/RoamlingLogicTests/FocusActivityLogicTests.swift` "when the agent finishes, the
-    work app takes the seat". `scene.emitAgent(.achievement)` → `drainActivityEvents()` →
-    `scene.run(seconds: 30)`에서 `recording.walked`(= `behaviorState == .travelToInterest`를 한 번이라도
-    봄)를 요구한다.
-  - 시간: `WorkAppScene.run(seconds:)`는 `TestClock`을 1/30초씩 손으로 올리고 `runtime.tick()`을
-    직접 부른다. 즉 이 테스트의 시계는 가짜다.
-  - 배달: `drainActivityEvents()`(`RuntimeLogicTests.swift`)는 `RunLoop.main.run(mode:before: Date())`를
-    400번 돌린다. agent 이벤트는 `RoamlingRuntime.swift`의 `for await event in stream` Task로 메인
-    큐에 배달되므로 이 펌프가 필요하다.
-  - 새는 곳: 런타임의 자기 tick 타이머(`RoamlingRuntime.swift` `scheduleNextTick`, `Timer`를
-    `RunLoop.main`에 `.common`으로 등록)도 같은 run loop에 있다. 펌프 400번이 실제 시간으로 타이머
-    발화 시각을 넘기면 `tickTimerFired` → `tick()`이 **가짜 시계가 멈춘 채로** 끼어든다. 느린 러너일수록
-    끼어들 확률이 높다. `drainActivityEvents`의 주석이 이미 이 가능성을 적고 있다.
-- **확인 순서**
-  1. 맥에서 `swift run RoamlingLogicTests`를 20회 돌려 실패율을 잰다(재현이 안 되면 CI 러너 속도
-     차이일 수 있으니 부하를 걸고 다시).
-  2. `drainActivityEvents` 안에서 타이머 발화로 들어온 `tick()` 횟수를 세어 본다(임시 카운터).
-     0이 아니면 가설이 맞다.
-  3. 고치는 방향 후보: (a) 하네스가 만드는 런타임은 자기 타이머를 아예 켜지 않게 한다(테스트 시계가
-     있는 런타임은 손으로만 tick) — `RuntimeTrace`가 바이트 단위로 같아야 하므로 정상 경로에서
-     타이머 tick이 0이라는 것이 확인되면 안전하다; (b) 이벤트 배달을 run loop 펌프 대신 명시적으로
-     기다린다(`FakeAgent.emit`이 배달 완료를 돌려줌). (a)가 원인을 없애고 (b)는 증상을 줄인다.
-  4. 고친 뒤 하네스 20회 연속 통과와 `scripts/test.sh` 전체, `RuntimeTrace` 바이트 비교 통과.
-     **트레이스를 다시 만들지 않는다.**
-- **손대지 않는 것** 런타임의 동작·타이밍. 하네스 층만이다.
+- **처음 가설 (Windows 세션, 틀렸다)** `drainActivityEvents()`가 run loop를 돌리는 동안 런타임의
+  자기 tick 타이머가 끼어들어 자리 인수인계가 녹화 전에 끝난다는 것. 이 테스트에서는 성립하지
+  않는다 — `WorkAppScene`은 `runtime.start(drivingTicks: false)`로 켜고
+  (`FocusActivityLogicTests.swift` `WorkAppScene.init`), `scheduleNextTick`을 부르는 곳은 `start`의
+  `drivingTicks` 분기 · 포인터 상호작용의 `apply` · `tickTimerFired` 자신뿐이라
+  (`RoamlingRuntime.swift`) 포인터 입력이 없는 이 장면에서는 타이머가 무장되지 않는다. 실패 메시지도
+  맞지 않았다: 30초 동안 입은 그림이 `[work]` 하나였는데, 끝 신호가 닿았다면 인수인계가 아무리
+  빨라도 축하·점프가 기록에 남는다.
+- **원인 (맥에서 실측, 2026-09-18)** **`.achievement` 이벤트가 끝까지 배달되지 않는다.**
+  - 배달 경로: `FakeAgent.emit` → `AsyncStream` → `RoamlingRuntime.swift`의
+    `Task { for await event in stream }` → `handleActivityEvent`. `for await`의 `next()`는 메인 액터
+    밖(협력 스레드 풀)에서 재개된 뒤 메인으로 돌아오므로, 배달에는 **풀 스레드가 실제로 스케줄되는
+    시간**이 든다.
+  - `drainActivityEvents()`(`RuntimeLogicTests.swift`)는 기한이 이미 지난
+    `RunLoop.main.run(mode:before: Date())`를 400번 돌린다. 기다리지 않으므로 400번은 실제 시간으로
+    거의 0이다. 그 안에 풀 스레드가 돌지 못하면 이벤트는 아직 메인 큐에 없다.
+  - 이어지는 `WorkAppScene.run(seconds:)`은 가짜 시계와 `runtime.tick()`만 돌리고 run loop를 돌리지
+    않는다. 그래서 **늦은 이벤트는 테스트가 끝날 때까지 오지 않는다** — agent가 끝나지 않았으니
+    펫은 30초 내내 `work`다.
+- **실측** 임시 카운터(emit 수 · `handleActivityEvent` 수 · `tickTimerFired` 수)를 넣고 쟀다. 카운터는
+  커밋하지 않았다.
+  - 무부하 20회: 전부 통과. 배달은 drain 1,143번 중 늦어도 21번째 회전에 끝났다(400 중).
+  - CPU 14개에 `yes` 42개로 부하를 건 12회: **9회 실패.** B4와 같은 테스트·같은 메시지가 3회 나왔고,
+    그 drain은 전부 `배달 안 됨 · 타이머 tick +0`이었다. 배달된 경우에도 최대 395번째 회전까지 밀렸다 —
+    400은 여유가 아니라 우연이다.
+  - **B4는 이 테스트 하나의 문제가 아니다.** 같은 원인으로 "a recorded session replays tick for tick"
+    5회, "a hidden pet keeps agent activity but requests no luminance" 2회, "beside a working agent …"
+    셋이 각 1회 떨어졌다. `drainActivityEvents()`로 agent 이벤트를 기다리는 테스트 전부가 대상이다.
+    트레이스 테스트의 실패는 트레이스가 틀려서가 아니라 이벤트가 제 틱에 닿지 않아서다 —
+    **트레이스를 다시 만들 이유가 아니다.**
+  - 곁가지: 타이머 tick이 drain 중에 끼어드는 일은 실제로 있다. 다만 `runtime.start()`를
+    `drivingTicks` 없이 부르는 두 테스트(`RuntimeLogicTests.swift` "arriving at a work seat ends the
+    walk even with nothing to react with"와 그 아래 한 곳)에서만이고, 이번 실패들과는 무관하다.
+- **상태** 수정됨(2026-09-18, 맥).
+- **고친 것** 하네스 층만 — 런타임은 한 줄도 바꾸지 않았다.
+  - `FakeAgent.makeEventStream()`(`RuntimeLogicTests.swift`)이 같은 이벤트를
+    `AsyncStream(unfolding:)`으로 넘기면서, 런타임이 다음 이벤트를 달라고 온 횟수를 센다
+    (`DeliveryCount`). 런타임의 `for await`는 이벤트 하나를 `handleActivityEvent`로 처리한 뒤에야 다음을
+    달라고 하므로, **"달라고 온 횟수 = 보낸 수 + 1"이면 전부 처리된 것이다.** 런타임 안을 들여다보지
+    않고 테스트가 볼 수 있는 유일한 배달 신호다. 런타임이 멈춰 스트림이 끝났거나 아무 런타임도 듣지
+    않는 agent에게는 빚이 없다.
+  - `drainActivityEvents()`는 살아 있는 `FakeAgent` 전부(`DeliveryLedger`)의 빚이 0이 될 때까지 run
+    loop를 1ms 기한씩 **실제 시간으로** 돌린다. 그 뒤에 예전의 기한 지난 400회전을 그대로 둔다 —
+    capture Task(`RoamlingRuntime.swift` `luminanceTask`)는 `@MainActor`끼리라 풀 스레드를 거치지
+    않고, 기한 지난 회전으로 결정적으로 빠진다(`CaptureProviding`과 `FakeCaptureProvider` 둘 다
+    `@MainActor`). 호출부 19곳은 그대로다.
+  - 10초를 기다려도 안 오면 조용히 지나가지 않는다. `RoamlingLogicTestMain.swift`가 테스트 본문 뒤에
+    `DeliveryLedger.takeUndelivered()`를 보고 그 테스트를 "an agent event was still undelivered"로
+    실패시킨다. 테스트 자신의 단언이 먼저 떨어졌으면 그 밑에 같이 찍는다.
+- **확인** 같은 부하(`yes` 42개)에서 하네스 **20회 연속 통과**(고치기 전 12회 중 9회 실패). 무부하 1회
+  통과, 실행 시간 그대로(약 30초). `scripts/test.sh` 전체 통과. `RuntimeTrace.txt`는 건드리지 않았고
+  바이트 비교 통과.
+- **남은 것** `runtime.start()`를 `drivingTicks: false` 없이 부르는 두 테스트의 타이머 끼어들기는
+  그대로다(위 "곁가지"). 지금까지 실패를 낸 적은 없다.
 
 ## 거절·보류
 
