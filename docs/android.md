@@ -53,9 +53,9 @@ Dynamic Island 지원 iPhone에서는 잠금 해제 중 작은 모치를 Live Ac
 ## 붙이는 방식 — 세 번째 seam
 
 **Android는 플랫폼 seam의 세 번째 구현이지 두 번째 제품이 아니다.** 펫이 무엇을 할지 정하는 코드는
-전부 `rust/roamling-core`의 `PetLoop`(`src/ffi.rs:1602`)에 있고, Android 셸이 하는 일은 Windows
-셸과 같다 — 기계를 읽어 `FfiTickInput`(`ffi.rs:1501-1513`)을 채우고 `FfiTickOutput`
-(`ffi.rs:1516-1528`)대로 그린다. Windows에서 그 본체는 `rust/roamling-win/src/main.rs:532`의 `tick`
+전부 `rust/roamling-core`의 `PetLoop`(`src/ffi/runtime.rs`)에 있고, Android 셸이 하는 일은 Windows
+셸과 같다 — 기계를 읽어 `FfiTickInput`(`ffi/runtime.rs`)을 채우고 `FfiTickOutput`
+(`ffi/runtime.rs`)대로 그린다. Windows에서 그 본체는 `rust/roamling-win/src/main.rs`의 `tick`
 이고, 입력을 모으는 자리가 651-676이다.
 
 갈리는 것은 붙는 방식뿐이다. macOS는 uniffi Swift 바인딩(`scripts/build-rust-core.sh:38-41`),
@@ -313,7 +313,7 @@ PlatformServices.swift:54-71`), 자리는 열하나다(`docs/architecture.md:586
 | coordinateSpace | px ÷ density. y 뒤집기 없음 | 채움 |
 
 **틱 입력에는 자리가 아닌 것이 둘 더 있다.** 아래 둘은 `PlatformServices`의 슬롯이 아니라
-`FfiTickInput`(`rust/roamling-core/src/ffi.rs:1501-1513`)의 필드다 — 셸이 매 틱 직접 채운다.
+`FfiTickInput`(`rust/roamling-core/src/ffi/runtime.rs`)의 필드다 — 셸이 매 틱 직접 채운다.
 
 | 틱 입력 | Android 답 | 첫 판 |
 |---|---|---|
@@ -349,7 +349,7 @@ PlatformServices.swift:54-71`), 자리는 열하나다(`docs/architecture.md:586
 
 ## roamling-android가 노출하는 것 — A1 구현
 
-`ffi.rs`에는 애니메이션이 없다 — `AnimationResolver`(`rust/roamling-core/src/animation.rs:297`)와
+`ffi/`에는 애니메이션이 없다 — `AnimationResolver`(`rust/roamling-core/src/animation.rs:297`)와
 `PetAnimationPlayer`(`animation.rs:446`)는 uniffi로 나가 있지 않고, 내장 마스코트는 uniffi가 없는
 `roamling-pet`에 있다. A0의 `default_tuning()`에 이어 새 크레이트가 감싸는 것은 아래 둘이다
 (`rust/roamling-android/src/lib.rs`).
@@ -374,11 +374,11 @@ A2는 `PreviewRuntime`에서 `PetLoop`를 진행하고 `MochiOverlay`가 주기�
 A3는 `CompanionService`가 이를 소유하며 위치를 SharedPreferences에 저장한다. 아래는 현재 흐름이다.
 
 ```text
-Service 시작    PetLoop.new(저장된 자리 또는 화면 중앙, 기본 FfiTuning, seed)   ffi.rs:1609
+Service 시작    PetLoop.new(저장된 자리 또는 화면 중앙, 기본 FfiTuning, seed)   ffi/runtime.rs PetLoop::new
                 set_displays(1619) / set_object_size(1638) / MascotAtlas → Bitmap
 매 틱           begin_tick(now)(1735) → 포커스는 묻지 않음 → finish_tick(1739)
                 → 창 위치 갱신, Player로 프레임 하나 → 다음 틱 예약
-터치            PetLoop.touch_down / pointer_dragged / pointer_up (ffi.rs)
+터치            PetLoop.touch_down / pointer_dragged / pointer_up (ffi/runtime.rs)
 자리 저장       persist_position이 참일 때 SharedPreferences에 x, y
 SCREEN_OFF      set_hidden(true)(1667), 틱 중단, 창 제거
 USER_PRESENT    set_hidden(false), 창 다시 붙임, 저장된 자리에서 재개(set_position 1678)
@@ -390,7 +390,7 @@ USER_PRESENT    set_hidden(false), 창 다시 붙임, 저장된 자리에서 재
   (`rust/roamling-core/src/pet_runtime.rs:298-316`)이 걷는 중 1/60, 잡힌 중 1/30,
   포인터를 보는 중 1/16(`pet_runtime.rs:312`), 자는 중 1/2, 그 외 1/12을 준다. 1/60일 때만 `Choreographer` 프레임 콜백, 그 외에는 `Handler.postDelayed`.
 - **터치 뒤의 재예약을 빠뜨리지 않는다.** `InteractionOutput`의 `reschedule_after`
-  (`rust/roamling-core/src/ffi.rs:1538`)가 차 있으면 그 시각에 한 번 더 틱한다.
+  (`rust/roamling-core/src/ffi/runtime.rs`의 `FfiTickOutput`)가 차 있으면 그 시각에 한 번 더 틱한다.
 - 시계는 `SystemClock.elapsedRealtime()`을 초로 바꾼 단조 시각이다. core는 f64 초만 받는다.
 - foreground service는 사용자가 시작한 세션 동안 유지한다. 숨김·잠금은 틱 없는 일시정지이고
   알림 [종료]가 세션을 끝낸다. Android 14+의

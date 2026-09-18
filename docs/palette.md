@@ -14,7 +14,7 @@
 스와치가 쓰는 `middle`, 설정 한 줄로 쓰고 읽는 `palette_to_text`/`palette_from_text`.
 
 **두 셸이 그 한 벌을 쓴다.** Windows는 크레이트를 직접 링크하고, macOS는 uniffi를 건넌다
-(`ffi.rs`의 팔레트 절). `roamling-pet`은 프리셋을 다시 내보내기만 한다. **어느 쪽에도 같은
+(`ffi/palette.rs`). `roamling-pet`은 프리셋을 다시 내보내기만 한다. **어느 쪽에도 같은
 산술의 두 번째 벌이 없다** — 설정 파일 한 줄이 두 기계에서 같은 뜻인 이유다.
 
 ## 고양이는 세 축이다

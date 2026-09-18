@@ -301,3 +301,54 @@ R16. 리팩터 1에서 저장 키가 enum 이름에서 유도되고 있던 곳�
 - 본문·주석·키 이름·저장 순서는 그대로다. 설정 파일에 쓰이는 바이트는 달라지지 않는다.
 
 **결과.** `main.rs` 1,568줄 → 1,412줄, `persistence.rs` 181줄. 테스트 셋이 같이 옮겨 갔고 셸 테스트 54개 통과.
+
+## `ffi.rs`를 절마다 한 파일로 (2026-09-18)
+
+R16. `rust/roamling-core/src/ffi.rs`는 2,230줄로 저장소에서 가장 큰 Rust 파일이다. 이미 주석 배너로 열
+절이 나뉘어 있고 절마다 자기 `use`를 갖고 있다 — 포팅 단위마다 뒤에 이어 붙여 온 흔적이다.
+
+### 바꾸는 것
+
+배너를 경계로 `ffi/` 밑의 파일 열 개로 나눈다. `ffi.rs`에는 모듈 설명과 `mod …; pub use …::*;`만 남는다.
+
+| 파일 | 배너 |
+|---|---|
+| `ffi/world.rs` | (첫 절) geometry · world · emptiness · interest · safe zone |
+| `ffi/attention.rs` | attention and reactions |
+| `ffi/models.rs` | the per-tick models |
+| `ffi/director.rs` | the director |
+| `ffi/tuning.rs` | the knobs |
+| `ffi/activity.rs` | the activity director |
+| `ffi/focus.rs` | the app in front |
+| `ffi/runtime.rs` | the tick loop |
+| `ffi/updater.rs` | the updater |
+| `ffi/palette.rs` | palette |
+
+### 규칙과 확인
+
+- 본문은 그대로 옮긴다. 바뀌는 것은 절 사이에서 서로 부르던 비공개 변환 함수의 가시성
+  (`fn` → `pub(super) fn`)과 파일 머리의 `use super::*;`뿐이다.
+- 바깥에서 보는 경로 `roamling_core::ffi::X`는 `pub use`로 그대로 유지된다(`roamling-android`가
+  `ffi::{normalize_tuning, FfiPetImage, FfiTuning}`를 쓴다).
+- **FFI 표면이 같다는 것은 바인딩으로 확인한다.** `uniffi-bindgen`은 Windows에서도 돈다. 나누기 전과 뒤의
+  라이브러리에서 Swift·Kotlin 바인딩과 C 헤더를 뽑아 비교한다.
+
+### 결과 — 바이트로는 같지 않았다, 그리고 그 이유
+
+처음 세운 기준("바이트 단위로 같다")은 **통과하지 못했다.** 다른 것은 둘이고, 둘뿐이다.
+
+1. **체크섬 106개가 전부 바뀌었다.** uniffi는 함수마다 메타데이터의 해시를 바인딩에 박아 두고, 실행할
+   때 라이브러리의 값과 맞는지 본다. 그 메타데이터에 **모듈 경로**가 들어 있다 — `roamling_core::ffi`가
+   `roamling_core::ffi::runtime`이 되면 시그니처가 같아도 해시가 달라진다.
+2. **생성된 파일 안에서 최상위 함수의 순서가 바뀌었다.** 라이브러리에 메타데이터가 놓이는 순서를 따른다.
+
+체크섬 숫자를 가리고 줄 순서를 무시하면 Swift 6,679줄과 Kotlin 9,084줄이 **완전히 같고**, C 헤더와
+modulemap은 가리지 않아도 같다. 선언·이름·인자·타입·문서 주석은 하나도 달라지지 않았다.
+
+**해가 없는 이유.** 바인딩은 커밋하지 않는 빌드 산출물이고(`scripts/build-rust-core.sh`,
+`build-android-core`) 언제나 **같은 빌드의 라이브러리에서** 뽑는다. 체크섬은 "다른 빌드의 바인딩과
+라이브러리를 섞었다"를 잡는 장치라, 같이 만들어지는 한 늘 맞는다. 이 저장소에 바인딩과 라이브러리를
+따로 배포하는 경로는 없다. macOS와 Android의 실제 빌드는 push 뒤 CI가 확인한다.
+
+절 사이에서 서로 부르던 비공개 항목은 상수 둘(`KINDS`, `REACTIONS`)뿐이었고 `pub(super)`가 됐다.
+import는 위에서부터 누적돼 있었기 때문에, 파일마다 **실제로 쓰는 이름만** 다시 모았다.
