@@ -50,6 +50,8 @@
 
 기본 · 검정 · 하양 · 빨강 · **핫핑크** · 노랑 · 파랑 · 보라 · 무지개.
 
+**메뉴에 뜨는 이름은 2026-09-18에 펫 이름을 붙인 형태로 바꿨다** (`docs/requests.md` R14) — 보리 보리 · 흑보리 · 흰 보리 · 붉은 보리 · 핫핑크 보리 · 황금 보리 · 파란 보리 · 보라 보리 · 알록달록 보리, 영어는 Bori Bori · Black Bori · White Bori · Crimson Bori · Hot Pink Bori · Golden Bori · Blue Bori · Purple Bori · Motley Bori. 이 문서의 나머지는 색을 가리키는 짧은 이름을 그대로 쓴다. 키(`palette.*`)와 프리셋 값은 바뀌지 않았으므로 저장된 선택은 그대로 살아 있다.
+
 **여덟 개를 전부 실제 엔진에서 뽑아 눈으로 봤다** — 파이썬으로 흉내 내면 Rust와 갈라지므로,
 `ROAMLING_WRITE_PRESETS`를 주면 `roamling-pet`의 테스트가 진짜 바이트를 파일로 내놓는다.
 `ROAMLING_WRITE_TRACE`와 같은 자리의 장치다. **그렇게 보기 전까지 세 개가 깨져 있었다.**

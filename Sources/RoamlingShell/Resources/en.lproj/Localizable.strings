@@ -115,19 +115,19 @@
 
 "menu.palette" = "Colour";
 "menu.palette.custom" = "Mix a colour…";
-"palette.default" = "Original";
-"palette.black" = "Black";
-"palette.white" = "White";
-"palette.red" = "Red";
-"palette.hotpink" = "Hot pink";
-"palette.yellow" = "Yellow";
-"palette.blue" = "Blue";
-"palette.purple" = "Purple";
-"palette.rainbow" = "Rainbow";
+"palette.default" = "Bori Bori";
+"palette.black" = "Black Bori";
+"palette.white" = "White Bori";
+"palette.red" = "Crimson Bori";
+"palette.hotpink" = "Hot Pink Bori";
+"palette.yellow" = "Golden Bori";
+"palette.blue" = "Blue Bori";
+"palette.purple" = "Purple Bori";
+"palette.rainbow" = "Motley Bori";
 
 "palette.window.title" = "Roamling Colour";
 "palette.header" = "Make Bori your own";
-"palette.footer" = "Move a slider and the Bori on screen changes with it, and stays that way. A group you do not touch keeps the drawing exactly as it was — changing the body will not flatten the markings. To undo, press Start over, or pick Pet › Bori › Original from the menu.";
+"palette.footer" = "Move a slider and the Bori on screen changes with it, and stays that way. A group you do not touch keeps the drawing exactly as it was — changing the body will not flatten the markings. To undo, press Start over, or pick Pet › Bori › Bori Bori from the menu.";
 "palette.section.marking" = "Markings";
 "palette.section.body" = "Body";
 "palette.section.eye" = "Eyes";

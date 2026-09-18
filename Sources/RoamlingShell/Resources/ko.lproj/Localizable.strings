@@ -115,19 +115,19 @@
 
 "menu.palette" = "색";
 "menu.palette.custom" = "색 직접 고르기…";
-"palette.default" = "기본";
-"palette.black" = "검정";
-"palette.white" = "하양";
-"palette.red" = "빨강";
-"palette.hotpink" = "핫핑크";
-"palette.yellow" = "노랑";
-"palette.blue" = "파랑";
-"palette.purple" = "보라";
-"palette.rainbow" = "무지개";
+"palette.default" = "보리 보리";
+"palette.black" = "흑보리";
+"palette.white" = "흰 보리";
+"palette.red" = "붉은 보리";
+"palette.hotpink" = "핫핑크 보리";
+"palette.yellow" = "황금 보리";
+"palette.blue" = "파란 보리";
+"palette.purple" = "보라 보리";
+"palette.rainbow" = "알록달록 보리";
 
 "palette.window.title" = "Roamling 색 고르기";
 "palette.header" = "보리 색 만들기";
-"palette.footer" = "슬라이더를 움직이면 화면의 보리가 바로 따라 바뀌고, 그대로 기억됩니다. 손대지 않은 묶음은 원래 그림 그대로 남습니다 — 몸통을 바꿔도 무늬가 흐려지지 않습니다. 되돌리려면 '처음으로'를 누르거나 메뉴에서 펫 › 보리 › 기본을 고르세요.";
+"palette.footer" = "슬라이더를 움직이면 화면의 보리가 바로 따라 바뀌고, 그대로 기억됩니다. 손대지 않은 묶음은 원래 그림 그대로 남습니다 — 몸통을 바꿔도 무늬가 흐려지지 않습니다. 되돌리려면 '처음으로'를 누르거나 메뉴에서 펫 › 보리 › 보리 보리를 고르세요.";
 "palette.section.marking" = "무늬";
 "palette.section.body" = "몸통";
 "palette.section.eye" = "눈";

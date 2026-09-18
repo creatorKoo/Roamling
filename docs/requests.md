@@ -31,6 +31,34 @@
 
 ## 진행
 
+### R14. 색 프리셋 이름에 보리를 붙이기 (2026-09-18)
+
+- **누가·언제** 사용자, 2026-09-18.
+- **원문** "이거 이름을 바꾸고 싶은데 설계해줄래? 기본 : 보리 보리 / 검정: 검은 보리 / 하양: 하얀 보리",
+  "대안안이 훨씬 귀엽고 웃기다 다만 보라 보리 핑크는 핫핑크 보리로 해줘 영어도 색을 대안 색으로 해줘",
+  "파란 보리로 하자 그럼 하늘 보리는 나중에 추가하고 그리고 한번에 해서 발행까지 해줘".
+- **결정** 아홉 프리셋의 표시 이름만 바꾼다. 키·프리셋 값·저장 형식은 그대로다.
+
+  | 키 | ko | en |
+  |---|---|---|
+  | `palette.default` | 보리 보리 | Bori Bori |
+  | `palette.black` | 흑보리 | Black Bori |
+  | `palette.white` | 흰 보리 | White Bori |
+  | `palette.red` | 붉은 보리 | Crimson Bori |
+  | `palette.hotpink` | 핫핑크 보리 | Hot Pink Bori |
+  | `palette.yellow` | 황금 보리 | Golden Bori |
+  | `palette.blue` | 파란 보리 | Blue Bori |
+  | `palette.purple` | 보라 보리 | Purple Bori |
+  | `palette.rainbow` | 알록달록 보리 | Motley Bori |
+
+  R8의 "새 색상별 이름은 만들지 않는다"는 이 결정으로 뒤집혔다. 파랑은 실제 프리셋 명도가
+  22–78로 하늘색보다 진해서 "파란 보리"로 두고, **하늘 보리는 밝은 파랑 프리셋을 새로 만들 때
+  붙일 이름으로 남겨 둔다.**
+- **범위** ko/en `Localizable.strings`의 `palette.*` 아홉 키와 팔레트 창 footer의 "펫 › 보리 › 기본"
+  문구. Windows 트레이는 같은 키를 읽으므로 따로 고칠 것이 없다. 사용 안내 revision은 조작·기능
+  변화가 아니라 유지한다(`docs/usage-guide.md`).
+- **상태** 진행. 0.6.6으로 발행한다.
+
 ### R6. Android에서 돌아다니는 Roamling
 
 - **누가·언제** 사용자, 2026-09-12. 첫 사용 대상은 아내분의 Android 휴대전화.
