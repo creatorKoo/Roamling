@@ -37,9 +37,10 @@ final class UsageGuideWindowController: NSWindowController, NSWindowDelegate {
         text.isVerticallyResizable = true
         text.isHorizontallyResizable = false
         text.autoresizingMask = [.width]
-        text.maxSize = NSSize(width: .greatestFiniteMagnitude, height: .greatestFiniteMagnitude)
+        text.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude,
+                              height: CGFloat.greatestFiniteMagnitude)
         text.textContainer?.containerSize = NSSize(width: scroll.contentSize.width,
-                                                   height: .greatestFiniteMagnitude)
+                                                   height: CGFloat.greatestFiniteMagnitude)
         text.textContainer?.widthTracksTextView = true
         scroll.documentView = text
         content.addSubview(scroll)

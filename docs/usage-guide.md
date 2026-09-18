@@ -45,3 +45,14 @@ Ctrl/Command로 회피를 멈추고 잡는 방법을 첫 항목으로 설명한�
   약 0.65%. Windows release exe 비교이며 macOS 번들 증가량을 측정한 것은 아니다.
 - Swift 모델·메뉴 검사도 추가했지만 이 Windows 기계에서는 Swift/AppKit을 컴파일하지 않았다.
   macOS 서명 빌드와 창 표시·재실행·포커스 실물 확인은 별도로 남아 있다.
+
+## 0.6.5 발행 검증
+
+사용자가 Windows 안내를 확인하고 2026-09-18 발행을 승인했다.
+[Windows 전체 검사](https://github.com/creatorKoo/Roamling/actions/runs/35294304103)는
+테스트·패키징·실행·DLL 의존성까지 통과했다.
+[macOS 검사](https://github.com/creatorKoo/Roamling/actions/runs/35295558933)는 Swift 197개와
+승인된 새 녹화 비교를 통과했지만, 앱 빌드에서 안내 창의 `greatestFiniteMagnitude` 타입 추론이
+모호해 중단됐다. `CGFloat`를 명시했으며 최종 서명 빌드·실행은 양 플랫폼 성공 후에만 공개하는
+릴리스 워크플로에서 확인한다. 실제 Mac의 팝업·포커스 사용감은 CI 실행과 별개다.
+녹화 보존과 변경 근거는 [녹화 검토](runtime-trace-review-0.6.5.md)에 있다.

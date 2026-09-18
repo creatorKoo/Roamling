@@ -5,8 +5,9 @@
 
 ## 원본과 산출 근거
 
-- 이전 기준: `Tests/Fixtures/runtime/RuntimeTrace-pre-0.6.5.txt`. 교체 전 파일과 SHA-256이
-  `a5ae0e727de84896a4aadd6fc3ae3352988f61350cea10bc3d77bce9323d3f96`으로 같음을 확인했다.
+- 이전 기준: `Tests/Fixtures/runtime/RuntimeTrace-pre-0.6.5.txt`. Windows 작업 사본(CRLF)의
+  교체 전후 SHA-256이 `a5ae0e727de84896a4aadd6fc3ae3352988f61350cea10bc3d77bce9323d3f96`으로 같았다.
+  Git의 LF 정규화 뒤에도 이전 기준과 보존본의 blob은 모두 `9d3b766cc37680ed266c3f02b72caa3bd562e6a3`이다.
 - 새 기준: `Tests/RoamlingLogicTests/RuntimeTrace.txt`.
 - 산출 커밋: `966679e2e466c7515f406674a90e43e24306f579`.
 - [검토용 macOS 녹화 실행](https://github.com/creatorKoo/Roamling/actions/runs/35294866872):
