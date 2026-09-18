@@ -338,9 +338,15 @@ impl PetRuntime {
         self.world = DesktopWorldSnapshot::new(displays, Vec::new());
     }
 
+    /// macOS hands the current field over on every tick and Windows only when
+    /// a capture lands, so "set" does not mean "new". Only a field that differs
+    /// drops the rest-spot verdict; the same field at the same spot has the
+    /// same answer, and a sleeping pet was recomputing it on every tick.
     pub fn set_luminance(&mut self, field: Option<LuminanceField>) {
+        if self.luminance != field {
+            self.rest_content_check = None;
+        }
         self.luminance = field;
-        self.rest_content_check = None;
     }
 
     pub fn set_object_size(&mut self, size: WorldSize) {
@@ -2031,6 +2037,29 @@ mod movement_policy_tests {
 mod hidden_tests {
     use super::*;
     use crate::activity::CompanionEventKind;
+
+    #[test]
+    fn the_same_field_again_keeps_the_rest_spot_verdict_and_a_new_one_drops_it() {
+        let field = |value: f64| {
+            LuminanceField::new(WorldRect::new(0.0, 0.0, 640.0, 400.0), 8, 5, vec![value; 40]).unwrap()
+        };
+        let mut pet = PetRuntime::new(WorldPoint::new(320.0, 200.0), RuntimeTuning::default(), 7);
+        pet.set_object_size(WorldSize::new(96.0, 104.0));
+        pet.set_luminance(Some(field(1.0)));
+        let verdict = pet.rest_spot_is_busy();
+        assert!(pet.rest_content_check.is_some());
+
+        // What macOS does on every tick.
+        pet.set_luminance(Some(field(1.0)));
+        assert!(pet.rest_content_check.is_some(), "the same field must not cost another check");
+        assert_eq!(pet.rest_spot_is_busy(), verdict);
+
+        pet.set_luminance(Some(field(0.5)));
+        assert!(pet.rest_content_check.is_none(), "a new capture has to be looked at");
+        pet.rest_spot_is_busy();
+        pet.set_luminance(None);
+        assert!(pet.rest_content_check.is_none(), "losing the field is a change too");
+    }
 
     #[test]
     fn direct_touch_uses_the_shared_catch_drag_and_drop_without_arming_a_mouse() {
