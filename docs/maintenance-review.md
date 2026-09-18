@@ -28,9 +28,9 @@
 | 우선순위 | 추천 | 근거·범위 |
 |---|---|---|
 | 1 (완료 2026-09-18, 아래 "리팩터 1 실행") | 접근 반응과 직접 클릭의 이름 분리 | `catch_armed_until`, `CatchArmDistance`, `CatchApproachSpeed`, `CatchWindow`가 이제 클릭 허용 조건이 아니라 접근 반응·틱 속도를 뜻한다. 내부 이름·설정 표시 설명부터 정리하되 저장 키와 공개 FFI는 호환을 유지한다. 실제 잡기 경로는 이번에 `touch_down`과 공유했다 |
-| 2 | 휘도 갱신과 평가 캐시의 수명 정리 | macOS `RoamlingRuntime.tick`은 `core.setLuminance`를 매 tick 호출하고 `PetRuntime::set_luminance`는 수면 검사 캐시를 매번 비운다. Windows `refresh_luminance`는 새 캡처 때만 전달한다. 동일 필드 재전달과 새 캡처를 구분하고, 이후 같은 평가에서 반복 생성되는 `ClearanceMap`을 공유하는 순서가 적절하다. 성능 이득은 측정 후 판단한다 |
+| 2 (절반만, 2026-09-18, 아래 "리팩터 2") | 휘도 갱신과 평가 캐시의 수명 정리 | macOS `RoamlingRuntime.tick`은 `core.setLuminance`를 매 tick 호출하고 `PetRuntime::set_luminance`는 수면 검사 캐시를 매번 비운다. Windows `refresh_luminance`는 새 캡처 때만 전달한다. 동일 필드 재전달과 새 캡처를 구분하고, 이후 같은 평가에서 반복 생성되는 `ClearanceMap`을 공유하는 순서가 적절하다. 성능 이득은 측정 후 판단한다 |
 | 3 (완료 2026-09-18, 아래 "리팩터 3 실행") | 포팅 대조 계약과 현재 배치 정책을 명시적으로 구분 | `PlacementDirector::new`와 `for_runtime`, 플래너의 `destination`과 `clear_destination`이 공존한다. 현재 정책 선택을 명시하는 내부 타입과 테스트 구성이 호출 실수를 줄인다. 기존 fixture를 바꾸거나 두 정책을 무작정 합치지 않는다 |
-| 4 | `PetRuntime`의 입력·휴식·경계 이동 코드를 기능별 파일로 분리 | 한 파일에 상태 조정과 회귀 테스트가 함께 늘었다. 먼저 테스트 모듈을 분리하고, 상태 소유자는 하나로 유지한 채 내부 helper를 추출한다. 동작·타이밍 변경과 함께 진행하지 않는다 |
+| 4 (완료 2026-09-18, 아래 "리팩터 4 실행") | `PetRuntime`의 입력·휴식·경계 이동 코드를 기능별 파일로 분리 | 한 파일에 상태 조정과 회귀 테스트가 함께 늘었다. 먼저 테스트 모듈을 분리하고, 상태 소유자는 하나로 유지한 채 내부 helper를 추출한다. 동작·타이밍 변경과 함께 진행하지 않는다 |
 
 큰 구조 변경은 이번에 실행하지 않았다. 우선 1번은 용어 혼동을 줄이는 작은 정리이고,
 2번은 코드로 확인된 중복 계산 경로다. 3·4번은 사용자 체감 확인 후 별도 변경으로 진행하는 편이 낫다.
@@ -235,3 +235,41 @@ R16. 후보 2는 둘로 나뉜다: (가) 한 판단 안에서 `ClearanceMap`을 
 
 맥이 매 틱 격자 전체(약 20 KB)를 FFI로 복사하는 것은 그대로 둔다. Swift 쪽 변경이고 Windows에서
 확인할 수 없으며, 위 표의 "활동 중 · 매 틱"이 보여 주듯 비용이 틱당 1.4 µs다.
+
+## 리팩터 4 실행 — `pet_runtime.rs`를 기능별 파일로 (2026-09-18)
+
+R16. 옮기기만 한다. 줄 하나의 뜻도 바꾸지 않는다.
+
+### 지금
+
+`rust/roamling-core/src/pet_runtime.rs`는 2,100줄이다. `impl PetRuntime` 하나가 1,400줄이고 그 안에
+틱 본체, 직접 잡기, 휴식, 배회, 회피가 같이 있다. 파일 끝 400줄은 테스트 모듈 둘이다.
+
+### 옮기는 곳
+
+`pet_runtime.rs`는 그대로 두고 옆에 `pet_runtime/` 디렉터리를 만들어 하위 모듈로 나눈다. 하위 모듈은
+부모의 비공개 필드를 볼 수 있으므로 **상태의 주인은 여전히 `PetRuntime` 하나**다. 구조체 정의, 생성자,
+설정 함수, `begin_tick` · `finish_tick`, 상황 수집(`make_situation`), 배치 의도 적용은 본 파일에 남는다.
+
+| 새 파일 | 옮기는 함수 |
+|---|---|
+| `pet_runtime/holding.rs` | `pointer_down` · `touch_down` · `begin_catch` · `pointer_dragged` · `pointer_up` · `finish_drop` |
+| `pet_runtime/rest.rs` | `update_rest_lifecycle` · `begin_rest_travel` · `enter_sleep` · `rest_spot_is_busy` · `defer_rest` · `cancel_rest_for_activity` |
+| `pet_runtime/roaming.rs` | `update_roaming` · `begin_stroll` · `stroll_candidates` · `random_wander_point` |
+| `pet_runtime/evade.rs` | `apply_evade` · `update_evade_transition` |
+| `pet_runtime/names.rs` | 진단 문자열 함수 `state_name` · `proximity_name` · `reason_name` · `describe` · `reaction_name` |
+| `pet_runtime/movement_policy_tests.rs` · `hidden_tests.rs` | 테스트 모듈 둘, 본문 그대로 |
+
+### 규칙
+
+- 함수 본문과 주석은 **바이트 그대로** 옮긴다. 바뀌는 것은 부모에서 부르는 비공개 함수의 가시성
+  (`fn` → `pub(super) fn`)과 파일 머리의 `use super::*;`뿐이다. 스크립트가 "옮긴 조각을 다시 이으면
+  원본과 같다"를 확인한 뒤에만 파일을 쓴다.
+- 공개 API(`pub fn`)의 이름·시그니처·경로는 그대로다. `roamling-win`, FFI, Swift는 바뀌지 않는다.
+- 모니터 경계 통과는 `finish_tick` 본문 안에 얽혀 있어 이번에 꺼내지 않는다 — 꺼내려면 본문을
+  고쳐야 하고 그건 "옮기기만"을 넘는다.
+
+**결과.** 1,017줄을 옮겼고 본 파일은 1,108줄이 됐다. 원본과 새 파일들의 줄을 모아 비교하면 다른 것은
+모듈 선언 · SPDX 머리 · `use super::*;` · `impl PetRuntime {` 와 닫는 중괄호 · `pub(super)`뿐이다.
+코어 78개와 differential 열 묶음 통과. 이 문서의 앞 절들이 `pet_runtime.rs`의 함수라고 적은
+`rest_spot_is_busy`는 이제 `pet_runtime/rest.rs`에 있다.
