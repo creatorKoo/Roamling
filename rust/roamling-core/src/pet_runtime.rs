@@ -186,7 +186,7 @@ pub struct PetRuntime {
 
     last_tick_at: Option<f64>,
     next_wander_at: f64,
-    catch_armed_until: f64,
+    approach_hold_until: f64,
     caught_animation_until: f64,
     click_reaction_until: f64,
     /// How long the pet is allowed to land for before it notices the cursor.
@@ -247,7 +247,7 @@ impl PetRuntime {
             is_hidden: false,
             last_tick_at: None,
             next_wander_at: 0.0,
-            catch_armed_until: 0.0,
+            approach_hold_until: 0.0,
             caught_animation_until: 0.0,
             click_reaction_until: 0.0,
             landing_until: 0.0,
@@ -303,7 +303,7 @@ impl PetRuntime {
     /// How soon the caller should come back. A pet asleep is worth a beat every
     /// half second; one being reached for is worth every frame.
     pub fn preferred_tick_interval(&self, now: f64) -> f64 {
-        if now <= self.catch_armed_until {
+        if now <= self.approach_hold_until {
             return 1.0 / 60.0;
         }
         match self.behavior.state() {
@@ -371,23 +371,23 @@ impl PetRuntime {
         }
     }
 
-    /// Returns whether the caller should release the panel: a catch already
-    /// armed must not survive the switch being turned off.
+    /// Returns whether the caller should release the panel: an approach
+    /// reaction already under way must not survive the switch being turned off.
     pub fn set_interactions_enabled(&mut self, enabled: bool) -> bool {
         self.are_interactions_enabled = enabled;
         if !enabled {
-            self.catch_armed_until = 0.0;
+            self.approach_hold_until = 0.0;
         }
         !enabled
     }
 
     /// Hiding is only a presentation switch: ticks, movement and activity
-    /// sources stay alive. A hidden pet cannot keep or re-arm a catch, and it
+    /// sources stay alive. A hidden pet cannot keep or start an approach reaction, and it
     /// has no visible seat worth paying for a luminance capture to choose.
     pub fn set_hidden(&mut self, hidden: bool) {
         self.is_hidden = hidden;
         if hidden {
-            self.catch_armed_until = 0.0;
+            self.approach_hold_until = 0.0;
             self.luminance_requests.clear();
         }
     }
@@ -555,17 +555,17 @@ impl PetRuntime {
         };
 
         if !self.is_click_reaction_pending
-            && decision.should_arm_catch()
+            && decision.is_fast_approach()
             && self.are_interactions_enabled
             && !self.is_hidden
         {
-            self.catch_armed_until =
-                swift_max(self.catch_armed_until, now + self.tuning.catch_window);
+            self.approach_hold_until =
+                swift_max(self.approach_hold_until, now + self.tuning.approach_hold);
         }
-        let catch_is_armed = !self.is_click_reaction_pending
+        let approach_held = !self.is_click_reaction_pending
             && self.are_interactions_enabled
             && !self.is_hidden
-            && now <= self.catch_armed_until;
+            && now <= self.approach_hold_until;
 
         if !self.behavior.state().is_held() {
             // Gather, decide, apply. The decision runs every tick even when
@@ -573,7 +573,7 @@ impl PetRuntime {
             // by the time placement is allowed to act on it.
             let was_travelling = self.placement.is_travelling();
             let situation = self.make_situation(
-                now, input, proximity, is_adored, catch_is_armed && allows_pointer_glance,
+                now, input, proximity, is_adored, approach_held && allows_pointer_glance,
             );
             let intent = if self.crossing_clear.is_some() {
                 PlacementIntent::None
@@ -619,7 +619,7 @@ impl PetRuntime {
             };
             self.record("agent", &agent);
 
-            if catch_is_armed && self.crossing_clear.is_none() && allows_pointer_glance {
+            if approach_held && self.crossing_clear.is_none() && allows_pointer_glance {
                 self.is_evade_transitioning = false;
                 self.movement.cancel_route(false);
                 self.behavior
@@ -628,8 +628,8 @@ impl PetRuntime {
                 self.movement.update_route(delta_time);
                 self.next_wander_at = swift_max(self.next_wander_at, now + 1.0);
             } else if let Some(clear) = self.crossing_clear {
-                // Arming remains live for an actual click, but a passing
-                // cursor cannot park the panel astride two macOS displays.
+                // The approach reaction stays held, but a passing cursor
+                // cannot park the panel astride two macOS displays.
                 self.movement.update_route(delta_time);
                 if !self.movement.remaining_waypoints().contains(&clear) {
                     self.crossing_clear = None;
@@ -815,7 +815,7 @@ impl PetRuntime {
             swift_max(now, self.caught_animation_until) + self.dragged_cycle_duration;
         let clamped = self.world.clamp(self.movement.position(), self.object_size);
         self.movement.teleport(clamped, true);
-        self.catch_armed_until = 0.0;
+        self.approach_hold_until = 0.0;
         let mut output = self.interaction(now, Some(false), true);
         output.reschedule_after = Some(1.0 / 30.0);
         output
@@ -970,7 +970,7 @@ impl PetRuntime {
         input: &TickInput,
         proximity: PointerProximity,
         is_adored: bool,
-        catch_is_armed: bool,
+        approach_held: bool,
     ) -> PetSituation {
         let pointer = input.pointer;
         let is_watching = self.activity.is_watching_window();
@@ -1032,7 +1032,7 @@ impl PetRuntime {
             walking_speed: self.tuning.walking_speed,
             // Being petted owns the pet outright, and is not a glance: a
             // glance is something the pet tires of, and this is not.
-            is_pointer_owned: catch_is_armed
+            is_pointer_owned: approach_held
                 || is_adored
                 || matches!(
                     self.behavior.state(),
@@ -1614,7 +1614,7 @@ impl PetRuntime {
         self.behavior.handle(BehaviorInput::MouseReleased, now);
         let clamped = self.world.clamp(self.movement.position(), self.object_size);
         self.movement.teleport(clamped, true);
-        self.catch_armed_until = 0.0;
+        self.approach_hold_until = 0.0;
         // The whole of `Dropped`, so the pet lands and then notices the user a
         // beat later. Reusing the state's own length keeps this from becoming
         // a second number that has to be kept in step with it.
@@ -1780,8 +1780,8 @@ mod movement_policy_tests {
             let mut sample = input(10.1, contact);
             sample.pointer_is_over_pet = true;
             let out = pet.finish_tick(&sample);
-            assert!(out.interaction_enabled, "the shell must receive the unarmed click");
-            assert_eq!(pet.catch_armed_until, 0.0);
+            assert!(out.interaction_enabled, "the shell must receive the click without a fast approach");
+            assert_eq!(pet.approach_hold_until, 0.0);
             assert_eq!(out.state, if working { BehaviorState::Work } else { BehaviorState::Wander });
             let origin = pet.position();
             pet.pointer_down(contact, 10.11);
@@ -1805,7 +1805,7 @@ mod movement_policy_tests {
         let mut sample = input(10.0, contact);
         sample.pointer_is_over_pet = true;
         let out = pet.finish_tick(&sample);
-        assert_eq!(pet.catch_armed_until, 0.0);
+        assert_eq!(pet.approach_hold_until, 0.0);
         assert_eq!(out.state, BehaviorState::EvadePointer);
         assert!(out.interaction_enabled);
         pet.pointer_down(contact, 10.01);
@@ -1877,8 +1877,8 @@ mod movement_policy_tests {
                 .state,
             BehaviorState::Work
         );
-        // An armed catch exposes the hit target without starting a tail wag.
-        pet.catch_armed_until = 14.0;
+        // A held approach reaction exposes the hit target without starting a tail wag.
+        pet.approach_hold_until = 14.0;
         assert_eq!(
             pet.finish_tick(&input(13.3, WorldPoint::new(635.0, 400.0)))
                 .state,
@@ -1914,7 +1914,7 @@ mod movement_policy_tests {
         let mut pet = PetRuntime::new(WorldPoint::new(500.0, 400.0), RuntimeTuning::default(), 7);
         pet.set_displays(vec![display("main", 0.0, 0.0)]);
         pet.begin_stroll(WorldPoint::new(750.0, 400.0), 10.0, 0.0);
-        pet.catch_armed_until = 100.0;
+        pet.approach_hold_until = 100.0;
         let mut arrived = false;
         for i in 1..600 {
             let now = 10.0 + f64::from(i) / 30.0;
@@ -2013,7 +2013,7 @@ mod movement_policy_tests {
         pet.begin_stroll(WorldPoint::new(1300.0, 400.0), 0.0, 0.0);
         pet.finish_tick(&input(0.1, WorldPoint::new(500.0, 400.0)));
         assert!(pet.crossing_clear.is_some());
-        assert_eq!(pet.catch_armed_until, 0.0);
+        assert_eq!(pet.approach_hold_until, 0.0);
         pet.pointer_down(pet.position(), 0.2);
         assert_eq!(pet.state(), BehaviorState::Caught);
         assert!(pet.crossing_clear.is_none());
@@ -2072,12 +2072,12 @@ mod hidden_tests {
         pet.set_displays(vec![display]);
         let region = WorldRect::new(100.0, 100.0, 600.0, 400.0);
 
-        pet.catch_armed_until = 42.0;
+        pet.approach_hold_until = 42.0;
         pet.request_luminance(region, LUMINANCE_REFRESH_INTERVAL);
         assert_eq!(pet.luminance_requests.len(), 1);
 
         pet.set_hidden(true);
-        assert_eq!(pet.catch_armed_until, 0.0);
+        assert_eq!(pet.approach_hold_until, 0.0);
         assert!(pet.luminance_requests.is_empty());
 
         let requests = pet.handle_activity_event(

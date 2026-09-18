@@ -47,7 +47,7 @@ MVP 4 게이트 안에서 발견된 결함 다섯 개가 전부 이 흐름에 �
 ```mermaid
 flowchart TD
     T["tick() 매 프레임"] --> W["watchSeatWhileParked<br/>1초 주기 · 앉아 있을 때"]
-    T --> CH{"catch armed?"}
+    T --> CH{"approach held?"}
     CH -->|yes| CATCH["포인터가 소유"]
     CH -->|no| EV{"evade 중?"}
     EV -->|yes| EVADE["회피가 소유"]
@@ -85,7 +85,7 @@ flowchart TD
 - 사슬 안쪽: catch → evade → rest → pointer → activity → roaming 순서
 - 사슬 바깥: 자리 감시가 `pointerOwnedStates`라는 **별도 집합**으로 스스로 양보
 
-두 규칙이 같은 것을 말하지 않는다. `catchArmedUntil`이 켜지는 tick에서는 behavior state가
+두 규칙이 같은 것을 말하지 않는다. `approach_hold_until`(당시 `catchArmedUntil`)이 켜지는 tick에서는 behavior state가
 아직 `.observe`라 감시가 통과하고, 같은 tick 뒷부분의 catch 분기가 방금 깐 경로를 취소한다.
 한 tick짜리 창이라 증상은 작지만, **"누가 펫을 소유하는가"의 답이 두 군데 있고 서로
 다르다**는 것이 문제다. 결함 5가 여기서 나왔다.

@@ -30,7 +30,7 @@ The current desktop implementation includes:
   noticeable multi-display exploration;
 - pointer awareness, capped evasion, direct body-click catching, drag, drop,
   cross-monitor dragging, and connected-edge escape when gently cornered;
-- a live **Behavior Tuning…** panel for MVP 0/0.5 movement, pointer, catch,
+- a live **Behavior Tuning…** panel for MVP 0/0.5 movement, pointer approach,
   and hit-region values, with persistent settings and one-click reset;
 - permission-free idle detection plus sit, safe sleep-spot travel, sleep,
   wake, and stretch behavior at a reduced sleeping cadence;

@@ -10,7 +10,7 @@
 //!
 //! **The bounds are not this file's.** `RuntimeTuning::bounds` owns them, and
 //! the comment on it says why: a second table drifts, and once did -- the panel
-//! offered a catch arm up to 140 while the model accepted 360. Every range here
+//! offered the approach distance up to 140 while the model accepted 360. Every range here
 //! is read from the core, and re-read after every change, because one of them
 //! moves with another value.
 //!
@@ -101,9 +101,9 @@ fn items() -> Vec<Item> {
         Item::Section("tuning.section.pointer"),
         slider("tuning.noticeDistance", K::PointerAwarenessDistance, 5.0, Unit::Points),
         slider("tuning.evadeSpeed", K::EvadeSpeedScale, 0.05, Unit::Multiplier),
-        slider("tuning.catchArm", K::CatchArmDistance, 2.0, Unit::Points),
-        slider("tuning.catchSpeed", K::CatchApproachSpeed, 10.0, Unit::PointsPerSecond),
-        slider("tuning.catchWindow", K::CatchWindow, 0.05, Unit::SecondsDecimal),
+        slider("tuning.catchArm", K::ApproachDistance, 2.0, Unit::Points),
+        slider("tuning.catchSpeed", K::ApproachSpeed, 10.0, Unit::PointsPerSecond),
+        slider("tuning.catchWindow", K::ApproachHold, 0.05, Unit::SecondsDecimal),
         slider("tuning.hitRegion", K::HitRegionScale, 0.01, Unit::Multiplier),
         Item::Note("tuning.pointerNote"),
         Item::Section("tuning.section.advanced"),
@@ -586,7 +586,7 @@ fn centre(window: HWND) {
 
 /// Puts every trackbar and readout back in step with the current tuning.
 ///
-/// Ranges are re-applied, not just positions: `CatchArmDistance`'s ceiling is
+/// Ranges are re-applied, not just positions: `ApproachDistance`'s ceiling is
 /// the notice distance, so moving one slider changes another's scale.
 fn refresh() {
     PANEL.with(|slot| {

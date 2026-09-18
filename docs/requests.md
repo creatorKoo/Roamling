@@ -31,6 +31,23 @@
 
 ## 진행
 
+### R15. 밀린 일 정리 — 리팩터 1과 B4, 맥에서 마무리 (2026-09-18)
+
+- **누가·언제** 사용자, 2026-09-18, 0.6.6 발행 직후.
+- **원문** "응 뭔가 밀린일 있으면 할까나", "1,3 으로 하고 2번은 드랍. 5번이랑 엮어서 아예 맥에서
+  진행할까? 너의 의견은?", "ㄱㄱ".
+- **결정** 밀린 일 다섯 중 B4(간헐 실패 테스트)와 리팩터 후보 1(접근 반응·잡기 이름 분리)을 한다.
+  하늘 보리는 드랍(거절·보류 참조). 순서는 (1) 리팩터 1을 Windows에서 끝내고 push, (2) B4의 흐름을
+  문서로 남기고, (3) 맥에서 B4 수정·하네스 반복 실행·서명 빌드, 이어서 macOS 실사용 확인(실제 클릭
+  전달, 다중 모니터 경계 깜박임).
+- **리팩터 1 (완료, Windows)** 흐름·이름 대응표·저장 키 결정은 `docs/maintenance-review.md`
+  "리팩터 1 실행". Rust 내부 이름만 바꿨고 FFI·Swift·저장 키는 그대로다. 발견: Windows가 저장 키를
+  enum 이름에서 유도하고 있어 이름을 바꾸면 사용자의 튠 값이 조용히 초기화될 뻔했다 —
+  `RuntimeTuningKey::storage_name` 표와 코어·셸 테스트 둘로 고정했다. 패널 문구(en/ko)를 접근 반응
+  설명으로 고쳤다. `scripts/test.ps1` 통과(코어 77, 셸 54, differential·릴리스 빌드), 펫 재실행.
+  Swift 컴파일은 push 뒤 Check macOS로 확인한다.
+- **B4 (맥에서)** 계획은 아래 B4 항목.
+
 ### R6. Android에서 돌아다니는 Roamling
 
 - **누가·언제** 사용자, 2026-09-12. 첫 사용 대상은 아내분의 Android 휴대전화.
@@ -415,12 +432,41 @@
   tick 타이머가 같은 run loop에 있어서 러너 속도에 따라 **몇 틱이 실제로 지나가는지가 달라진다.**
   느린 러너에서 그 사이에 자리 인수인계가 이미 끝나 버리면 이어지는 `run(seconds: 30)` 녹화에
   걷기가 안 잡힌다. 문자열만 바꾼 커밋이라 이번 변경과는 무관하다.
-- **상태** 미수정. 고치려면 drain을 tick과 분리하거나(가짜 시계로 이벤트만 배달) 테스트가
-  drain 동안의 착용 기록도 보게 해야 한다 — 하네스 층 변경이라 문서 먼저(작업 방식 규칙).
+- **상태** 미수정. 맥에서 진행한다(R15). 아래는 맥 세션을 위한 인수인계다.
+- **코드 위치**
+  - 테스트: `Tests/RoamlingLogicTests/FocusActivityLogicTests.swift` "when the agent finishes, the
+    work app takes the seat". `scene.emitAgent(.achievement)` → `drainActivityEvents()` →
+    `scene.run(seconds: 30)`에서 `recording.walked`(= `behaviorState == .travelToInterest`를 한 번이라도
+    봄)를 요구한다.
+  - 시간: `WorkAppScene.run(seconds:)`는 `TestClock`을 1/30초씩 손으로 올리고 `runtime.tick()`을
+    직접 부른다. 즉 이 테스트의 시계는 가짜다.
+  - 배달: `drainActivityEvents()`(`RuntimeLogicTests.swift`)는 `RunLoop.main.run(mode:before: Date())`를
+    400번 돌린다. agent 이벤트는 `RoamlingRuntime.swift`의 `for await event in stream` Task로 메인
+    큐에 배달되므로 이 펌프가 필요하다.
+  - 새는 곳: 런타임의 자기 tick 타이머(`RoamlingRuntime.swift` `scheduleNextTick`, `Timer`를
+    `RunLoop.main`에 `.common`으로 등록)도 같은 run loop에 있다. 펌프 400번이 실제 시간으로 타이머
+    발화 시각을 넘기면 `tickTimerFired` → `tick()`이 **가짜 시계가 멈춘 채로** 끼어든다. 느린 러너일수록
+    끼어들 확률이 높다. `drainActivityEvents`의 주석이 이미 이 가능성을 적고 있다.
+- **확인 순서**
+  1. 맥에서 `swift run RoamlingLogicTests`를 20회 돌려 실패율을 잰다(재현이 안 되면 CI 러너 속도
+     차이일 수 있으니 부하를 걸고 다시).
+  2. `drainActivityEvents` 안에서 타이머 발화로 들어온 `tick()` 횟수를 세어 본다(임시 카운터).
+     0이 아니면 가설이 맞다.
+  3. 고치는 방향 후보: (a) 하네스가 만드는 런타임은 자기 타이머를 아예 켜지 않게 한다(테스트 시계가
+     있는 런타임은 손으로만 tick) — `RuntimeTrace`가 바이트 단위로 같아야 하므로 정상 경로에서
+     타이머 tick이 0이라는 것이 확인되면 안전하다; (b) 이벤트 배달을 run loop 펌프 대신 명시적으로
+     기다린다(`FakeAgent.emit`이 배달 완료를 돌려줌). (a)가 원인을 없애고 (b)는 증상을 줄인다.
+  4. 고친 뒤 하네스 20회 연속 통과와 `scripts/test.sh` 전체, `RuntimeTrace` 바이트 비교 통과.
+     **트레이스를 다시 만들지 않는다.**
+- **손대지 않는 것** 런타임의 동작·타이밍. 하네스 층만이다.
 
 ## 거절·보류
 
-아직 없다.
+### 하늘 보리 — 밝은 파랑 프리셋 (드랍 2026-09-18)
+
+- **어디서** R14를 정하던 중 "파란 보리로 하자 그럼 하늘 보리는 나중에 추가하고".
+- **결정** 같은 날 밀린 일을 고르면서 "2번은 드랍". 프리셋을 늘리지 않는다. 이름만 남긴다 —
+  밝은 파랑 프리셋을 정말 만들게 되면 그때 이 이름을 쓴다.
 
 ---
 

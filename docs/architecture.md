@@ -36,7 +36,7 @@ macOS는 UniFFI 바인딩과 `RustCore.swift`, Windows는 Rust 직접 링크, An
 - `DesktopWorld`: immutable display/window/pointer/focus/safe-zone snapshot
 - `DisplayTopology`: display graph, seam/portal, continuous route waypoints
 - `MovementController`: acceleration, capped speed, arrival/deceleration
-- `PointerInteractionModel`: proximity, approach speed, catch arming, escape vector
+- `PointerInteractionModel`: proximity, approach speed, fast-approach detection, escape vector
 - `BehaviorController`: explicit creature FSM
 - `BasicSafeZonePlanner`: permission-free rest candidates and destination scoring
 - `BasicInterestPositionPlanner`: coarse window-edge destination scoring for MVP 1
@@ -450,8 +450,11 @@ window는 sprite 크기다. macOS는 `PetOverlayView.containsPet`의 ellipse가 
 `RuntimeTuning`과 menu bar의 **Behavior Tuning…** 창은 MVP 0/0.5의 체감 검증 값만
 노출한다. walk speed, idle pause, 다른 display 방문 확률, notice/catch thresholds,
 접근 반응 창과 hit region, 휴식 진입 대기 시간이 실행 중 반영된다. macOS는 `UserDefaults`,
-Windows는 `settings.rs`의 사용자 설정 파일에 저장한다. 잡기 이름이 남은 접근 설정은
-직접 클릭 허용 조건이 아니다. 설정 키의 정본은 `tuning.rs::RuntimeTuningKey`다.
+Windows는 `settings.rs`의 사용자 설정 파일에 저장한다. 접근 반경·속도·반응 시간
+(`ApproachDistance` · `ApproachSpeed` · `ApproachHold`)은 직접 클릭 허용 조건이 아니다.
+설정 키의 정본은 `tuning.rs::RuntimeTuningKey`이고, **저장되는 이름**은 같은 파일의
+`storage_name`이 갖는다 — 셋은 `catchArmDistance` 등 옛 이름 그대로다(2026-09-18 리팩터,
+`docs/maintenance-review.md`).
 
 FatMochi의 idle frame을 visual identity의 기준으로 둔다. walk와 caught intro는 frame마다
 alpha silhouette을 독립적으로 중앙 정렬하고, 크기는 idle bounding box에서 2px 이상
@@ -537,7 +540,7 @@ tap이나 input 내용을 수집하지 않고 마지막 local input 이후 경�
 ## Performance model
 
 - active movement/evade/travel: 약 60 Hz, caught/drop: 약 30 Hz
-- catch가 arm된 짧은 구간: 60 Hz input gate
+- 접근 반응이 유지되는 짧은 구간(`approach_hold_until`): 60 Hz input gate
 - idle: 12 Hz, look: 16 Hz (`PetRuntime::preferred_tick_interval`)
 - sleep: 2 Hz (wake input은 최대 약 0.5초 안에 감지)
 - display/AX/window tree: notification/debounce 기반

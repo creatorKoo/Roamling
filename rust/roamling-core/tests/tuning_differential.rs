@@ -4,7 +4,7 @@
 //! Unit 6a's gate: the tuning value and every bound in it.
 //!
 //! No state, so these are independent cases -- but the clamps are order
-//! dependent, because `CatchArmDistance` is bounded by the *already clamped*
+//! dependent, because `ApproachDistance` is bounded by the *already clamped*
 //! pointer awareness. Most of the draws are therefore out of range, which is
 //! the only place that ordering is visible.
 
@@ -29,9 +29,9 @@ fn fields(tuning: &RuntimeTuning) -> Vec<f64> {
         tuning.wander_pause,
         tuning.cross_display_wander_chance,
         tuning.pointer_awareness_distance,
-        tuning.catch_arm_distance,
-        tuning.catch_approach_speed,
-        tuning.catch_window,
+        tuning.approach_distance,
+        tuning.approach_speed,
+        tuning.approach_hold,
         tuning.hit_region_scale,
         tuning.gait_cadence,
         tuning.evade_speed_scale,
@@ -125,9 +125,9 @@ fn the_catch_radius_ends_where_awareness_does() {
         let tuning = RuntimeTuning::new(
             160.0, 12.0, 0.46, awareness, 1_000.0, 380.0, 0.35, 1.12, 1.0, 1.4, 75.0,
         );
-        assert_eq!(tuning.catch_arm_distance, awareness);
+        assert_eq!(tuning.approach_distance, awareness);
         assert_eq!(
-            tuning.limits(RuntimeTuningKey::CatchArmDistance),
+            tuning.limits(RuntimeTuningKey::ApproachDistance),
             (40.0, awareness)
         );
     }

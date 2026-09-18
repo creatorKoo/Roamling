@@ -796,18 +796,13 @@ fn refresh_luminance(app: &mut App, requests: &[roamling_core::LuminanceRequest]
 ///
 /// `RuntimeTuningKey` declares the wire order and this walks it, so a key added
 /// to the core is saved here without this function being touched.
+///
+/// The name is the core's `storage_name`, which the macOS blob also uses. It
+/// used to be derived from the variant's debug name; that made a rename in the
+/// core a silent reset of every value a user had tuned, so the core now owns
+/// the stored names as a table with a test on it.
 fn tuning_key(key: RuntimeTuningKey) -> String {
-    // The camelCase names the macOS blob uses, derived rather than tabulated.
-    let name = format!("{key:?}");
-    let mut out = String::with_capacity(name.len());
-    for (index, character) in name.chars().enumerate() {
-        if index == 0 {
-            out.extend(character.to_lowercase());
-        } else {
-            out.push(character);
-        }
-    }
-    format!("{}{out}", settings::TUNING_PREFIX)
+    format!("{}{}", settings::TUNING_PREFIX, key.storage_name())
 }
 
 fn guide_seen(settings: &Settings) -> u32 {
@@ -1485,6 +1480,30 @@ mod tests {
     use super::{is_work_app, make_work_app_items, persist_work_app_label};
     use crate::settings::{Settings, WORK_APP_LABEL_PREFIX};
     use std::collections::HashMap;
+
+    /// A settings file written before the 2026-09-18 rename says
+    /// `catchArmDistance`; it has to keep answering for the approach distance.
+    #[test]
+    fn renamed_tuning_keys_still_read_the_lines_older_files_wrote() {
+        use crate::{stored_tuning, tuning_key};
+        use roamling_core::RuntimeTuningKey;
+
+        assert_eq!(
+            tuning_key(RuntimeTuningKey::ApproachDistance),
+            "roamling.runtimeTuning.catchArmDistance"
+        );
+        assert_eq!(
+            tuning_key(RuntimeTuningKey::ApproachSpeed),
+            "roamling.runtimeTuning.catchApproachSpeed"
+        );
+        assert_eq!(
+            tuning_key(RuntimeTuningKey::ApproachHold),
+            "roamling.runtimeTuning.catchWindow"
+        );
+        let mut stored = Settings::load_from(None);
+        stored.set("roamling.runtimeTuning.catchWindow", 0.9);
+        assert_eq!(stored_tuning(&stored).approach_hold, 0.9);
+    }
 
     #[test]
     fn work_app_names_ignore_ascii_case() {

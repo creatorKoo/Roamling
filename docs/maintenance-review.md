@@ -80,3 +80,84 @@ macOS에서는 실제 클릭 전달, 다중 모니터 경계의 깜박임, Swift
 Windows·macOS 모두 통과했다. Swift 197개·새 녹화 비교, Rust 코어 76개·기존 differential,
 Windows 셸 53개(네트워크 1개 제외), Mac 서명·패키지 실행과 발행을 확인했다.
 공개 파일 6개의 해시와 피드·업데이트 파일 서명도 검증했다. 승인 전 원본 녹화는 보존했다.
+
+## 리팩터 1 실행 — 접근 반응과 잡기의 이름 분리 (2026-09-18)
+
+사용자가 "1, 3으로 하고"로 착수를 정했다. 코드를 바꾸기 전에 지금 흐름을 코드 위치와 함께 적는다.
+
+### 지금 "catch arm"이 실제로 하는 일
+
+1. **판정** — `rust/roamling-core/src/pointer.rs` `PointerInteractionModel::evaluate`: 커서가
+   `catch_distance` 안이고 속도가 `catch_pointer_speed` 이상, 접근(closing) 속도가
+   `catch_closing_speed` 이상이면 `PointerProximity::Catchable`.
+2. **값의 출처** — `tuning.rs` `RuntimeTuning::pointer_configuration`: `catch_arm_distance`가
+   `catch_distance`로, `catch_approach_speed`가 `catch_pointer_speed`로, 그 0.48배(최소 120)가
+   closing 속도로 들어간다.
+3. **유지 시간** — `pet_runtime.rs` `finish_tick`: `decision.should_arm_catch()`이고 상호작용이
+   켜져 있고 숨김이 아니고 클릭 반응 대기가 아니면 `catch_armed_until = max(기존, now + catch_window)`.
+   `catch_is_armed`는 같은 게이트에 `now <= catch_armed_until`.
+4. **켜졌을 때 일어나는 것** — 셋뿐이다.
+   - `preferred_tick_interval`: 1/60초로 틱 (셸이 매 프레임 부른다).
+   - `make_situation`의 `is_pointer_owned`: 배치가 펫을 옮기지 않는다.
+   - `finish_tick`의 분기(`catch_is_armed && crossing_clear.is_none() && allows_pointer_glance`):
+     경로 취소, `behavior.handle(Pointer(Catchable))` → `behavior.rs`에서 `LookAtPointer`,
+     배회를 1초 미룬다. 앉아 있을 때만이다(`allows_pointer_glance`).
+5. **하지 않는 것** — 클릭 허용. R11(2026-09-18) 뒤로 `pointer_down`은 `touch_down`과 같은 몸체
+   접촉 검증만 쓰고, `TickOutput.interaction_enabled`는 이 값을 보지 않는다
+   (`pet_runtime.rs` 테스트 "the shell must receive the unarmed click").
+6. **꺼지는 곳** — `set_interactions_enabled`, `set_hidden`, 잡기 시작, 숨김 해제 뒤 리셋.
+
+즉 이 세 값은 **"빠르게 다가오는 커서를 앉은 펫이 알아채고 잠깐 쳐다보는" 반응**의 반경·속도·
+유지 시간이다. 이름의 "catch"는 R11 이전의 뜻이다.
+
+### 바꾸는 이름
+
+| 지금 | 바꾼 뒤 | 어디 |
+|---|---|---|
+| `RuntimeTuningKey::CatchArmDistance` | `ApproachDistance` | `tuning.rs`, `roamling-win/tuning.rs`, `tests/tuning_differential.rs` |
+| `RuntimeTuningKey::CatchApproachSpeed` | `ApproachSpeed` | 같은 곳 |
+| `RuntimeTuningKey::CatchWindow` | `ApproachHold` | 같은 곳 |
+| `RuntimeTuning.catch_arm_distance` 등 세 필드 | `approach_distance` · `approach_speed` · `approach_hold` | `tuning.rs`, `ffi.rs`의 변환 본문 |
+| `PetRuntime.catch_armed_until` | `approach_hold_until` | `pet_runtime.rs` |
+| `catch_is_armed` (지역 변수·인자) | `approach_held` | `pet_runtime.rs` |
+| `PointerDecision::should_arm_catch` | `is_fast_approach` | `pointer.rs`, `pet_runtime.rs`, `tests/mechanics_differential.rs` |
+
+**그대로 두는 이름과 이유.**
+
+- `FfiTuning`의 필드와 `normalize_tuning`의 인자 이름(`catch_arm_distance` …) — uniffi가 Swift 인자
+  라벨로 내보내는 공개 FFI. Swift는 이 라벨로 부른다.
+- `PointerInteractionConfiguration.catch_distance` 등과 `PointerProximity::Catchable` — 같은 이유로
+  FFI(`ffi.rs`의 pointer 함수들)이고, `Catchable`은 differential fixture와 behavior 입력에도 박혀 있다.
+  "잡을 수 있는 거리·속도로 다가온 커서"라는 판정 이름으로는 여전히 맞다.
+- Swift `RuntimeTuningKey.catchArmDistance` 등 — `Codable` 키가 그대로 macOS `UserDefaults` blob의
+  JSON 키다. 이번엔 Swift를 만지지 않는다(맥 없이 컴파일 확인이 CI뿐이다).
+- 문자열 키 `tuning.catchArm` · `tuning.catchSpeed` · `tuning.catchWindow` — Swift 패널이 같은 키로
+  읽는다. **값만** 바꾼다.
+
+### 저장 키 — 발견한 것과 결정
+
+Windows는 `roamling-win/src/main.rs` `tuning_key`가 **`format!("{key:?}")`로 enum 변형 이름에서**
+`roamling.runtimeTuning.catchArmDistance`를 만든다("표가 아니라 유도"). 변형 이름을 바꾸면 사용자가
+튠한 값이 조용히 기본값으로 돌아간다. 이것이 리팩터 검토가 "저장 키 호환 유지"라고 적은 그 지점이다.
+
+결정: `tuning.rs`에 `RuntimeTuningKey::storage_name()`을 두고 열한 개의 **기존 camelCase 이름을
+표로** 적는다. Windows `tuning_key`는 그것을 쓴다. 코어 테스트가 열한 이름 전부를 macOS blob 키와
+같은 문자열로 고정한다. "유도라 안 어긋난다"를 "표지만 테스트가 고정한다"로 바꾸는 것이고, 저장된
+이름과 코드 이름이 **의도적으로 다른** 순간부터는 표가 정직한 쪽이다.
+
+### 사용자에게 보이는 문구
+
+패널의 세 슬라이더와 안내문이 아직 클릭 조건을 설명하고 있어 R11 이후 거짓이다. 키는 그대로,
+값만 바꾼다.
+
+| 키 | en | ko |
+|---|---|---|
+| `tuning.section.pointer` | Pointer | 포인터 |
+| `tuning.catchArm` | Approach distance | 접근 반경 |
+| `tuning.catchSpeed` | Approach speed | 접근 속도 |
+| `tuning.catchWindow` | Approach hold | 접근 반응 시간 |
+| `tuning.pointerNote` | 접근 반응 설명 + "잡기는 몸체 클릭, 이 값과 무관" | 같은 뜻 |
+
+리팩터 게이트라 **동작·기본값·범위는 바꾸지 않는다.** `tuning_differential` fixture와 `RuntimeTrace`가
+그대로 통과해야 한다. `docs/architecture.md`와 `docs/placement.md`의 `catchArmedUntil`·"catch arm"
+표현도 같은 작업에서 고친다.

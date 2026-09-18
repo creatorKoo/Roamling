@@ -221,7 +221,7 @@ fn matches_the_swift_original_bit_for_bit() {
                     decision.escape_velocity.dy,
                     decision.look_direction_degrees.unwrap_or(NIL),
                     decision.attention_rate,
-                    decision.should_arm_catch() as u8 as f64,
+                    decision.is_fast_approach() as u8 as f64,
                 ]
             }
             // ------------------------------------------------------ behavior

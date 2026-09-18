@@ -6,7 +6,11 @@
 //! this type's clamping lives in its initialiser rather than at its callers.
 //!
 //! Every bound has one owner, and it is this file. A second table drifts: the
-//! panel once offered `catchArmDistance` up to 140 while the model accepted 360.
+//! panel once offered the approach distance up to 140 while the model accepted 360.
+//!
+//! Since 2026-09-18 the three pointer values are named for what they do -- the
+//! seated pet noticing a fast approach -- and no longer for the catch they once
+//! gated. The names they are *stored* under did not move; see `storage_name`.
 
 use crate::geometry::{clamped, swift_max};
 use crate::pointer::PointerInteractionConfiguration;
@@ -21,9 +25,9 @@ pub enum RuntimeTuningKey {
     IdleBeforeRest,
     PointerAwarenessDistance,
     EvadeSpeedScale,
-    CatchArmDistance,
-    CatchApproachSpeed,
-    CatchWindow,
+    ApproachDistance,
+    ApproachSpeed,
+    ApproachHold,
     HitRegionScale,
     GaitCadence,
 }
@@ -35,12 +39,41 @@ pub const TUNING_KEYS: [RuntimeTuningKey; 11] = [
     RuntimeTuningKey::IdleBeforeRest,
     RuntimeTuningKey::PointerAwarenessDistance,
     RuntimeTuningKey::EvadeSpeedScale,
-    RuntimeTuningKey::CatchArmDistance,
-    RuntimeTuningKey::CatchApproachSpeed,
-    RuntimeTuningKey::CatchWindow,
+    RuntimeTuningKey::ApproachDistance,
+    RuntimeTuningKey::ApproachSpeed,
+    RuntimeTuningKey::ApproachHold,
     RuntimeTuningKey::HitRegionScale,
     RuntimeTuningKey::GaitCadence,
 ];
+
+impl RuntimeTuningKey {
+    /// The name each value is persisted under, on both platforms: the key
+    /// inside macOS's `roamling.runtimeTuning` JSON blob and the suffix of
+    /// Windows' `roamling.runtimeTuning.<name>` line.
+    ///
+    /// Tabulated rather than derived from the variant, deliberately. Windows
+    /// used to build this from `{key:?}`, which meant the code name *was* the
+    /// stored name -- and renaming a variant would have silently reset every
+    /// value a user had tuned. Since 2026-09-18 the three pointer values are
+    /// named for the approach reaction they drive while their stored names
+    /// keep saying `catch`, so the two lists differ on purpose and a test pins
+    /// this one.
+    pub fn storage_name(self) -> &'static str {
+        match self {
+            RuntimeTuningKey::WalkingSpeed => "walkingSpeed",
+            RuntimeTuningKey::WanderPause => "wanderPause",
+            RuntimeTuningKey::CrossDisplayWanderChance => "crossDisplayWanderChance",
+            RuntimeTuningKey::IdleBeforeRest => "idleBeforeRest",
+            RuntimeTuningKey::PointerAwarenessDistance => "pointerAwarenessDistance",
+            RuntimeTuningKey::EvadeSpeedScale => "evadeSpeedScale",
+            RuntimeTuningKey::ApproachDistance => "catchArmDistance",
+            RuntimeTuningKey::ApproachSpeed => "catchApproachSpeed",
+            RuntimeTuningKey::ApproachHold => "catchWindow",
+            RuntimeTuningKey::HitRegionScale => "hitRegionScale",
+            RuntimeTuningKey::GaitCadence => "gaitCadence",
+        }
+    }
+}
 
 /// The default `idleBeforeRest`, which Swift reads from
 /// `RestConfiguration.standard`. Repeated here because Core owns that type and
@@ -54,9 +87,9 @@ pub struct RuntimeTuning {
     pub wander_pause: f64,
     pub cross_display_wander_chance: f64,
     pub pointer_awareness_distance: f64,
-    pub catch_arm_distance: f64,
-    pub catch_approach_speed: f64,
-    pub catch_window: f64,
+    pub approach_distance: f64,
+    pub approach_speed: f64,
+    pub approach_hold: f64,
     pub hit_region_scale: f64,
     pub gait_cadence: f64,
     pub evade_speed_scale: f64,
@@ -67,8 +100,8 @@ impl RuntimeTuning {
     /// What `new` will clamp a value to, given the rest of this tuning.
     ///
     /// Takes the pointer awareness rather than reading a field, because one
-    /// bound moves with it: arming a catch further away than the pet can notice
-    /// is meaningless, so `CatchArmDistance` ends where awareness does.
+    /// bound moves with it: reacting to an approach further away than the pet
+    /// can notice is meaningless, so `ApproachDistance` ends where awareness does.
     pub fn bounds(key: RuntimeTuningKey, pointer_awareness: f64) -> (f64, f64) {
         match key {
             RuntimeTuningKey::WalkingSpeed => (20.0, 320.0),
@@ -82,15 +115,15 @@ impl RuntimeTuning {
             RuntimeTuningKey::IdleBeforeRest => (15.0, 600.0),
             RuntimeTuningKey::PointerAwarenessDistance => (140.0, 360.0),
             RuntimeTuningKey::EvadeSpeedScale => (0.8, 3.0),
-            RuntimeTuningKey::CatchArmDistance => (40.0, pointer_awareness),
-            RuntimeTuningKey::CatchApproachSpeed => (150.0, 900.0),
-            RuntimeTuningKey::CatchWindow => (0.15, 1.2),
+            RuntimeTuningKey::ApproachDistance => (40.0, pointer_awareness),
+            RuntimeTuningKey::ApproachSpeed => (150.0, 900.0),
+            RuntimeTuningKey::ApproachHold => (0.15, 1.2),
             RuntimeTuningKey::HitRegionScale => (0.75, 1.3),
             RuntimeTuningKey::GaitCadence => (0.5, 3.2),
         }
     }
 
-    /// Clamps in the order Swift's initialiser does. `catch_arm_distance` reads
+    /// Clamps in the order Swift's initialiser does. `approach_distance` reads
     /// the *assigned* awareness, not the argument, so reordering these two
     /// changes the answer whenever awareness arrives out of range.
     #[allow(clippy::too_many_arguments)]
@@ -99,9 +132,9 @@ impl RuntimeTuning {
         wander_pause: f64,
         cross_display_wander_chance: f64,
         pointer_awareness_distance: f64,
-        catch_arm_distance: f64,
-        catch_approach_speed: f64,
-        catch_window: f64,
+        approach_distance: f64,
+        approach_speed: f64,
+        approach_hold: f64,
         hit_region_scale: f64,
         gait_cadence: f64,
         evade_speed_scale: f64,
@@ -125,17 +158,17 @@ impl RuntimeTuning {
                 0.0,
             ),
             pointer_awareness_distance,
-            catch_arm_distance: bound(
-                catch_arm_distance,
-                RuntimeTuningKey::CatchArmDistance,
+            approach_distance: bound(
+                approach_distance,
+                RuntimeTuningKey::ApproachDistance,
                 pointer_awareness_distance,
             ),
-            catch_approach_speed: bound(
-                catch_approach_speed,
-                RuntimeTuningKey::CatchApproachSpeed,
+            approach_speed: bound(
+                approach_speed,
+                RuntimeTuningKey::ApproachSpeed,
                 0.0,
             ),
-            catch_window: bound(catch_window, RuntimeTuningKey::CatchWindow, 0.0),
+            approach_hold: bound(approach_hold, RuntimeTuningKey::ApproachHold, 0.0),
             hit_region_scale: bound(hit_region_scale, RuntimeTuningKey::HitRegionScale, 0.0),
             gait_cadence: bound(gait_cadence, RuntimeTuningKey::GaitCadence, 0.0),
             evade_speed_scale: bound(evade_speed_scale, RuntimeTuningKey::EvadeSpeedScale, 0.0),
@@ -157,9 +190,9 @@ impl RuntimeTuning {
             RuntimeTuningKey::IdleBeforeRest => self.idle_before_rest,
             RuntimeTuningKey::PointerAwarenessDistance => self.pointer_awareness_distance,
             RuntimeTuningKey::EvadeSpeedScale => self.evade_speed_scale,
-            RuntimeTuningKey::CatchArmDistance => self.catch_arm_distance,
-            RuntimeTuningKey::CatchApproachSpeed => self.catch_approach_speed,
-            RuntimeTuningKey::CatchWindow => self.catch_window,
+            RuntimeTuningKey::ApproachDistance => self.approach_distance,
+            RuntimeTuningKey::ApproachSpeed => self.approach_speed,
+            RuntimeTuningKey::ApproachHold => self.approach_hold,
             RuntimeTuningKey::HitRegionScale => self.hit_region_scale,
             RuntimeTuningKey::GaitCadence => self.gait_cadence,
         }
@@ -168,7 +201,7 @@ impl RuntimeTuning {
     /// One value changed, and the whole thing re-clamped.
     ///
     /// It goes back through `new` rather than assigning the field, because the
-    /// bounds are not independent: raising the catch arm past the notice
+    /// bounds are not independent: raising the approach distance past the notice
     /// distance has to be caught, and only `new` knows that.
     #[must_use]
     pub fn with(&self, key: RuntimeTuningKey, value: f64) -> Self {
@@ -184,9 +217,9 @@ impl RuntimeTuning {
                 fields.pointer_awareness_distance = value
             }
             RuntimeTuningKey::EvadeSpeedScale => fields.evade_speed_scale = value,
-            RuntimeTuningKey::CatchArmDistance => fields.catch_arm_distance = value,
-            RuntimeTuningKey::CatchApproachSpeed => fields.catch_approach_speed = value,
-            RuntimeTuningKey::CatchWindow => fields.catch_window = value,
+            RuntimeTuningKey::ApproachDistance => fields.approach_distance = value,
+            RuntimeTuningKey::ApproachSpeed => fields.approach_speed = value,
+            RuntimeTuningKey::ApproachHold => fields.approach_hold = value,
             RuntimeTuningKey::HitRegionScale => fields.hit_region_scale = value,
             RuntimeTuningKey::GaitCadence => fields.gait_cadence = value,
         }
@@ -195,9 +228,9 @@ impl RuntimeTuning {
             fields.wander_pause,
             fields.cross_display_wander_chance,
             fields.pointer_awareness_distance,
-            fields.catch_arm_distance,
-            fields.catch_approach_speed,
-            fields.catch_window,
+            fields.approach_distance,
+            fields.approach_speed,
+            fields.approach_hold,
             fields.hit_region_scale,
             fields.gait_cadence,
             fields.evade_speed_scale,
@@ -229,11 +262,11 @@ impl RuntimeTuning {
             self.pointer_awareness_distance,
             self.pointer_awareness_distance * 100.0 / 170.0,
             self.pointer_awareness_distance * 50.0 / 170.0,
-            self.catch_arm_distance,
+            self.approach_distance,
             self.slow_evade_speed(),
             self.fast_evade_speed(),
-            self.catch_approach_speed,
-            swift_max(120.0, self.catch_approach_speed * 0.48),
+            self.approach_speed,
+            swift_max(120.0, self.approach_speed * 0.48),
         )
     }
 
@@ -276,6 +309,27 @@ mod tests {
     /// `get` and `with` have to name the same field for every key, or the panel
     /// silently edits a different slider than the one under the cursor. Eleven
     /// keys, eleven fields, and no compiler check that they line up.
+    /// The stored names are a contract with every settings file already on
+    /// disk and with the macOS blob, whose `Codable` keys these are.
+    #[test]
+    fn stored_names_are_the_ones_every_settings_file_already_uses() {
+        let expected = [
+            "walkingSpeed",
+            "wanderPause",
+            "crossDisplayWanderChance",
+            "idleBeforeRest",
+            "pointerAwarenessDistance",
+            "evadeSpeedScale",
+            "catchArmDistance",
+            "catchApproachSpeed",
+            "catchWindow",
+            "hitRegionScale",
+            "gaitCadence",
+        ];
+        let actual: Vec<&str> = TUNING_KEYS.iter().map(|key| key.storage_name()).collect();
+        assert_eq!(actual, expected);
+    }
+
     #[test]
     fn every_key_reads_back_what_it_wrote() {
         let tuning = RuntimeTuning::default();
@@ -299,17 +353,17 @@ mod tests {
         }
     }
 
-    /// The one bound that is not independent: arming a catch further away than
+    /// The one bound that is not independent: reacting to an approach further away than
     /// the pet can notice is meaningless, so lowering the notice distance has
-    /// to pull the catch arm down with it.
+    /// to pull the approach distance down with it.
     #[test]
-    fn narrowing_awareness_pulls_the_catch_arm_in() {
+    fn narrowing_awareness_pulls_the_approach_distance_in() {
         let wide = RuntimeTuning::default()
             .with(RuntimeTuningKey::PointerAwarenessDistance, 360.0)
-            .with(RuntimeTuningKey::CatchArmDistance, 300.0);
-        assert_eq!(wide.get(RuntimeTuningKey::CatchArmDistance), 300.0);
+            .with(RuntimeTuningKey::ApproachDistance, 300.0);
+        assert_eq!(wide.get(RuntimeTuningKey::ApproachDistance), 300.0);
 
         let narrow = wide.with(RuntimeTuningKey::PointerAwarenessDistance, 140.0);
-        assert_eq!(narrow.get(RuntimeTuningKey::CatchArmDistance), 140.0);
+        assert_eq!(narrow.get(RuntimeTuningKey::ApproachDistance), 140.0);
     }
 }

@@ -52,8 +52,8 @@ impl PointerInteractionConfiguration {
             awareness_distance,
             slow_evade_distance: swift_min(slow_evade_distance, awareness_distance),
             fast_evade_distance: swift_min(fast_evade_distance, slow_evade_distance),
-            // A fast approach should arm interaction before the pointer reaches
-            // the sprite. It may therefore be wider than the fast-evade radius.
+            // A fast approach should be noticed before the pointer reaches the
+            // sprite. It may therefore be wider than the fast-evade radius.
             catch_distance: clamped(catch_distance, 0.0, awareness_distance),
             slow_evade_speed: swift_max(0.0, slow_evade_speed),
             fast_evade_speed: swift_max(slow_evade_speed, fast_evade_speed),
@@ -97,7 +97,7 @@ pub struct PointerDecision {
 }
 
 impl PointerDecision {
-    pub fn should_arm_catch(&self) -> bool {
+    pub fn is_fast_approach(&self) -> bool {
         self.proximity == PointerProximity::Catchable
     }
 }
