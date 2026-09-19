@@ -89,9 +89,23 @@ pub struct ActivityDirector {
     heard_at: f64,
     active_reaction: Option<CompanionReaction>,
     arrival_reaction: Option<CompanionReaction>,
+    /// Off in the ported contract, which the Swift original is compared
+    /// against; on in the shipping runtime. See `keeping_pending_current`.
+    keeps_pending_current: bool,
 }
 
 impl ActivityDirector {
+    /// A waiting event is replaced by a later one from the same source, even
+    /// one that would not have woken the pet. The runtime holds events back
+    /// for the whole of getting up, and an agent does not stand still for
+    /// that long: asked for approval, answered, and working again inside the
+    /// stretch, it left the pet asking for an approval already given until
+    /// its next event, which can be minutes.
+    pub fn keeping_pending_current(mut self) -> Self {
+        self.keeps_pending_current = true;
+        self
+    }
+
     pub fn is_watching_window(&self) -> bool {
         self.active_source_id.is_some() && self.hint.is_some()
     }
@@ -222,6 +236,14 @@ impl ActivityDirector {
         }
         if is_resting {
             if !selected.kind.wakes_resting_pet() {
+                if self.keeps_pending_current
+                    && self
+                        .pending
+                        .as_ref()
+                        .is_some_and(|waiting| waiting.source_id == selected.source_id)
+                {
+                    self.pending = Some(selected);
+                }
                 return effects;
             }
             effects.push(ActivityEffect::CancelRest);

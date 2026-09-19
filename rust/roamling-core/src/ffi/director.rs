@@ -12,6 +12,7 @@ use crate::placement::PlacementDirector;
 use crate::placement::PlacementIntent;
 use crate::placement::PlacementPolicy;
 use crate::placement::PlacementTravelReason;
+use crate::placement::RestPhase;
 use crate::world::DesktopWorldSnapshot;
 use crate::world::DisplaySnapshot;
 use crate::world::FocusSnapshot;
@@ -70,7 +71,9 @@ pub struct FfiSituation {
 
 #[derive(uniffi::Record)]
 pub struct FfiPlacementIntent {
-    /// 0 none, 1 hold, 2 travel, 3 sleep in place, 4 stroll, 5 escape.
+    /// 0 none, 1 hold, 2 travel, 3 sleep in place, 4 stroll, 5 escape,
+    /// 6 rest at, 7 no rest spot. The last two are the shipping policy's and
+    /// the ported contract never returns them.
     pub kind: u8,
     pub x: f64,
     pub y: f64,
@@ -177,6 +180,9 @@ impl Placement {
             is_evading: situation.is_evading,
             is_walking: situation.is_walking,
             is_resting: situation.is_resting,
+            // The record is the ported contract's and stays as it is; the
+            // phase only matters to the shipping policy, which lives in Rust.
+            rest_phase: RestPhase::from_resting(situation.is_resting),
             activity_source_id: situation.activity_source_id,
             activity_hint: situation.hint.as_ref().map(|hint| {
                 LocationHint::new(hint.region.as_ref().map(WorldRect::from), hint.confidence)
@@ -211,6 +217,8 @@ impl Placement {
             PlacementIntent::SleepInPlace => (3, 0.0, 0.0, 0.0, 0, String::new()),
             PlacementIntent::Stroll(point) => (4, point.x, point.y, 0.0, 0, String::new()),
             PlacementIntent::Escape(point) => (5, point.x, point.y, 0.0, 0, String::new()),
+            PlacementIntent::RestAt(point) => (6, point.x, point.y, 0.0, 0, String::new()),
+            PlacementIntent::NoRestSpot => (7, 0.0, 0.0, 0.0, 0, String::new()),
         };
         FfiPlacementIntent {
             kind,

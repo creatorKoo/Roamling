@@ -271,8 +271,21 @@ fn wander_and_sleep_destinations_leave_shared_edges_clear() {
         let point = pet.random_wander_point().unwrap();
         assert!((point.x - 1000.0).abs() >= 168.0);
     }
-    pet.begin_rest_travel(WorldPoint::new(0.0, 0.0), false, 10.0);
-    assert!((pet.rest_destination.as_ref().unwrap().point.x - 1000.0).abs() >= 168.0);
+    // The sleep spot is the director's answer to a sit that has just ended.
+    let input = TickInput {
+        now: 10.0, pointer: WorldPoint::new(0.0, 0.0), primary_button_down: false,
+        user_idle_duration: 1000.0, capture_authorized: false, focus_authorized: false,
+        did_query_focus: false, queried_focus: None, pointer_is_over_pet: false,
+        affection_held: false,
+    };
+    let mut situation = pet.make_situation(10.0, &input, PointerProximity::Far, false, false);
+    situation.is_resting = true;
+    situation.rest_phase = RestPhase::Seeking;
+    let PlacementIntent::RestAt(bed) = pet.placement.decide(&situation) else {
+        panic!("a pet on a shared edge has to walk somewhere to sleep");
+    };
+    assert_eq!(pet.placement.rest_walk(), Some(bed));
+    assert!((bed.x - 1000.0).abs() >= 168.0);
     let world = placement_world(&pet.world);
     let seat = crate::interest::BasicInterestPositionPlanner::destination(
         &LocationHint::new(Some(WorldRect::new(650.0, 0.0, 350.0, 800.0)), 1.0),

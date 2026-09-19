@@ -116,6 +116,10 @@ pub mod timing {
     /// Roamling-only, the two lengths Petdex has no word for.
     pub const WAKE: f64 = 0.7;
     pub const STRETCH: f64 = 1.0;
+    /// What the shipping runtime stretches for. `STRETCH` stays the ported
+    /// number the Swift original is compared against; this one is matched to
+    /// the built-in `stretching` track, which holds the longest pose.
+    pub const FULL_STRETCH: f64 = 1.9;
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -147,6 +151,7 @@ pub struct BehaviorTransition {
 pub struct BehaviorController {
     state: BehaviorState,
     entered_at: f64,
+    stretch_duration: f64,
 }
 
 impl Default for BehaviorController {
@@ -157,7 +162,14 @@ impl Default for BehaviorController {
 
 impl BehaviorController {
     pub fn new(state: BehaviorState, entered_at: f64) -> Self {
-        Self { state, entered_at }
+        Self { state, entered_at, stretch_duration: timing::STRETCH }
+    }
+
+    /// The ported length unless a caller says otherwise, so the differential
+    /// fixtures keep comparing against what Swift does.
+    pub fn with_stretch_duration(mut self, duration: f64) -> Self {
+        self.stretch_duration = duration;
+        self
     }
 
     pub fn state(&self) -> BehaviorState {
@@ -290,7 +302,7 @@ impl BehaviorController {
         let next = match self.state {
             BehaviorState::Dropped if age >= timing::DROPPED => BehaviorState::Idle,
             BehaviorState::Wake if age >= timing::WAKE => BehaviorState::Stretch,
-            BehaviorState::Stretch if age >= timing::STRETCH => BehaviorState::Idle,
+            BehaviorState::Stretch if age >= self.stretch_duration => BehaviorState::Idle,
             BehaviorState::Celebrate if age >= timing::CELEBRATE => BehaviorState::Idle,
             BehaviorState::Sad if age >= timing::SAD => BehaviorState::Idle,
             BehaviorState::Spark if age >= timing::SPARK => BehaviorState::Idle,

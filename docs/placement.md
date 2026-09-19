@@ -242,8 +242,9 @@ flowchart LR
 | 5 | 자리 emptiness < `abandonEmptiness` **그리고** 체류 시간 경과 | `.travel(reason: .coveringWork)` — 커서 응시에 양보하지 않는다 |
 | 6 | 캡처 없이 정한 자리 + 캡처 도착 | `.travel(reason: .plannedBlind)` |
 | 7 | 보는 창이 바뀜 | `.travel(reason: .followedFocus)` |
-| 8 | 활동 중 + 자리 유지 가능 + user idle 경과 | `.sleepInPlace` |
+| 8 | 활동 중 + 자리 유지 가능 + user idle 경과 + **몸체가 내용과 안 겹침 + 공유 경계 여유 밖** | `.sleepInPlace` — 허가가 아니라 지시다. 휴식 층은 다른 곳을 찾지 않는다 (3.5) |
 | 9 | 활동 중 + 자리 유지 가능 | `.hold` |
+| 9' | 활동 없음 + 쉬는 중 | 휴식 단계에 따라 `.hold`(앉는 중) · `.sleepInPlace` · `.restAt(점)` · `.noRestSpot` — 잠자리는 여기서 정한다 (3.5) |
 | 10 | 활동 없음 + 배회 시각 도래 | `.stroll(to:)` — 무작위 6개 + 디스플레이 격자 35개를 **여유 반경**으로 고른다(3.2.3). 커서를 가로지르는 길은 뺀다(3.2.4). 아무것도 깨끗하지 않고 지금 자리가 깨끗하면 `.hold`. 응시가 7초를 넘겼으면 `.escape`로 나간다(3.2.5) |
 | 10' | 활동 없음 + 지금 자리가 덮임 | `.escape(to:)` — 후보와 선택은 같고, 커서에게 양보하지 않는다 |
 | 11 | 그 외 | `.hold` |
@@ -529,6 +530,270 @@ pet 로딩·카탈로그, 애니메이션, 오버레이, 메뉴, 튜닝 창, 훅
 `MovementController` · `BehaviorController` · `PointerInteractionModel`도 그대로 둔다 —
 이미 순수하고 이번 결함들과 무관하다. catch/drag/evade 경로의 동작도 바꾸지 않는다.
 `PlacementDirector`는 그 경로들이 활성일 때 `.none`을 돌려주고 비켜선다.
+
+### 3.5 휴식과 자리를 한 층으로 (2026-09-19)
+
+`docs/requests.md` R20 · B6 · B7. **코드에 들어갔다** — 지금의 동작은 3.2의 8 · 9'번과
+`docs/behavior-flow.md` §3.1이 적고 있고, 이 절은 왜 그렇게 됐는지의 기록이다. 3.5.1 · 3.5.2는 고치기
+**전**의 구조와 결함이고, 3.5.3 · 3.5.4가 지금 구조다. 남은 것은 3.5.5의 녹화 갱신 하나다.
+
+#### 3.5.1 고치기 전 — "어디"에 답하는 곳이 둘이었다
+
+3.1은 결정을 한 곳으로 모았다고 적었지만 **잠자리는 거기 들어오지 않았다.**
+
+| 질문 | 자리 층 | 휴식 층 |
+|---|---|---|
+| 언제 | 재평가 0.5초 · 체류 2.5초 (`PlacementConfiguration::default`) | idle 75초 · sit 2.4초 · 입력 0.8초/커서로 기상 (`rest.rs` `update_rest_lifecycle`, `pet_runtime.rs` `SITTING_DURATION`) |
+| 어디 | agent 창 주변 좌석 (`PlacementDirector::destination` → `interest.rs` `clear_destination`) | 화면 모서리 + 7×5 격자 (`rest.rs` `begin_rest_travel` → `safe_zone.rs` `clear_destination`) |
+| 지금 자리가 나빠졌나 | 몸체 emptiness < 0.55, 또는 여유가 24pt 이상 나은 좌석이 있음 (`departure_reason`) | 몸체가 내용 셀과 겹침 (`rest.rs` `rest_spot_is_busy` → `defer_rest`) |
+
+두 층이 서로에 대해 아는 것은 두 가지뿐이다.
+
+- director → 휴식: `SleepInPlace`. 휴식 층은 이것을 **허가**로만 읽는다 — `update_rest_lifecycle`의
+  `may_nap_on_seat`는 "쉬기 시작해도 된다"이지 "여기서 자라"가 아니다. 캡처가 있으면
+  `begin_rest_travel`은 제자리 지름길을 건너뛰고(`self.luminance.is_none()` 조건) 잠자리를 따로 고른다.
+- 휴식 → director: `PetSituation::is_resting`. 읽는 곳은 `stroll_verdict` 하나다. **agent 좌석
+  경로(`verdict`)는 이 값을 보지 않는다.**
+
+#### 3.5.2 그래서 나는 결함
+
+- **B6 핑퐁.** 휴식 층이 낸 걸음은 `self.travel`에 없으므로 director는 목적지가 아니라 걷는 도중의
+  위치를 채점하고(`verdict`의 `judged`), 24pt 벗어나면 `CoveringWork`로 되돌린다. 이동 의도는 휴식을
+  무조건 취소한다(`finish_tick`의 `intent.travel_reason().is_some() && is_resting`). 6초 주기, 멈출 조건
+  없음. 로그와 원인 사슬은 `docs/requests.md` B6.
+- **같은 뿌리의 느린 판 (코드로만 확인, 로그에서는 못 봤다).** "자도 되는 자리"의 기준이 둘이라
+  director는 유지 가능(몸체 평균 ≥ 0.55)이라 하고 휴식 층은 busy(내용 셀 하나와 겹침)라 하는 자리가
+  있을 수 있다. 그러면 `SleepInPlace` → sit → `enter_sleep`이 busy로 `defer_rest` → 30초 뒤 다시,
+  를 자리가 바뀔 때까지 되풀이한다.
+- **B7.** director가 더한 격자 후보(`sweep`)는 런타임의 "선 자리는 목적지가 아니다" 거름
+  (`roaming.rs` `stroll_candidates`)을 지나지 않는다. 규칙이 director 밖에 있어서 director가 새로
+  만든 후보에는 닿지 않았다 — 2.2 "규칙이 두 벌"과 같은 모양이다.
+
+#### 3.5.3 지금 구조 — 휴식은 "언제", director는 "어디"
+
+```text
+휴식 층 (rest.rs)                      director (placement.rs)
+  idle 75초 · 커서 멀리 · 이동 중 아님      PetSituation.is_resting + 휴식 단계를 받는다
+  sit 2.4초                               ├ 여기서 자라        SleepInPlace
+  sit이 끝나면 director의 답을 따른다  ◀── ├ 저기 가서 자라     RestAt(point)      ← 새로
+  입력 0.8초 · 커서 접근으로 기상          ├ 잘 곳이 없다       NoRestSpot         ← 새로
+  wake 0.7초 → stretch 1.0초              └ 자리가 나빠졌다    Travel(reason)     (지금 그대로)
+```
+
+- 휴식 층에 남는 것: 진입 조건, sit·wake·stretch의 시간, 기상 조건, `rest_retry_at`(30초 재시도).
+  **좌표를 고르는 코드는 남지 않는다.**
+- director로 가는 것: `begin_rest_travel`의 목적지 선택, `enter_sleep`과 `Sleep` 상태의 busy 재검사.
+  후보를 만드는 `BasicSafeZonePlanner::clear_destination`은 그대로 두고 부르는 곳만 옮긴다.
+- 휴식 걸음도 director의 이동이 되므로 **목적지를 채점한다.** 핑퐁이 성립하지 않는다.
+- 새 규칙은 전부 `keeps_clear()`(`PlacementPolicy::ClearOfContent`) 안에 둔다. `PortedContract`
+  director와 FFI 레코드(`ffi/director.rs`)는 그대로다 — 새 입력은 FFI 변환에서 기본값을 받는다.
+
+**agent를 지켜보는 동안의 규칙 (사용자 결정 2026-09-19: 자리에서 잔다).**
+
+| 자리의 상태 | director의 답 | 펫 |
+|---|---|---|
+| 유지 가능 · 몸체가 내용과 안 겹침 · 공유 경계 여유 밖 · user idle | `SleepInPlace` | **그 자리에서 잔다.** 더 빈 곳이 멀리 있어도 가지 않는다 |
+| 유지 가능하지만 몸체 밑에 내용 셀이 있음 | 더 나은 좌석이 창 주변에 있으면 `Travel(coveringWork)`(지금의 `departure_reason` 끝 분기), 없으면 `Hold` | 옮겨 앉아 거기서 자거나, **깨어서 자리를 지킨다** (열린 결정 ①) |
+| 캐럿을 덮음 · emptiness 미달 · 창이 바뀜 | `Travel(reason)` — 지금 그대로 | 깨어서 옮기고, 도착한 자리가 첫 줄이면 다시 잔다 |
+| 자는 중에 답이 `SleepInPlace`에서 `Hold`로 바뀜 | — | 깬다, 30초 뒤 재시도 (지금의 `defer_rest`와 같다) |
+
+**agent가 없을 때의 규칙 — 동작은 지금과 같고 주인만 바뀐다.** 후보(모서리 + 7×5 격자), 24pt 개선
+기준, 0.75배속 걸음, 도착·수면 중 재검사, 전부 덮였을 때의 30초 보류 — `docs/behavior-flow.md` §3.1의
+표 그대로다.
+
+#### 3.5.4 구현 명세 — 한 번에 한다 (사용자 결정 2026-09-19: "1,2 단계 합칠 수도 있을 것 같은데")
+
+처음에는 agent 곁(결함을 닫음)과 agent 없음(구조를 끝냄)을 두 단계로 나눴다. 나눈 이유는
+`RuntimeTrace.txt`를 한쪽에서만 건드리기 위해서였는데, 3.6의 기지개가 어차피 같은 녹화를 바꾸므로
+나눌 이유가 없어졌다. **녹화는 한 번만 갱신한다.**
+
+**타입.**
+
+- `PetSituation`에 휴식 단계를 더한다 — `RestPhase { Awake, Settling, Seeking, Walking, Asleep }`.
+  `is_resting`은 `PortedContract`가 읽으므로 그대로 둔다. `make_situation`이 `decide` **앞에서** 채운다:
+  `Sit`이고 `SITTING_DURATION`이 안 지났으면 `Settling`, 지났으면 `Seeking`; `FindSleepSpot`이고 경로가
+  남았으면 `Walking`, 경로가 없으면 `Seeking`(도착했다); `Sleep`은 `Asleep`. 그래야 sit이 끝나는 바로
+  그 tick에 답이 적용돼 지금과 시간이 같다.
+- `PlacementIntent`에 `RestAt(point)`와 `NoRestSpot`을 더한다. **`travel_reason()`은 둘 다 `None`이다** —
+  `finish_tick`의 "이동 의도는 휴식을 깨운다" 분기에 걸리면 안 된다. FFI 의도 코드
+  (`ffi/director.rs`, 지금 0~5)에 6·7을 더하되 `PortedContract`는 내지 않는다. FFI의 `PetSituation`
+  레코드는 바꾸지 않고 변환에서 `is_resting`으로 `RestPhase`의 기본값을 만든다.
+
+**director (`placement.rs`, 전부 `keeps_clear()` 안).**
+
+- agent 경로 `verdict`의 Priority 7 — `SleepInPlace`의 조건에 둘을 더한다: 몸체가 내용과 안 겹침
+  (`ClearanceMap::distance(position) >= 0`, 잴 수 없으면 통과 — 지금 `rest_spot_is_busy`의 기준 그대로),
+  공유 경계 여유 밖(지금 `begin_rest_travel`의 `away_from_seam`과 같은 식·같은 수). 못 채우면 `Hold`.
+  더 나은 좌석으로 옮기는 것은 기존 `departure_reason`이 한다.
+- agent 없는 경로 `stroll_verdict` — `is_resting`이면 `Hold`를 돌려주던 자리에서 단계로 가른다.
+  `Settling`은 `Hold`. `Seeking`은 지금 `begin_rest_travel`이 하던 선택을 **같은 순서로**: 후보는
+  `BasicSafeZonePlanner::clear_destination`(같은 인자 — `placement_world` + safe zones + focus +
+  luminance), 선 자리가 비었고 24pt 이상 나은 후보가 없으면 `SleepInPlace`, 후보가 없으면 `NoRestSpot`,
+  배회가 꺼져 있으면 제자리(busy면 `NoRestSpot`), 그 외 `RestAt(point)`. 고른 점은 director가 기억하고
+  (`rest_walk`) `Walking` 동안 같은 `RestAt`을 되풀이한다 — **걷는 동안 다시 고르지 않는다**, 지금도
+  그렇다. `rest_walk`가 있는 채로 `Seeking`이 오면 도착이다: 선 자리가 busy면 `NoRestSpot`, 아니면
+  `SleepInPlace`. `Asleep`은 선 자리의 busy 검사만 — busy면 `NoRestSpot`. `Awake`가 되면 `rest_walk`를 지운다.
+- busy 검사의 캐시(`rest_content_check`)와 리팩터 2(`ac685ec`)의 무효화 조건을 같이 옮긴다. 맥은 매
+  tick 필드를 넘기므로 캐시 없이 옮기면 그때 잰 70배가 돌아온다(`docs/maintenance-review.md`).
+- `comfortable` — 선 자리에서 `minimum_travel_distance` 안쪽인 후보는 버린다(무작위·격자 모두, B7).
+  런타임의 기존 거름(`roaming.rs` `stroll_candidates`)은 난수 순서 때문에 그대로 둔다.
+
+**휴식 층 (`rest.rs`).** `update_rest_lifecycle`이 `may_nap_on_seat: bool` 대신 의도를 받는다.
+
+- 진입 조건은 그대로다 — agent를 지켜보는 중이면 `SleepInPlace`일 때만 쉬기 시작한다.
+- sit이 끝난 tick: `SleepInPlace` → 그 자리에서 잔다. `RestAt(p)` → `SeekSleepSpot`, 0.75배속 경로.
+  `NoRestSpot` → `defer_rest`. 그 밖(`None` — 포인터가 소유 중 등)은 sit을 이어 가고 다음 tick에 다시 묻는다.
+- 경로가 끝난 **그 tick에** `PlacementDirector::rest_arrival`을 불러 선 자리를 재고 눕는다. 도착은
+  `decide` 뒤(경로 갱신)에 일어나므로 다음 tick의 `decide`를 기다리면 눕는 것이 한 tick 늦어지고, 녹화의
+  58.1초가 흔들린다. 갈 경로가 없을 때(이미 그 자리)도 같은 호출이다.
+- 자는 중: `NoRestSpot`, 또는 agent 곁에서 `Hold`로 바뀌면 → `defer_rest`.
+- `begin_rest_travel` · `rest_spot_is_busy` · `PetRuntime`의 `rest_destination` · `rest_content_check`는
+  없어진다. `enter_sleep`은 검사 없는 전이만 남는다.
+- 진단 `rest` 줄의 문구와 시점은 그대로 둔다(`sleeping in place, on a vetted seat`,
+  `tucking into a safe zone, spot unvetted`, `no clear sleep spot, staying awake`). 녹화가 그 줄을 담고 있다.
+- `describe`(`names.rs`)에 `rest at x,y`와 `no rest spot`을 더한다.
+
+**회귀 테스트 — 실물 모양의 입력으로, 고치기 전 코드에서 실패하는 것을 먼저 확인한다.**
+
+- B6: 캡처가 있고, agent 좌석은 유지 가능하고, 화면 다른 곳에 24pt 이상 더 빈 곳이 있다. 사용자 idle.
+  기대: `sit → sleep`이 그 자리에서, 이후 60초 동안 `findSleepSpot`도 `travelToInterest`도 없다.
+- 느린 핑퐁: agent 좌석의 몸체 평균은 0.55 이상인데 내용 셀 하나와 겹친다. 기대: 더 나은 좌석이
+  있으면 한 번 옮겨 거기서 자고, 없으면 `sit`에 들어가지 않고 깨어 있다.
+- B7: 격자점 위에 선 펫. 기대: 산책 의도의 목적지가 선 자리가 아니다.
+- R10의 `clearance_tests.rs`는 같은 기대를 director를 거쳐 그대로 만족해야 한다 — 기대를 고치지 않는다.
+
+#### 3.5.5 게이트
+
+- differential fixture 10개 — 무변경이어야 한다. 새 규칙이 `ClearOfContent`에만 있는 이유다.
+- `RuntimeTrace.txt` — **바뀐다. 어디가 바뀌어야 하는지 미리 적어 둔다** (사용자 승인 2026-09-19).
+  ① 휴식 구간의 `place` 줄 — 지금은 47.5초의 `place hold`가 67.0초까지 이어지지만, 52.9초에
+  `place rest at …`, 58.1초에 `place sleep in place`, 64.5초에 `place hold`가 생긴다. 그 구간의
+  좌표·`pet`·`rest` 줄과 프레임은 그대로여야 한다. ② 3.6의 기지개 — 64.5초 `wake` 뒤 `stretch → idle`이 66.2초에서 0.9초
+  늦어지고, 그 뒤의 첫 산책(67.0초)도 같이 밀린다. 난수 순서가 tick 수에 묶여 있으면 그 뒤가 전부
+  달라질 수 있다. **이 둘로 설명되지 않는 차이가 있으면 갱신하지 않고 원인을 찾는다.**
+- 갱신 절차는 0.6.5의 선례(`docs/runtime-trace-review-0.6.5.md`) — Windows에서는 녹화를 못 만든다
+  (Swift 하네스가 만든다). `.github/workflows/record-runtime-trace.yml`이 제안 녹화를 산출하면 차이를
+  사용자에게 보여 주고, 승인 뒤에 기준을 바꾼다. 통과시키려고 다시 만들지 않는다.
+
+#### 3.5.6 같은 로그에서 본 것 — 결함이 아닌 것과 아직 모르는 것
+
+- **승인 대기는 자는 펫을 깨운다. 설계다.** `CompanionEventKind::wakes_resting_pet`
+  (`activity.rs`)이 `AttentionRequired` · `Achievement` · `Negative` · `Setback`만 깨우게 한다 —
+  도구 호출마다 깨면 한 박자도 못 자기 때문이고, 주석이 그 이유를 적고 있다. 로그 33282~33575초에서
+  Codex가 승인 대기와 작업을 오갈 때마다 `wake → waitingForUser → work → sit → sleep`이 20초 안팎으로
+  열 번쯤 돈 것이 이것이다. 사용자가 자리에 없을 때(idle 75초 이상)도 깨울지는 열린 결정 ③.
+- **이유가 안 보이는 기상 (미확정).** 같은 구간에서 반응 없이 `wake → stretch → idle → sit → sleep`만
+  도는 곳이 있다(예: 33351.0, 33369.0, 33402.5초 — `work`로 돌아가 앉은 지 0.1~2초 뒤. 33323.0초는
+  잠든 지 18초 뒤다). 입력이었다면
+  `rest`가 `waiting for user idle`을 찍었을 텐데 `clear to rest`다. 어떤 이벤트가 `CancelRest`를 내고
+  반응은 버려진 것으로 보이지만 로그만으로는 확정하지 못했다. R20과 섞지 않고 따로 본다.
+
+#### 3.5.7 정해진 것 (사용자 2026-09-19: "너가 제안한거 다 승인할꺼긴한데")
+
+1. 자리는 유지 가능한데 몸체 밑에 내용이 조금 있고 더 나은 좌석도 없을 때 — **깨어서 지킨다.**
+   "글자 위에서 자지 않는다"는 R10의 요청이고, 깨어 있는 펫은 이미 그 자리에 앉아 있던 펫이라 더
+   성가셔지지 않는다.
+2. `RuntimeTrace.txt`의 `place` 진단 줄이 바뀌는 것 — **차이를 검토하고 갱신한다.** 오늘의 진단이
+   `place` 줄 덕에 됐다. 휴식 걸음이 거기 안 찍혔기 때문에 "누가 걸음을 냈는가"를 코드에서 거꾸로
+   찾아야 했다.
+3. 사용자가 자리에 없을 때의 승인 대기 — **지금대로 깨운다.** 돌아온 사용자가 처음 보는 것이 "기다리는
+   중"이어야 agent가 멈춰 있다는 것을 안다. 깨어난 뒤의 모양은 3.6이 바꾼다.
+
+### 3.6 기지개는 끝까지 (2026-09-19)
+
+`docs/requests.md` R21. 자리 결정은 아니지만 3.5와 같은 작업이고 같은 녹화를 바꾸므로 여기 둔다.
+**코드에 들어갔다** — 지금의 동작은 `docs/behavior-flow.md` §3과 타이머 표, `docs/art/mochi-sheet.md`의
+`stretching` 길이가 적고 있다. 3.6.1은 고치기 전이다.
+
+#### 3.6.1 고치기 전 — 기지개는 누구든 끊었다
+
+- 길이는 고정이다: `wake` 0.7초 + `stretch` 1.0초 (`behavior.rs` `timing::WAKE` · `STRETCH`,
+  "Roamling's own numbers" — Petdex에 없는 말이라 우리가 정한다). 그림은 확장 `stretching` 8칸 ×
+  0.212초 = 1.7초로 그 합에 맞춰져 있고, 두 상태가 한 capability라 한 번에 이어 재생된다
+  (`roamling-pet/src/lib.rs`의 `stretching` 트랙과 그 위 주석, Swift 쪽은 `MascotPetFactory.swift`).
+- **끊는 것 넷.** `BehaviorController::handle`은 잡힌 상태만 아니면 어느 상태에서든 전이를 받는다.
+  1. 반응 — `BehaviorInput::Reaction`. 로그 2307.2초 `wake` → 2307.3초 `waitingForUser`. 깨운 이벤트는
+     `pending`에 들어가 `Idle`을 기다리지만(`resume_pending_if_ready`), `wake`는 `is_resting`이 아니므로
+     그사이 도착한 다음 이벤트는 곧바로 dispatch된다(`handle_event`).
+  2. 커서 — `update_rest_lifecycle`이 커서 접근으로 휴식을 취소해 `Wake`로 보내고 `false`를 돌려주면,
+     같은 tick의 커서 분기가 `BehaviorInput::Pointer`를 넣어 `LookAtPointer`나 `EvadePointer`로 덮는다
+     (`handle_pointer`도 쉬는 펫을 `Wake`로 보낸 같은 호출에서 그렇게 한다). 코드로 확인했고 로그로는
+     못 봤다 — 자리를 비운 사이의 로그라 커서가 없었다.
+  3. 자리 이동 — `apply_intent`의 `BeginInterestTravel`. 로그 37438.3초 `wake` → 37438.5초 `travelToInterest`.
+  4. 잡기 — `CatchBegan`. **이것만 남긴다.**
+
+#### 3.6.2 규칙
+
+**`Wake`와 `Stretch` 동안 펫을 가져갈 수 있는 것은 잡기뿐이다.** 나머지는 기지개가 끝나 `Idle`이 된
+다음에 일어난다 — 버리지 않고 미룬다.
+
+- 자는 펫을 깨우는 자리 이동(`finish_tick`의 `travel_reason().is_some() && is_resting` 분기)은 **깨우기만
+  한다.** 예전에는 같은 tick에 걸음까지 시작해 `wake`가 0.2초 만에 `travelToInterest`로 덮였다. director는
+  받아들여질 때까지 같은 이동을 되풀이하므로 걸음은 기지개 뒤에 시작된다.
+- `finish_tick`의 else-if 사슬에서 `update_rest_lifecycle` **바로 다음**에 "일어나는 중" 분기를 둔다.
+  경로를 비우고 `update_route`만 한다 — 의도도 커서도 적용하지 않는다. 그 자리여야 하는 이유: 휴식
+  취소가 `update_rest_lifecycle` 안에서 일어나고 `false`를 돌려주므로, 그 tick의 나머지 분기(커서·의도)
+  가 같은 tick에 `Wake`를 덮는다. 앞쪽의 `approach_held` 분기는 애정 키(`is_adored`)로도 열리므로
+  **쉬는 중에도 일어나는 중에도** 닫는다 — 그 분기는 커서를 상태 기계에 바로 넣고, `Sleep`에서 그것은 한
+  호출 안의 `Wake → LookAtPointer`다. 첫 구현은 일어나는 중만 닫았고 독립 검토가 이 구멍을 재현했다
+  (애정 키 + 50pt까지의 빠른 접근).
+- `ActivityDirector`에 넘기는 `is_resting`은 전부 "쉬는 중이거나 일어나는 중"으로 넘긴다
+  (`handle_event` · `declare_state` · `expire_states` · `expire_silent` · `resume_pending_if_ready`).
+  깨우는 이벤트는 `pending`으로 가서 `Idle`에 나온다. `CancelRest`가 한 번 더 나와도
+  `cancel_rest_for_activity`가 쉬는 중이 아니면 아무것도 안 한다.
+- **일상 진행은 그대로 두면 사라진다 — 이 문서의 첫 판이 여기서 틀렸다.** "버려지되 `recent`에 남아
+  `sustain_on_seat`가 다시 입힌다"고 적었지만 `sustain_on_seat`는 `recent`가 아니라 `active_reaction`을
+  입힌다. 승인 대기로 깬 펫이 기지개를 켜는 사이 agent가 승인을 받고 다시 일하면, `pending`에 남은 옛
+  승인 대기가 `Idle`에 나와 **다음 이벤트가 올 때까지 기다리는 포즈로 서 있었다**(독립 검토가 재현).
+  그래서 `pending`은 같은 source의 더 새 이벤트로 바뀐다 — 깨우지 않는 종류여도
+  (`ActivityDirector::keeping_pending_current`). 포팅 대조군과 비교되는 기본값에서는 꺼져 있고 런타임이 켠다.
+  기지개 중에 끝난 턴의 축하가 곧바로 다음 턴의 시작으로 덮일 수 있는데, 그것은 막지 않던 때에도 같았다.
+  **`deliver_arrival_reaction`은 일어나는 중에 부르지 않는다** — 입히지 못해도 빚을 지워 버린다.
+  위 분기가 `hold_seat`에 닿지 않게 하므로 따로 막을 것은 없고, 테스트로 고정한다.
+- `BehaviorController`의 전이 규칙은 고치지 않는다. 포팅 대조군(`mechanics_differential.rs`)이 같은
+  표를 보고 있고, 규칙을 거는 자리는 런타임으로 충분하다.
+
+#### 3.6.3 길이 — 1.7초에서 2.6초로
+
+사용자: "좀 길게 기지개 펴도 될 것 같아서". 칸을 새로 그리지 않고 **가장 늘어난 자세에서 머문다.**
+기지개를 푸는 순간이 f4→f5이므로(`docs/history/mochi-v3-plan.md` "`stretching`") 정점은 f3·f4다.
+
+| 칸 | f0 | f1 | f2 | f3 | f4 | f5 | f6 | f7 | 합 |
+|---|---|---|---|---|---|---|---|---|---|
+| 지금 | 0.212 | 0.212 | 0.212 | 0.212 | 0.212 | 0.212 | 0.212 | 0.212 | 1.70 |
+| 제안 | 0.212 | 0.212 | 0.212 | **0.500** | **0.700** | 0.300 | 0.232 | 0.232 | 2.60 |
+
+- `wake`는 0.7초 그대로, `stretch`가 1.0 → 1.9초. 합이 트랙 길이와 같아야 한다 — 길면 마지막 칸에서
+  멈춰 서고, 짧으면 기지개가 잘린다. **합이 같다는 것을 테스트로 고정한다.**
+- 포팅된 `timing::STRETCH`는 그대로 두고 `BehaviorController`가 길이를 값으로 갖게 한다(기본 1.0,
+  `PetRuntime`이 1.9로 만든다). `PlacementPolicy`와 같은 이유다 — 대조군은 옛 값으로 비교된다.
+- 고친 곳 넷: `behavior.rs`(`timing::FULL_STRETCH`, `with_stretch_duration`) · `pet_runtime.rs`
+  (`WAKE_WANDER_DELAY` 2.5 → 3.4 — 두 길이의 합 + 0.8초로 적어 기지개 뒤의 숨이 그대로다) ·
+  `roamling-pet/src/lib.rs` `stretching_frames` · `MascotPetFactory.swift`(같은 여덟 값).
+  디스크에서 읽는 펫 패키지는 자기 `roamling.json`의 시간을 쓰므로 트랙이 먼저 끝나 마지막 칸에 머문다 —
+  깨지지 않는다.
+- `WAKE_WANDER_DELAY`는 잠자리가 없어 휴식을 미룰 때(`defer_rest`)에도 쓰이므로, 그때의 다음 산책도
+  0.9초 늦어진다.
+- 내장 트랙은 이제 shipped `mochi-v3` 패키지의 매니페스트(1.70초)와 **일부러 다르다.** 매니페스트는
+  `fps` 하나라 칸마다 다른 길이를 적을 수 없다. `PetLogicTests.swift`의 길이 고정 표가 그 차이를 주석과
+  함께 2.60으로 적는다. 패키지 쪽을 맞추려면 `idle`처럼 칸을 반복해 적어야 한다 — 하지 않았다.
+- **숫자는 보고 정한다.** 위 표는 첫 판이다.
+
+#### 3.6.4 회귀 테스트
+
+- 자는 펫 + `AttentionRequired`, **이어서 0.1초 뒤 같은 agent의 다음 이벤트**(실물은 늘 그렇게 온다).
+  기대: `wake` 0.7 → `stretch` 1.9 → `idle` → `waitingForUser`. 고치기 전 코드에서 기지개가 잘리는
+  것을 먼저 확인한다.
+- 자는 펫 + 커서 접근. 기대: 기지개가 끝난 뒤에 `lookAtPointer`.
+- 자는 펫 + director의 `Travel`(캐럿을 덮음). 기대: 기지개가 끝난 뒤에 출발.
+- 기지개 중 잡기. 기대: 바로 `caught`.
+- 기지개 중에 온 `Achievement`는 버려지지 않고 `idle` 뒤에 `celebrate`로 나온다.
+- 승인 대기로 깬 뒤 기지개 중에 같은 agent가 다시 일한다. 기대: `idle` 뒤에 `work`, 기다리는 포즈가 아니다.
+- 애정 키를 누른 채 멀리서 50pt까지 한 tick에 다가온다. 기대: 그래도 `wake → stretch`.
+
+테스트는 `pet_runtime/rest_tests.rs`. **전부 고치기 전 코드에서 실패하는 것을 확인했다** — 처음 열은
+저장소 밖 worktree의 `96b73c6`에 테스트만 옮겨서(잠자리 넷 · 기지개 다섯 · 트랙 길이 하나), 뒤의 둘은
+첫 구현 위에서.
 
 ## 4. 진단 방법
 

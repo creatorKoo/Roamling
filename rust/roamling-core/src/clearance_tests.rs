@@ -105,6 +105,7 @@ fn situation(world: DesktopWorldSnapshot, position: WorldPoint) -> PetSituation 
         is_evading: false,
         is_walking: false,
         is_resting: false,
+        rest_phase: RestPhase::Awake,
         activity_source_id: None,
         activity_hint: None,
         user_idle_duration: 0.0,
@@ -266,4 +267,106 @@ fn new_content_at_arrival_and_under_a_sleeping_pet_is_rechecked() {
         walking.begin_tick(now);
         assert_ne!(walking.finish_tick(&input(now)).state, BehaviorState::Sleep);
     }
+}
+
+#[test]
+fn rest_b6_agent_sleeps_on_its_seat_for_sixty_seconds() {
+    let world = world(Some(field(|col, _| col < 20)));
+    let mut pet = pet(&world, WorldPoint::new(712.0, 620.0));
+    pet.handle_activity_event(CompanionEvent::new(
+        "work", "codex:turn", 100.0, CompanionEventKind::HighIntensity, 1.0,
+        Some(LocationHint::new(Some(WorldRect::new(0.0, 100.0, 650.0, 500.0)), 1.0)),
+    ), 100.0);
+    let mut seated = None;
+    let mut slept = false;
+    for i in 0..2100 {
+        let now = 100.0 + i as f64 / 30.0;
+        pet.begin_tick(now);
+        let out = pet.finish_tick(&input(now));
+        if out.state == BehaviorState::Sit && seated.is_none() {
+            let position = pet.position();
+            let map = ClearanceMap::new(world.luminance.as_ref().unwrap());
+            assert!(map.distance(position, SIZE).unwrap() >= 0.0);
+            assert!(map.improves(position, WorldPoint::new(1152.0, 704.0), SIZE));
+            seated = Some(position);
+        }
+        if let Some(position) = seated {
+            assert!(!matches!(out.state, BehaviorState::FindSleepSpot | BehaviorState::TravelToInterest),
+                "agent seat must not ping-pong: {:?} at {now}", out.state);
+            assert_eq!(pet.position(), position);
+            slept |= out.state == BehaviorState::Sleep;
+        }
+    }
+    assert!(seated.is_some() && slept);
+    assert_eq!(pet.state(), BehaviorState::Sleep);
+}
+
+#[test]
+fn rest_b7_stroll_does_not_choose_the_grid_point_under_its_feet() {
+    let world = world(Some(field(|col, _| col < 20)));
+    // The clearest point of the director's bottom-first 7 x 5 sweep.
+    let point = WorldPoint::new(66.0 + 1148.0 * 6.5 / 7.0, 64.0 + 672.0 * 0.9);
+    for random in [vec![WorldPoint::new(600.0, 400.0)], vec![point]] {
+        let mut scene = situation(world.clone(), point);
+        scene.stroll_candidates = random;
+        let mut director = PlacementDirector::new(PlacementPolicy::ClearOfContent, PlacementConfiguration::default());
+        let PlacementIntent::Stroll(destination) = director.decide(&scene) else { panic!("expected a stroll") };
+        assert!(point.distance(destination) >= PlacementConfiguration::default().minimum_travel_distance,
+            "stroll chose its own position: {destination:?}");
+    }
+}
+
+#[test]
+fn rest_sparse_content_on_a_holdable_seat_does_not_start_sitting() {
+    // Small repeated ink clusters: the body average is holdable, but every
+    // possible resting body touches at least one content neighbourhood.
+    let samples = (0..40).flat_map(|row| (0..64).map(move |col| {
+        if col % 5 == 2 && row % 5 == 2 { 0.95 } else { 1.0 }
+    })).collect();
+    let world = world(Some(LuminanceField::new(WorldRect::new(0.0, 0.0, 1280.0, 800.0), 64, 40, samples).unwrap()));
+    let point = WorldPoint::new(640.0, 400.0);
+    let hint = LocationHint::new(Some(world.displays[0].frame), 1.0);
+    let evaluation = BasicInterestPositionPlanner::evaluate_seat(point, &hint, &world, point, None, 0.0, SIZE).unwrap();
+    assert!(evaluation.emptiness.unwrap() >= 0.55, "body average: {:?}", evaluation.emptiness);
+    assert!(ClearanceMap::new(world.luminance.as_ref().unwrap()).distance(point, SIZE).unwrap() < 0.0);
+    assert!(BasicInterestPositionPlanner::clear_destination(&hint, &world, point, None, 0.0, SIZE).is_none());
+    let mut pet = pet(&world, point);
+    pet.handle_activity_event(CompanionEvent::new("work", "codex:turn", 100.0,
+        CompanionEventKind::HighIntensity, 1.0, Some(hint)), 100.0);
+    for i in 0..2100 {
+        let now = 100.0 + i as f64 / 30.0;
+        pet.begin_tick(now);
+        let out = pet.finish_tick(&input(now));
+        assert!(!out.state.is_resting(), "busy but holdable seat started {:?}", out.state);
+    }
+}
+
+#[test]
+fn rest_sparse_content_moves_once_to_an_agent_seat_then_sleeps_there() {
+    let mut capture = field(|col, _| col < 20);
+    capture.samples[31 * 64 + 35] = 0.95;
+    let world = world(Some(capture));
+    let origin = WorldPoint::new(712.0, 620.0);
+    let hint = LocationHint::new(Some(WorldRect::new(0.0, 100.0, 650.0, 500.0)), 1.0);
+    let evaluation = BasicInterestPositionPlanner::evaluate_seat(origin, &hint, &world, origin, None, 0.0, SIZE).unwrap();
+    assert!(evaluation.emptiness.unwrap() >= 0.55);
+    assert!(ClearanceMap::new(world.luminance.as_ref().unwrap()).distance(origin, SIZE).unwrap() < 0.0);
+    assert!(BasicInterestPositionPlanner::clear_destination(&hint, &world, origin, None, 0.0, SIZE).is_some());
+    let mut pet = pet(&world, origin);
+    pet.handle_activity_event(CompanionEvent::new("work", "codex:turn", 100.0,
+        CompanionEventKind::HighIntensity, 1.0, Some(hint)), 100.0);
+    let mut trips = 0;
+    let mut was_travelling = false;
+    for i in 0..2400 {
+        let now = 100.0 + i as f64 / 30.0;
+        pet.begin_tick(now);
+        let out = pet.finish_tick(&input(now));
+        assert_ne!(out.state, BehaviorState::FindSleepSpot, "rest left the replacement agent seat");
+        let travelling = out.state == BehaviorState::TravelToInterest;
+        trips += usize::from(travelling && !was_travelling);
+        was_travelling = travelling;
+    }
+    assert_eq!(trips, 1);
+    assert_eq!(pet.state(), BehaviorState::Sleep);
+    assert_ne!(pet.position(), origin);
 }

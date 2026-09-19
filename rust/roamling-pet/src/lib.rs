@@ -194,6 +194,18 @@ pub const fn built_in_mochi_palette() -> Palette {
     BUILT_IN_PALETTE
 }
 
+/// Eight frames that last as long as `wake` and the runtime's stretch put
+/// together (0.7 s + 1.9 s). The extra time is spent where a stretch spends
+/// it, held at full length on the fourth and fifth frames, rather than spread
+/// over a getting-up that would only look slow.
+fn stretching_frames(start: usize) -> Vec<(usize, f64)> {
+    [0.212, 0.212, 0.212, 0.500, 0.700, 0.300, 0.232, 0.232]
+        .iter()
+        .enumerate()
+        .map(|(offset, duration)| (start + offset, *duration))
+        .collect()
+}
+
 fn track(name: &str, frames: &[(usize, f64)], loops: bool) -> PetAnimationTrack {
     let mut built = PetAnimationTrack::new(
         name,
@@ -308,7 +320,7 @@ fn built_in_mochi_from_images(atlas: PetImage, extension_sheet: PetImage) -> Pet
         // through both states rather than replaying the first half.
         tracks.insert(
             "stretching".into(),
-            track("stretching", &range(base + COLUMNS * 2, 8, 0.212), false),
+            track("stretching", &stretching_frames(base + COLUMNS * 2), false),
         );
 
         for (behavior, name) in [
@@ -341,6 +353,42 @@ fn built_in_mochi_from_images(atlas: PetImage, extension_sheet: PetImage) -> Pet
 mod tests {
     use super::*;
     use roamling_core::PaletteTargets;
+
+    #[test]
+    fn stretching_track_matches_the_runtime_wake_and_stretch() {
+        use roamling_core::{BehaviorState, CompanionEvent, CompanionEventKind, DisplaySnapshot,
+            PetRuntime, RuntimeTuning, TickInput, WorldPoint, WorldRect};
+        let asset = built_in_mochi().unwrap();
+        let duration: f64 = asset.tracks["stretching"].frames.iter().map(|frame| frame.duration).sum();
+        assert!((duration - 2.6).abs() < 1e-10, "stretching track lasts {duration}");
+        let mut pet = PetRuntime::new(WorldPoint::new(500.0, 400.0), RuntimeTuning::default(), 7);
+        let frame = WorldRect::new(0.0, 0.0, 1280.0, 800.0);
+        pet.set_displays(vec![DisplaySnapshot {
+            id: "main".into(), name: "main".into(), frame, visible_frame: frame, scale: 1.0,
+        }]);
+        pet.set_flags(false, false, true);
+        let mut input = TickInput {
+            now: 100.0, pointer: WorldPoint::new(-1000.0, -1000.0), primary_button_down: false,
+            user_idle_duration: 1000.0, capture_authorized: false, focus_authorized: false,
+            did_query_focus: false, queried_focus: None, pointer_is_over_pet: false, affection_held: false,
+        };
+        for i in 0..=300 {
+            input.now = 100.0 + i as f64 / 100.0;
+            pet.begin_tick(input.now);
+            pet.finish_tick(&input);
+        }
+        assert_eq!(pet.state(), BehaviorState::Sleep);
+        pet.handle_activity_event(CompanionEvent::new("wake", "codex:turn", 104.0,
+            CompanionEventKind::AttentionRequired, 1.0, None), 104.0);
+        assert_eq!(pet.state(), BehaviorState::Wake);
+        // Exact state boundaries, with a small epsilon for floating point timestamps.
+        pet.begin_tick(104.0 + roamling_core::timing::WAKE + 1e-8);
+        assert_eq!(pet.state(), BehaviorState::Stretch);
+        pet.begin_tick(104.0 + duration - 1e-6);
+        assert_eq!(pet.state(), BehaviorState::Stretch);
+        pet.begin_tick(104.0 + duration + 1e-6);
+        assert_eq!(pet.state(), BehaviorState::WaitingForUser);
+    }
 
     /// The sheets are a contract, not just data: `docs/history/windows.md` and
     /// `CLAUDE.md` both pin 8 columns by 9 and 3 rows at 192x208.

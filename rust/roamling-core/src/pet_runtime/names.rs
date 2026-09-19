@@ -64,6 +64,10 @@ pub(super) fn describe(intent: &PlacementIntent) -> String {
         PlacementIntent::Escape(point) => {
             format!("escape to {:.0},{:.0}", point.x, point.y)
         }
+        PlacementIntent::RestAt(point) => {
+            format!("rest at {:.0},{:.0}", point.x, point.y)
+        }
+        PlacementIntent::NoRestSpot => "no rest spot".to_string(),
         PlacementIntent::Travel(destination, reason) => format!(
             "travel {} to {:.0},{:.0}",
             reason_name(*reason),

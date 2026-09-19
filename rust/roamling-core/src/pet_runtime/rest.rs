@@ -1,8 +1,10 @@
 // SPDX-FileCopyrightText: 2026 GooBeom Jeoung
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Going to sleep and staying asleep: choosing a spot, walking to it, checking
-//! it is not on top of content, and giving it up when something else matters.
+//! Going to sleep and staying asleep: when to sit, how long, and what wakes
+//! the pet. Where it sleeps is the placement director's answer -- this file
+//! chooses no coordinates. It used to, and the two answers to "where" walked
+//! the pet back and forth between them (`docs/placement.md` 3.5).
 
 use super::*;
 
@@ -11,8 +13,8 @@ impl PetRuntime {
         &mut self,
         user_idle_duration: f64,
         proximity: PointerProximity,
-        pointer: WorldPoint,
-        may_nap_on_seat: bool,
+        situation: &PetSituation,
+        intent: &PlacementIntent,
         now: f64,
         delta_time: f64,
     ) -> bool {
@@ -26,8 +28,7 @@ impl PetRuntime {
                 self.movement.cancel_route(false);
                 self.movement.update_route(delta_time);
                 if now - self.behavior.entered_at() >= SITTING_DURATION {
-                    self.behavior.handle(BehaviorInput::SeekSleepSpot, now);
-                    self.begin_rest_travel(pointer, may_nap_on_seat, now);
+                    self.follow_rest_answer(situation, intent, now);
                 }
                 return true;
             }
@@ -36,15 +37,24 @@ impl PetRuntime {
                     .set_maximum_speed(swift_max(24.0, self.tuning.walking_speed * 0.75));
                 if self.movement.has_route() {
                     if self.movement.update_route(delta_time).reached_destination {
-                        self.enter_sleep(now);
+                        self.arrive_at_rest(situation, now);
                     }
                 } else {
-                    self.enter_sleep(now);
+                    self.arrive_at_rest(situation, now);
                 }
                 return true;
             }
             BehaviorState::Sleep => {
-                if self.rest_spot_is_busy() {
+                // Asleep beside an agent the answer is `SleepInPlace` for as
+                // long as the seat is good; `Hold` is the director taking that
+                // back. `None` is the pointer owning the pet, which says
+                // nothing about the spot.
+                let spot_is_gone = match intent {
+                    PlacementIntent::NoRestSpot => true,
+                    PlacementIntent::Hold => self.activity.is_watching_window(),
+                    _ => false,
+                };
+                if spot_is_gone {
                     self.defer_rest(now);
                     return true;
                 }
@@ -55,6 +65,7 @@ impl PetRuntime {
             _ => {}
         }
 
+        let may_nap_on_seat = *intent == PlacementIntent::SleepInPlace;
         // Watching an agent used to block rest outright, which meant the pet
         // could never sleep during the long unattended run that is exactly when
         // nobody is looking at it.
@@ -83,7 +94,6 @@ impl PetRuntime {
             return false;
         }
         self.is_evade_transitioning = false;
-        self.rest_destination = None;
         self.movement.cancel_route(false);
         self.behavior.handle(BehaviorInput::BeginRest, now);
         self.next_wander_at = f64::INFINITY;
@@ -91,98 +101,76 @@ impl PetRuntime {
         true
     }
 
-    pub(super) fn begin_rest_travel(&mut self, pointer: WorldPoint, nap_in_place: bool, now: f64) {
-        let away_from_seam = self.world.display_containing(self.movement.position())
-            .is_some_and(|display| placement_frame(display, &self.displays)
-                .inset_by(self.object_size.width / 2.0, self.object_size.height / 2.0)
-                .contains(self.movement.position()));
-        // Without a field, retain the permission-free behaviour. A measured
-        // field, however, judges every sleep spot including an agent's seat.
-        if nap_in_place && away_from_seam && self.luminance.is_none() {
-            self.record("rest", "sleeping in place, on a vetted seat");
-            self.enter_sleep(now);
-            return;
-        }
-        if self.luminance.is_none() {
-            self.record("rest", "tucking into a safe zone, spot unvetted");
-        }
-
-        let mut rest_world = placement_world(&self.world);
-        rest_world.safe_zones = BasicSafeZonePlanner::safe_zones(&rest_world);
-        rest_world.focus = self.world.focus.clone();
-        rest_world.luminance = self.luminance.clone();
-        self.rest_destination = BasicSafeZonePlanner::clear_destination(
-            &rest_world,
-            self.movement.position(),
-            Some(pointer),
-            self.object_size,
-        );
-
-        if away_from_seam {
-            if let Some(field) = self.luminance.as_ref() {
-                let map = crate::clearance::ClearanceMap::new(field);
-                let position = self.movement.position();
-                if map.distance(position, self.object_size).is_some_and(|distance| distance >= 0.0)
-                    && !self.rest_destination.as_ref().is_some_and(|destination| {
-                        map.improves(position, destination.point, self.object_size)
-                    })
-                {
-                    self.enter_sleep(now);
-                    return;
+    /// The sit is over and the director has said where to sleep.
+    fn follow_rest_answer(&mut self, situation: &PetSituation, intent: &PlacementIntent, now: f64) {
+        let beside_agent = self.activity.is_watching_window();
+        match intent {
+            PlacementIntent::SleepInPlace => {
+                self.record_unvetted_rest(beside_agent);
+                self.behavior.handle(BehaviorInput::SeekSleepSpot, now);
+                self.enter_sleep(now);
+            }
+            PlacementIntent::RestAt(point) => {
+                self.record_unvetted_rest(false);
+                self.behavior.handle(BehaviorInput::SeekSleepSpot, now);
+                let route = DisplayTopology::new(self.displays.clone())
+                    .route(self.movement.position(), *point);
+                self.movement
+                    .set_maximum_speed(swift_max(24.0, self.tuning.walking_speed * 0.75));
+                self.movement.set_route(route.waypoints);
+                if !self.movement.has_route() {
+                    self.arrive_at_rest(situation, now);
                 }
             }
+            PlacementIntent::NoRestSpot => {
+                self.record_unvetted_rest(false);
+                self.behavior.handle(BehaviorInput::SeekSleepSpot, now);
+                self.defer_rest(now);
+            }
+            // The seat stopped being one to sleep on while the pet was sitting
+            // down. It gets up and keeps watch rather than sitting for good.
+            PlacementIntent::Hold if beside_agent => {
+                self.behavior.handle(BehaviorInput::SeekSleepSpot, now);
+                self.defer_rest(now);
+            }
+            // No answer this tick -- something else owns the pet. Keep sitting
+            // and ask again.
+            _ => {}
         }
+    }
 
-        let Some(destination) = self.rest_destination.clone() else {
-            self.defer_rest(now);
-            return;
-        };
-        if !self.is_roaming_enabled {
-            self.enter_sleep(now);
+    /// Without a capture nothing was judged, and the log says which kind of
+    /// unjudged it was. The wording is recorded in `RuntimeTrace.txt`.
+    fn record_unvetted_rest(&mut self, on_agent_seat: bool) {
+        if self.luminance.is_some() {
             return;
         }
-        let route = DisplayTopology::new(self.displays.clone())
-            .route(self.movement.position(), destination.point);
-        self.movement
-            .set_maximum_speed(swift_max(24.0, self.tuning.walking_speed * 0.75));
-        self.movement.set_route(route.waypoints);
-        if !self.movement.has_route() {
-            self.enter_sleep(now);
+        if on_agent_seat {
+            self.record("rest", "sleeping in place, on a vetted seat");
+        } else {
+            self.record("rest", "tucking into a safe zone, spot unvetted");
+        }
+    }
+
+    /// The route to bed has run out. The director judges the spot now rather
+    /// than on the next tick's `decide`, so arriving and lying down stay one tick.
+    fn arrive_at_rest(&mut self, situation: &PetSituation, now: f64) {
+        let position = self.movement.position();
+        match self.placement.rest_arrival(situation, position) {
+            PlacementIntent::NoRestSpot => self.defer_rest(now),
+            _ => self.enter_sleep(now),
         }
     }
 
     fn enter_sleep(&mut self, now: f64) {
-        if self.rest_spot_is_busy() {
-            self.defer_rest(now);
-            return;
-        }
         self.movement.cancel_route(true);
         self.behavior.handle(BehaviorInput::SleepSpotReached, now);
         self.next_wander_at = f64::INFINITY;
         self.persist_position = true;
     }
 
-    pub(super) fn rest_spot_is_busy(&mut self) -> bool {
-        let position = self.movement.position();
-        if let Some((point, size, busy)) = self.rest_content_check {
-            if point == position && size == self.object_size {
-                return busy;
-            }
-        }
-        // Sleeping has no movement: only a new field, position or size needs
-        // another content check, not every animation tick.
-        let busy = self.luminance.as_ref().is_some_and(|field| {
-            crate::clearance::ClearanceMap::new(field)
-                .distance(position, self.object_size)
-                .is_some_and(|distance| distance < 0.0)
-        });
-        self.rest_content_check = Some((position, self.object_size, busy));
-        busy
-    }
-
     fn defer_rest(&mut self, now: f64) {
         self.movement.cancel_route(true);
-        self.rest_destination = None;
         self.behavior.handle(BehaviorInput::Reaction(CompanionReaction::Calm), now);
         self.rest_retry_at = now + 30.0;
         self.next_wander_at = now + WAKE_WANDER_DELAY;
@@ -193,7 +181,6 @@ impl PetRuntime {
         if !self.behavior.state().is_resting() {
             return;
         }
-        self.rest_destination = None;
         self.movement.cancel_route(false);
         self.behavior.handle(BehaviorInput::MeaningfulActivity, now);
         self.next_wander_at = now + WAKE_WANDER_DELAY;

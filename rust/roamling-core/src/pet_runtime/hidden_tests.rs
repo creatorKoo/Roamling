@@ -11,20 +11,38 @@ fn the_same_field_again_keeps_the_rest_spot_verdict_and_a_new_one_drops_it() {
     };
     let mut pet = PetRuntime::new(WorldPoint::new(320.0, 200.0), RuntimeTuning::default(), 7);
     pet.set_object_size(WorldSize::new(96.0, 104.0));
+    pet.set_displays(vec![DisplaySnapshot {
+        id: "display".into(), name: "Test".into(),
+        frame: WorldRect::new(0.0, 0.0, 640.0, 400.0),
+        visible_frame: WorldRect::new(0.0, 0.0, 640.0, 400.0), scale: 1.0,
+    }]);
+    // The verdict lives with the director now, and the director is asked the
+    // way the rest lifecycle asks it: on arrival at a sleep spot.
+    let input = TickInput {
+        now: 10.0, pointer: WorldPoint::new(-1000.0, -1000.0), primary_button_down: false,
+        user_idle_duration: 1000.0, capture_authorized: true, focus_authorized: false,
+        did_query_focus: false, queried_focus: None, pointer_is_over_pet: false,
+        affection_held: false,
+    };
+    let ask = |pet: &mut PetRuntime| {
+        let situation = pet.make_situation(10.0, &input, PointerProximity::Far, false, false);
+        let position = pet.position();
+        pet.placement.rest_arrival(&situation, position)
+    };
     pet.set_luminance(Some(field(1.0)));
-    let verdict = pet.rest_spot_is_busy();
-    assert!(pet.rest_content_check.is_some());
+    let verdict = ask(&mut pet);
+    assert!(pet.placement.has_rest_check());
 
     // What macOS does on every tick.
     pet.set_luminance(Some(field(1.0)));
-    assert!(pet.rest_content_check.is_some(), "the same field must not cost another check");
-    assert_eq!(pet.rest_spot_is_busy(), verdict);
+    assert!(pet.placement.has_rest_check(), "the same field must not cost another check");
+    assert_eq!(ask(&mut pet), verdict);
 
     pet.set_luminance(Some(field(0.5)));
-    assert!(pet.rest_content_check.is_none(), "a new capture has to be looked at");
-    pet.rest_spot_is_busy();
+    assert!(!pet.placement.has_rest_check(), "a new capture has to be looked at");
+    ask(&mut pet);
     pet.set_luminance(None);
-    assert!(pet.rest_content_check.is_none(), "losing the field is a change too");
+    assert!(!pet.placement.has_rest_check(), "losing the field is a change too");
 }
 
 #[test]

@@ -15,6 +15,7 @@
 use crate::emptiness::{ComfortPick, VisualEmptiness};
 use crate::geometry::{clamped, swift_max, swift_min, WorldPoint, WorldRect, WorldSize};
 use crate::interest::{BasicInterestPositionPlanner, InterestDestination, SeatEvaluation};
+use crate::safe_zone::BasicSafeZonePlanner;
 use crate::world::{DesktopWorldSnapshot, LocationHint};
 
 /// Why the director is sending the pet somewhere.
@@ -73,6 +74,34 @@ pub enum PlacementIntent {
     /// glance has held up past `GLANCE_PATIENCE` is issued as this too, for
     /// the same reason: it is a walk the glance may not stop.
     Escape(WorldPoint),
+    /// Where to walk to sleep. Deliberately not a `Travel`: a travel wakes a
+    /// resting pet, and this is the walk a resting pet takes.
+    RestAt(WorldPoint),
+    /// Rest asked where to sleep and nowhere will do -- every spot on offer is
+    /// on content, or the one the pet is asleep on has just become so.
+    NoRestSpot,
+}
+
+/// How far into resting the pet is, which is what the director needs to know
+/// to answer where it sleeps. Rest keeps the clock; the director keeps the map.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RestPhase {
+    Awake,
+    /// Sitting down, not yet asking for a spot.
+    Settling,
+    /// The sit is over, or the walk to a spot is: an answer is wanted now.
+    Seeking,
+    Walking,
+    Asleep,
+}
+
+impl RestPhase {
+    /// For callers that only know whether the pet rests at all, which is every
+    /// caller of the ported contract. `Settling` is the phase that asks for
+    /// nothing, so it reads exactly as `is_resting` always did.
+    pub fn from_resting(is_resting: bool) -> Self {
+        if is_resting { Self::Settling } else { Self::Awake }
+    }
 }
 
 impl PlacementIntent {
@@ -93,7 +122,8 @@ impl PlacementIntent {
         match self {
             Self::Escape(_) => true,
             Self::Travel(_, reason) => reason.keeps_walking_past_glance(),
-            Self::None | Self::Hold | Self::SleepInPlace | Self::Stroll(_) => false,
+            Self::None | Self::Hold | Self::SleepInPlace | Self::Stroll(_)
+            | Self::RestAt(_) | Self::NoRestSpot => false,
         }
     }
 }
@@ -130,6 +160,9 @@ pub struct PetSituation {
     /// The pet is sitting, seeking a sleep spot, or asleep. Rest owns movement
     /// while that lasts, so planning a stroll it cannot take is wasted work.
     pub is_resting: bool,
+    /// The same fact in the detail the shipping director needs to choose the
+    /// sleep spot. The ported contract reads `is_resting` and ignores this.
+    pub rest_phase: RestPhase,
     pub activity_source_id: Option<String>,
     pub activity_hint: Option<LocationHint>,
     pub user_idle_duration: f64,
@@ -263,6 +296,13 @@ pub struct PlacementDirector {
     carried: PlacementIntent,
     /// When the current glance began, so a stroll can outlast it.
     watching_since: Option<f64>,
+    /// The spot a resting pet is walking to. Chosen once: re-choosing on the
+    /// way is how a walk to bed turns into pacing.
+    rest_walk: Option<WorldPoint>,
+    /// Whether content lies under a body of this size at this point, kept
+    /// until the capture changes. A sleeping pet asks every tick, and macOS
+    /// hands the same field over every tick.
+    rest_check: Option<(WorldPoint, WorldSize, bool)>,
 }
 
 /// How long the pet looks at a cursor that just sits there before a stroll is
@@ -287,6 +327,8 @@ impl PlacementDirector {
             last_review_at: f64::NEG_INFINITY,
             carried: PlacementIntent::Hold,
             watching_since: Option::None,
+            rest_walk: Option::None,
+            rest_check: Option::None,
         }
     }
 
@@ -387,9 +429,15 @@ impl PlacementDirector {
         ) else {
             self.seat = Option::None;
             self.travel = Option::None;
+            if self.keeps_clear() && situation.rest_phase != RestPhase::Awake {
+                return self.rest_verdict(situation);
+            }
+            self.rest_walk = Option::None;
             return self.stroll_verdict(situation);
         };
         self.parked_since = Option::None;
+        // Beside an agent the seat is the bed, so there is never a walk to one.
+        self.rest_walk = Option::None;
 
         // A different agent is a different window. The pet walks over to it
         // rather than claiming wherever it happens to be standing.
@@ -502,11 +550,21 @@ impl PlacementDirector {
         // Priority 7. A pet dozing beside a working agent keeps the seat it
         // already vetted instead of walking to a display corner to sleep.
         // "Cannot tell" reads as fine here, the same way a missing capture does.
+        //
+        // This is an instruction, not a permission: rest sleeps here and looks
+        // nowhere else. When it looked for itself it walked off to a clearer
+        // corner, this table walked it back for `CoveringWork`, and the two
+        // kept that up every six seconds until the user came back. So what
+        // rest used to check is checked here -- no content under the body, and
+        // not on the margin of a shared display edge.
         if evaluation
             .as_ref()
             .map(SeatEvaluation::is_holdable)
             .unwrap_or(true)
             && situation.user_idle_duration >= situation.idle_before_rest
+            && (!self.keeps_clear()
+                || (Self::away_from_seam(situation, situation.position)
+                    && !self.rest_spot_is_busy(situation, situation.position)))
         {
             self.carried = PlacementIntent::SleepInPlace;
             return self.carried.clone();
@@ -740,6 +798,123 @@ impl PlacementDirector {
         8.0 + distance / swift_max(20.0, situation.walking_speed) * 2.0
     }
 
+    /// Where a pet with no agent to sit beside sleeps. Rest decides when; this
+    /// is the where, moved here from the rest lifecycle so that one place
+    /// answers it and the walk to bed is a walk this table knows about.
+    fn rest_verdict(&mut self, situation: &PetSituation) -> PlacementIntent {
+        self.carried = PlacementIntent::Hold;
+        self.parked_since = Option::None;
+        match situation.rest_phase {
+            RestPhase::Awake | RestPhase::Settling => PlacementIntent::Hold,
+            RestPhase::Walking => self
+                .rest_walk
+                .map_or(PlacementIntent::Hold, PlacementIntent::RestAt),
+            RestPhase::Seeking => {
+                if self.rest_walk.is_some() {
+                    return self.rest_arrival(situation, situation.position);
+                }
+                self.choose_rest_spot(situation)
+            }
+            RestPhase::Asleep => self.sleep_here(situation, situation.position),
+        }
+    }
+
+    fn choose_rest_spot(&mut self, situation: &PetSituation) -> PlacementIntent {
+        let position = situation.position;
+        let away_from_seam = Self::away_from_seam(situation, position);
+        let mut rest_world = situation.world.clone();
+        rest_world.safe_zones = BasicSafeZonePlanner::safe_zones(&rest_world);
+        let destination = BasicSafeZonePlanner::clear_destination(
+            &rest_world,
+            position,
+            situation.pointer_position,
+            situation.object_size,
+        );
+
+        if away_from_seam {
+            if let Some(field) = situation.world.luminance.as_ref() {
+                let map = crate::clearance::ClearanceMap::new(field);
+                if map.distance(position, situation.object_size).is_some_and(|distance| distance >= 0.0)
+                    && !destination.as_ref().is_some_and(|destination| {
+                        map.improves(position, destination.point, situation.object_size)
+                    })
+                {
+                    return self.sleep_here(situation, position);
+                }
+            }
+        }
+
+        let Some(destination) = destination else {
+            return PlacementIntent::NoRestSpot;
+        };
+        if !situation.is_roaming_enabled {
+            return self.sleep_here(situation, position);
+        }
+        self.rest_walk = Some(destination.point);
+        PlacementIntent::RestAt(destination.point)
+    }
+
+    /// The walk to bed is over, wherever it ended. Called by the rest
+    /// lifecycle on the tick the route runs out, because that happens after
+    /// `decide` and a pet that has arrived lies down now, not a tick later.
+    pub fn rest_arrival(&mut self, situation: &PetSituation, position: WorldPoint) -> PlacementIntent {
+        self.rest_walk = Option::None;
+        self.sleep_here(situation, position)
+    }
+
+    fn sleep_here(&mut self, situation: &PetSituation, position: WorldPoint) -> PlacementIntent {
+        if self.rest_spot_is_busy(situation, position) {
+            PlacementIntent::NoRestSpot
+        } else {
+            PlacementIntent::SleepInPlace
+        }
+    }
+
+    /// Whether content lies under the body at `position`. Cannot-tell reads as
+    /// clear: no capture is not evidence of text.
+    fn rest_spot_is_busy(&mut self, situation: &PetSituation, position: WorldPoint) -> bool {
+        if let Some((point, size, busy)) = self.rest_check {
+            if point == position && size == situation.object_size {
+                return busy;
+            }
+        }
+        let busy = situation.world.luminance.as_ref().is_some_and(|field| {
+            crate::clearance::ClearanceMap::new(field)
+                .distance(position, situation.object_size)
+                .is_some_and(|distance| distance < 0.0)
+        });
+        self.rest_check = Some((position, situation.object_size, busy));
+        busy
+    }
+
+    /// The capture changed, so what was under the pet may have too. The caller
+    /// says so because it already compares the fields; macOS hands over the
+    /// same one every tick and rebuilding the map for it was measurable.
+    pub fn forget_rest_check(&mut self) {
+        self.rest_check = Option::None;
+    }
+
+    #[cfg(test)]
+    pub(crate) fn has_rest_check(&self) -> bool {
+        self.rest_check.is_some()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn rest_walk(&self) -> Option<WorldPoint> {
+        self.rest_walk
+    }
+
+    /// Off the margin kept clear along an edge two displays share. The
+    /// situation's world already carries the placement frames.
+    fn away_from_seam(situation: &PetSituation, position: WorldPoint) -> bool {
+        situation.world.display_containing(position).is_some_and(|display| {
+            display
+                .visible_frame
+                .inset_by(situation.object_size.width / 2.0, situation.object_size.height / 2.0)
+                .contains(position)
+        })
+    }
+
     /// Priorities 10 and 11. Wandering is where the pet spends most of its life,
     /// so it passes the same emptiness bar as an interest seat -- a rule that
     /// only applied to agent seats left most of the day unruled.
@@ -857,6 +1032,14 @@ impl PlacementDirector {
                     .filter(|point| self.path_avoids_pointer(*point, situation)),
             );
             if self.keeps_clear() {
+                // Where the pet stands is not somewhere to walk to. The runtime
+                // drops such draws from its own candidates, which never covered
+                // the sweep added here: a pet parked on a grid point was handed
+                // that point back every two seconds for as long as it ranked
+                // clearest.
+                points.retain(|point| {
+                    situation.position.distance(*point) >= self.configuration.minimum_travel_distance
+                });
                 let best = crate::clearance::ClearanceMap::new(field).best(&points, situation.object_size);
                 return best.first().map_or(ComfortPick::Marginal(situation.position), |index| {
                     ComfortPick::Clear(points[*index])

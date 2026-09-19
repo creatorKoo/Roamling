@@ -430,9 +430,13 @@ func petLogicTests() -> [LogicTest] {
             // Lengths the shipped `mochi-v3` manifests declare. Transcribed into
             // the factory because a built-in has no package directory to read,
             // so they are pinned here to catch the two drifting apart.
+            //
+            // `stretching` is the one deliberate difference: the package says
+            // 1.70 and the built-in holds the longest pose for 2.60, which is
+            // the runtime's wake plus stretch (docs/placement.md 3.6.3).
             for (name, seconds) in [
                 ("idle", 1.70), ("sleeping", 2.00), ("caught", 0.60),
-                ("sitting", 2.40), ("gaze", 1.03), ("stretching", 1.70)
+                ("sitting", 2.40), ("gaze", 1.03), ("stretching", 2.60)
             ] {
                 let total = try require(pet.tracks[name]).frames.reduce(0) { $0 + $1.duration }
                 try expect(

@@ -57,6 +57,52 @@
 
 ## 진행
 
+### R20. 휴식과 자리를 한 층에서 보게 (2026-09-19)
+
+- **누가·언제** 사용자, 2026-09-19, Windows. 진단 로그를 붙여 "지금 보리가 일하다 자다 반복했는데
+  한번 봐볼래?" — 원인은 아래 B6.
+- **원문** "흠 2개를 같은 층에서 보게 할 수는 없나? 그럼 너무 충돌나나? 휴식, 자리를 같이 잘 엮어서
+  하나의 층에서 보게 만드는게 좋을 것 같은데.. 그렇게 개선할 수도 있나?", 이어서 "응 순서대로 가자".
+- **뜻** "어디에 있을까"를 답하는 곳을 하나로 한다. 지금은 자리 층(`PlacementDirector`)과 휴식 층
+  (`PetRuntime::begin_rest_travel`)이 같은 질문에 따로 답하고 서로의 결정을 모른다.
+- **방향** 휴식 층은 **언제**(idle 75초 · sit 2.4초 · 깨우기)만 남기고, **어디**(잠자리 선택 · 자는
+  자리의 재검사)는 director로 옮긴다. 흐름·충돌·단계·게이트는 `docs/placement.md` 3.5.
+- **같이 본 것** 같은 로그의 나머지 둘 — 제자리로 가는 산책(B7)과, 승인 대기가 자는 펫을 깨우는 것
+  (결함이 아니라 설계, `docs/placement.md` 3.5.6).
+- **결정 (2026-09-19)** 방향과 열린 결정 셋(깨어서 지킨다 · 녹화는 검토 후 갱신 · 승인 대기는 지금대로
+  깨운다)에 "너가 제안한거 다 승인할꺼긴한데". 단계는 "1,2 단계 합칠 수도 있을 것 같은데..?" —
+  **합친다.** 나눈 이유가 `RuntimeTrace.txt`를 한쪽에서만 건드리려는 것이었는데 R21이 어차피 같은 녹화를
+  바꾼다. 명세는 `docs/placement.md` 3.5.4.
+- **순서** 문서(3.5 · 3.6) → 구현 → Windows 게이트와 실행 확인 → 사용자 실사용 확인 → 제안 녹화의 차이를
+  보여 주고 승인 → 기준 갱신.
+- **구현 (2026-09-19, Windows)** 잠자리 선택과 자는 자리의 재검사가 `PlacementDirector`로 갔다
+  (`rest_verdict` · `choose_rest_spot` · `rest_arrival`, `RestPhase`, `PlacementIntent::RestAt` ·
+  `NoRestSpot`). `pet_runtime/rest.rs`는 좌표를 고르지 않는다. 새 규칙은 전부 `ClearOfContent` 안이라
+  differential fixture 10개는 그대로 통과한다. `scripts/test.ps1` 전체 통과(코어 87 · 셸 57 · 릴리스 빌드),
+  새 빌드로 펫 재실행. 지금 동작의 기록은 `docs/behavior-flow.md` §3.1.
+- **상태** 진행 — 구현. 남은 것: 사용자 실사용 확인(agent를 돌려 두고 자리를 비운 뒤 진단 로그에
+  6초 바퀴가 없는지), macOS CI, `RuntimeTrace.txt` 제안 녹화의 차이 검토와 갱신
+  (`docs/placement.md` 3.5.5).
+
+### R21. 일어날 때 기지개는 무조건, 그리고 좀 길게 (2026-09-19)
+
+- **누가·언제** 사용자, 2026-09-19. 승인 대기가 자는 펫을 깨울 때 기지개 없이 0.1초 만에 기다리는
+  포즈로 바뀐다는 설명을 들은 직후.
+- **원문** "그리고 일어날때 기지개 무조건 수행하게 해줄수 있니? 그리고 기지개 초가 정해져있어? 좀 길게
+  기지개 펴도 될 것 같아서"
+- **지금** 길이는 고정이다 — `wake` 0.7초 + `stretch` 1.0초, 그림 8칸 × 0.212초가 그 1.7초에 맞춰져
+  있다. 기지개는 반응·커서·자리 이동이 전부 끊는다. 코드 위치는 `docs/placement.md` 3.6.1.
+- **결정** 일어나는 동안 펫을 가져갈 수 있는 것은 **잡기뿐**이다. 나머지는 버리지 않고 기지개 뒤로
+  미룬다. 길이는 1.7 → **2.6초**, 칸을 새로 그리지 않고 가장 늘어난 자세(f3·f4)에서 머문다. 숫자는 첫
+  판이고 보고 고친다. 명세는 `docs/placement.md` 3.6.
+- **알려 둔 것** 승인 대기로 깨면 기다리는 포즈가 지금보다 2.6초 늦게 나온다. 커서로 깨워도 기지개가
+  끝나야 쳐다보거나 피한다 — 그동안 잡을 수는 있다.
+- **구현 (2026-09-19, Windows)** `finish_tick`에 "일어나는 중" 분기, `ActivityDirector`에는 일어나는
+  펫을 자는 펫으로 알림(`PetRuntime::cannot_react`), 자는 펫을 깨우는 자리 이동은 깨우기만 하고 걸음은
+  기지개 뒤. 길이는 `timing::FULL_STRETCH` 1.9초, 트랙은 `stretching_frames`. 회귀 테스트 다섯
+  (`pet_runtime/rest_tests.rs`)과 트랙 길이 테스트 하나.
+- **상태** 진행 — 구현. 사용자가 보고 길이를 정한다. 녹화 갱신은 R20과 같이.
+
 ### R19. 데스크톱도 0.1배까지 줄일 수 있게 (2026-09-19)
 
 - **누가·언제** 사용자, 2026-09-19. 폰에서 작은 보리를 써 본 직후.
@@ -644,6 +690,57 @@
   (`TuningPersistenceTests.swift`)이 오버레이에 닿은 픽셀을 비교한다. 고치기 전 런타임에서 "the pet
   came back in the bundle's colours"로 실패, 고친 뒤 통과. 하네스 198개와 `scripts/test.sh` 전체 통과,
   `RuntimeTrace.txt`는 그대로.
+
+### B6. 일하다 자다를 6초마다 반복한다 — 휴식과 자리가 서로 밀어낸다 (2026-09-19)
+
+- **누가·언제** 사용자, 2026-09-19, Windows. agent(Claude Code · Codex)를 돌려 두고 자리를 비운 사이.
+- **증상** 진단 로그 37294~37684초, 약 6분 반 동안 6초짜리 같은 바퀴가 수십 번 돈다(승인 대기로 깨어 있던 두 구간만 빼고). 입력이 들어와서야 멈췄다.
+
+  ```
+  37300.5  place sleep in place                     ← 자리가 괜찮다, 여기서 자라
+  37300.6  pet   sit
+  37303.0  pet   findSleepSpot                      ← 휴식 층이 다른 곳으로 걸어 나감
+  37303.8  place travel coveringWork to 1653,786    ← 자리 층이 원래 자리로 되돌림
+  37303.8  pet   travelToInterest
+  37305.9  place hold   →  pet work  →  place sleep in place  →  처음으로
+  ```
+
+- **원인 (코드로 확정)** "어디에 있을까"에 두 곳이 따로 답한다.
+  1. director가 자리를 유지할 만하고 사용자가 idle이면 `SleepInPlace`를 낸다
+     (`placement.rs` `PlacementDirector::verdict`의 Priority 7).
+  2. 휴식 층은 그것을 "쉬어도 된다"로만 받는다(`rest.rs` `update_rest_lifecycle`의 `may_nap_on_seat`).
+     sit 2.4초 뒤 `begin_rest_travel`은 **캡처가 있으면** 제자리 지름길을 건너뛰고
+     (`nap_in_place && away_from_seam && self.luminance.is_none()`), 화면 전체의 모서리와 7×5 격자에서
+     잠자리를 따로 고른다(`safe_zone.rs` `BasicSafeZonePlanner::clear_destination`). 그곳이 여유를 24pt
+     이상 늘리면(`clearance.rs` `ClearanceMap::improves`) 자리를 떠난다.
+  3. 그 걸음은 director에게 보이지 않는다. director는 자기가 낸 이동이면 목적지를 채점하지만
+     (`verdict`의 `judged`), 이 경우 `self.travel`이 없으므로 **걷는 도중의 위치**를 자리로 채점한다.
+     24pt(`reseat_distance`) 넘게 벗어난 순간 `CoveringWork`로 원래 자리를 다시 낸다
+     (`departure_reason` · `accepts`).
+  4. 휴식 중에 이동 의도가 오면 휴식은 무조건 취소된다(`pet_runtime.rs` `finish_tick`의
+     `intent.travel_reason().is_some() && is_resting` 분기). 도착하면 1번이 다시 참이다.
+- **언제부터** R10(2026-09-17)이 2번의 "캡처가 있으면 agent 자리도 다시 잰다"를 넣은 뒤. 그 전에는
+  `SleepInPlace`가 곧 제자리 수면이었다. 두 후보 집합이 같은 답을 내는 화면에서는 지금도 조용하다 —
+  같은 로그의 34760초에는 `sit → sleep`이 바로 됐다.
+- **미확정** 3번의 `CoveringWork`가 `departure_reason`의 두 분기(emptiness 미달 / 여유 개선) 중 어느
+  쪽인지. 로그에는 같은 이름으로 찍힌다.
+- **상태** 고침(2026-09-19, R20). 회귀 테스트 `rest_b6_agent_sleeps_on_its_seat_for_sixty_seconds`와
+  느린 판 둘(`rest_sparse_content_…`, `clearance_tests.rs`). 사용자 실사용 확인 대기.
+
+### B7. 서 있는 자리로 산책을 나간다, 다시 — 격자 후보는 걸러지지 않는다 (2026-09-19)
+
+- **누가·언제** B6과 같은 로그에서 발견. 사용자가 본 증상은 없다 — B1의 고침 A 덕에 걷는 그림은 입지 않는다.
+- **증상** `place stroll to 1538,326` → `place hold`가 2초마다, 펫은 `idle`인 채로. 33968~33997,
+  34596~34624, 36918~36937, 37027~37089초. 펫은 33920초에 그 점으로 걸어가 서 있었다.
+- **원인 (코드로 확정)** B1의 고침 B는 런타임이 뽑는 무작위 후보에서만 "이미 선 자리"를 뺀다
+  (`roaming.rs` `stroll_candidates`). R10이 더한 디스플레이 7×5 격자(`placement.rs`
+  `PlacementDirector::sweep`)는 그 거름을 지나지 않고 `comfortable`에서 합쳐진다. 격자점 위에 선 펫에게
+  그 격자점이 가장 여유로운 후보로 다시 뽑히고, `begin_stroll`은 경로가 비어 `next_wander_at = now + 2.0`
+  만 두고 끝난다. 다른 후보가 이길 때까지 반복한다.
+- **해** 화면에는 안 보인다. 그동안 산책이 없고(가장 길게 약 1분), 2초마다 후보(무작위 6 + 격자 35)를 다시 잰다.
+- **상태** 고침(2026-09-19, R20). `PlacementDirector::comfortable`이 선 자리에서
+  `minimum_travel_distance` 안쪽인 후보를 무작위·격자 모두 버린다. 회귀 테스트
+  `rest_b7_stroll_does_not_choose_the_grid_point_under_its_feet`.
 
 ## 거절·보류
 

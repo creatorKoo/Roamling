@@ -27,6 +27,8 @@ mod roaming;
 mod hidden_tests;
 #[cfg(test)]
 mod movement_policy_tests;
+#[cfg(test)]
+mod rest_tests;
 
 use names::{describe, proximity_name, state_name};
 
@@ -41,10 +43,9 @@ use crate::geometry::{swift_max, swift_min, WorldPoint, WorldRect, WorldSize, Wo
 use crate::movement::{MovementConfiguration, MovementController};
 use crate::placement::{
     PetSituation, PlacementConfiguration, PlacementDirector, PlacementIntent, PlacementPolicy,
-    PlacementTravelReason,
+    PlacementTravelReason, RestPhase,
 };
 use crate::pointer::{PointerDecision, PointerInteractionModel, PointerProximity};
-use crate::safe_zone::{BasicSafeZonePlanner, RestDestination};
 use crate::source_state::StateDeclaration;
 use crate::topology::DisplayTopology;
 use crate::tuning::RuntimeTuning;
@@ -60,7 +61,11 @@ const WANDER_CANDIDATE_COUNT: usize = 6;
 /// Sitting and waking are authored pacing rather than a preference, so only the
 /// idle threshold is tunable. Ported from `RestConfiguration`.
 const SITTING_DURATION: f64 = 2.4;
-const WAKE_WANDER_DELAY: f64 = 2.5;
+/// The wake and the stretch, then the same 0.8 s of stillness there was when
+/// the two together took 1.7 s and this was 2.5.
+const WAKE_WANDER_DELAY: f64 = crate::behavior::timing::WAKE
+    + crate::behavior::timing::FULL_STRETCH
+    + 0.8;
 
 /// The pet's aimlessness, made repeatable.
 ///
@@ -226,9 +231,7 @@ pub struct PetRuntime {
     crossing_clear: Option<WorldPoint>,
     /// The affection key is held and the cursor is on the pet: see `TickInput`.
     is_petted: bool,
-    rest_destination: Option<RestDestination>,
     rest_retry_at: f64,
-    rest_content_check: Option<(WorldPoint, WorldSize, bool)>,
     caught_transition_duration: f64,
     dragged_cycle_duration: f64,
 
@@ -245,13 +248,14 @@ impl PetRuntime {
                 WorldVector::ZERO,
                 MovementConfiguration::new(tuning.walking_speed, 90.0, 115.0, 1.5),
             ),
-            behavior: BehaviorController::default(),
+            behavior: BehaviorController::default()
+                .with_stretch_duration(crate::behavior::timing::FULL_STRETCH),
             pointer_model: PointerInteractionModel::new(tuning.pointer_configuration()),
             placement: PlacementDirector::new(
                 PlacementPolicy::ClearOfContent,
                 PlacementConfiguration::default(),
             ),
-            activity: ActivityDirector::default(),
+            activity: ActivityDirector::default().keeping_pending_current(),
             tuning,
             rng: Aimlessness::new(seed),
             displays: Vec::new(),
@@ -278,9 +282,7 @@ impl PetRuntime {
             escape_route_active: false,
             crossing_clear: None,
             is_petted: false,
-            rest_destination: None,
             rest_retry_at: 0.0,
-            rest_content_check: None,
             caught_transition_duration: 0.0,
             dragged_cycle_duration: 0.4,
             diagnostics: Vec::new(),
@@ -357,7 +359,7 @@ impl PetRuntime {
     /// same answer, and a sleeping pet was recomputing it on every tick.
     pub fn set_luminance(&mut self, field: Option<LuminanceField>) {
         if self.luminance != field {
-            self.rest_content_check = None;
+            self.placement.forget_rest_check();
         }
         self.luminance = field;
     }
@@ -499,11 +501,11 @@ impl PetRuntime {
         self.behavior.handle(BehaviorInput::Tick, now);
         let effects = self
             .activity
-            .expire_states(self.behavior.state().is_resting(), now);
+            .expire_states(self.cannot_react(), now);
         self.apply_activity(effects, now);
         let effects = self
             .activity
-            .expire_silent(self.behavior.state().is_resting(), now);
+            .expire_silent(self.cannot_react(), now);
         self.apply_activity(effects, now);
         // The draw happens whether or not anything is pending, because the
         // Swift original evaluated it as an argument. Moving it inside the
@@ -512,7 +514,7 @@ impl PetRuntime {
         let effects = self.activity.resume_pending_if_ready(
             self.behavior.state() == BehaviorState::Idle,
             self.behavior.state().is_held(),
-            self.behavior.state().is_resting(),
+            self.cannot_react(),
             roll,
             now,
         );
@@ -644,7 +646,14 @@ impl PetRuntime {
             };
             self.record("agent", &agent);
 
-            if approach_held && self.crossing_clear.is_none() && allows_pointer_glance {
+            // A resting pet is left to the rest lifecycle below, which wakes
+            // it: this branch sends the pointer straight to the state machine,
+            // and from `Sleep` that is `Wake` and `LookAtPointer` in one call.
+            if approach_held
+                && self.crossing_clear.is_none()
+                && allows_pointer_glance
+                && !self.cannot_react()
+            {
                 self.is_evade_transitioning = false;
                 self.movement.cancel_route(false);
                 self.behavior
@@ -663,20 +672,30 @@ impl PetRuntime {
                 self.update_evade_transition(now, delta_time);
             } else if intent.travel_reason().is_some() && self.behavior.state().is_resting() {
                 // Stepping out from under the user's text is the one thing that
-                // outranks a nap, and the only reason placement may end one.
+                // outranks a nap, and the only reason placement may end one. It
+                // ends the nap and no more: the walk starts once the pet is up,
+                // because the director repeats a travel until it is taken.
                 self.cancel_rest_for_activity(now);
-                wore_arrival_reaction = self.apply_intent(&intent, now, delta_time);
+                self.movement.update_route(delta_time);
             } else if self.update_rest_lifecycle(
                 input.user_idle_duration,
                 // Suppressing a tail wag does not make the nearby hand absent
                 // for waking up or deciding whether it is time to sleep.
                 if is_adored { PointerProximity::Watching } else { decision.proximity },
-                input.pointer,
-                intent == PlacementIntent::SleepInPlace,
+                &situation,
+                &intent,
                 now,
                 delta_time,
             ) {
                 // Rest owns movement until input wakes the creature.
+            } else if self.is_waking() {
+                // Getting up is finished before anything else has the pet: the
+                // cursor, a walk, a reaction. Only a catch interrupts it, and
+                // that does not come through here. Placed after rest because
+                // rest is what starts a wake, and returns false on that tick --
+                // the branches below would overwrite it within the same tick.
+                self.movement.cancel_route(false);
+                self.movement.update_route(delta_time);
             } else if now < self.landing_until {
                 // Landing. The cursor is only where it is because the user put
                 // the pet there, so the pet finishes the animation first.
@@ -717,7 +736,9 @@ impl PetRuntime {
             // re-apply of `work` or `paw` after the other two. The visible loss
             // was the hop -- nobody ever saw a pet arrive and greet.
             if did_arrive {
-                if !wore_arrival_reaction {
+                // Delivering spends the reaction whether or not the pet could
+                // wear it, so a pet still getting up keeps it owed.
+                if !wore_arrival_reaction && !self.is_waking() {
                     let effects = self
                         .activity
                         .deliver_arrival_reaction(self.behavior.state().is_resting(), now);
@@ -767,7 +788,7 @@ impl PetRuntime {
         let effects = self.activity.handle_event(
             event,
             self.behavior.state().is_held(),
-            self.behavior.state().is_resting(),
+            self.cannot_react(),
             roll,
             now,
         );
@@ -785,7 +806,7 @@ impl PetRuntime {
         self.luminance_requests.clear();
         let effects =
             self.activity
-                .declare_state(declaration, self.behavior.state().is_resting(), now);
+                .declare_state(declaration, self.cannot_react(), now);
         self.apply_activity(effects, now);
         std::mem::take(&mut self.luminance_requests)
     }
@@ -982,6 +1003,7 @@ impl PetRuntime {
             is_evading: self.is_evade_transitioning,
             is_walking: self.movement.has_route(),
             is_resting: self.behavior.state().is_resting(),
+            rest_phase: self.rest_phase(now),
             activity_source_id: self.activity.active_source_id().map(str::to_owned),
             activity_hint: self.activity.hint().cloned(),
             user_idle_duration: input.user_idle_duration,
@@ -989,6 +1011,41 @@ impl PetRuntime {
             is_roaming_enabled: self.is_roaming_enabled,
             is_stroll_due,
             stroll_candidates: candidates,
+        }
+    }
+
+    /// Wake and stretch: the pet is up but not yet available.
+    fn is_waking(&self) -> bool {
+        matches!(self.behavior.state(), BehaviorState::Wake | BehaviorState::Stretch)
+    }
+
+    /// What the activity director is told in place of "is resting". A pet
+    /// getting up is treated as one still asleep: an event that would wake it
+    /// waits for `Idle`, and routine progress is put back on by the seat.
+    fn cannot_react(&self) -> bool {
+        self.behavior.state().is_resting() || self.is_waking()
+    }
+
+    /// Computed before `decide`, so the answer to a sit that ends this tick is
+    /// acted on this tick.
+    fn rest_phase(&self, now: f64) -> RestPhase {
+        match self.behavior.state() {
+            BehaviorState::Sit => {
+                if now - self.behavior.entered_at() >= SITTING_DURATION {
+                    RestPhase::Seeking
+                } else {
+                    RestPhase::Settling
+                }
+            }
+            BehaviorState::FindSleepSpot => {
+                if self.movement.has_route() {
+                    RestPhase::Walking
+                } else {
+                    RestPhase::Seeking
+                }
+            }
+            BehaviorState::Sleep => RestPhase::Asleep,
+            _ => RestPhase::Awake,
         }
     }
 
@@ -1027,7 +1084,14 @@ impl PetRuntime {
             // `SleepInPlace` lands here when rest declined to start -- the
             // pointer came close, or the state machine was mid-transition. The
             // seat is kept either way.
-            PlacementIntent::Hold | PlacementIntent::SleepInPlace | PlacementIntent::None => {
+            //
+            // The two rest answers belong to the rest lifecycle, which has
+            // already declined this tick if control is here.
+            PlacementIntent::Hold
+            | PlacementIntent::SleepInPlace
+            | PlacementIntent::RestAt(_)
+            | PlacementIntent::NoRestSpot
+            | PlacementIntent::None => {
                 if self.activity.is_watching_window()
                     || self.activity.sustained_reaction() == Some(CompanionReaction::Work)
                 {
@@ -1054,7 +1118,6 @@ impl PetRuntime {
             self.movement.set_route(route.waypoints);
         }
         self.is_evade_transitioning = false;
-        self.rest_destination = None;
         self.behavior
             .handle(BehaviorInput::BeginInterestTravel, now);
         self.movement.set_maximum_speed(self.tuning.walking_speed);

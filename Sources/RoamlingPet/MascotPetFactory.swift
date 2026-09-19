@@ -174,7 +174,8 @@ public enum MascotPetFactory {
             // restarts a track when the capability changes, so these eight run
             // straight through both states rather than replaying the first half.
             tracks["stretching"] = track("stretching", frames:
-                (0..<8).map { (base + columns * 2 + $0, 0.212) }, loops: false)
+                [0.212, 0.212, 0.212, 0.500, 0.700, 0.300, 0.232, 0.232]
+                    .enumerated().map { (base + columns * 2 + $0.offset, $0.element) }, loops: false)
         }
 
         return PetAsset(

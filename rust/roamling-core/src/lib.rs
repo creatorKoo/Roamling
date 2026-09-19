@@ -63,7 +63,7 @@ pub use pet_runtime::{
 };
 pub use placement::{
     PetSituation, PlacementConfiguration, PlacementDirector, PlacementIntent, PlacementPolicy,
-    PlacementTravelReason,
+    PlacementTravelReason, RestPhase,
 };
 pub use pointer::{
     look_direction_degrees, PointerDecision, PointerInteractionConfiguration,

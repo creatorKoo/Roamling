@@ -73,9 +73,11 @@ Mochi v3는 다섯 항목을 확장 시트에서 직접 그린다.
 **더 그릴 행은 없다.**
 
 `stretching`은 **두 행을 잇는 유일한 행**이다. `sleeping`의 웅크림에서 출발해 `idle`의
-앉은 자세로 끝나야 하므로 양 끝이 이웃 행과 맞아야 한다. `wake` 0.7초와 `stretch` 1.0초가
+앉은 자세로 끝나야 하므로 양 끝이 이웃 행과 맞아야 한다. `wake` 0.7초와 `stretch` 1.9초가
 같은 capability이고 player는 capability가 바뀔 때만 트랙을 되감으므로, 여덟 칸이 두 상태에
-걸쳐 한 번에 재생된다.
+걸쳐 한 번에 재생된다. 칸마다 길이가 다르다 — 가장 늘어난 f3·f4에서 0.5초·0.7초 머문다
+(`roamling-pet/src/lib.rs` `stretching_frames`, `docs/placement.md` 3.6.3). **두 상태의 합과 트랙의
+합(2.6초)은 같아야 하고 테스트가 그것을 본다** (`stretching_track_matches_the_runtime_wake_and_stretch`).
 
 Petdex 9행만 있는 패키지에서 `sit`은 `waiting`이 아니라 **`idle`을 빌린다.** `waiting`의
 계약상 뜻이 "사용자에게 막힘 — 승인이나 입력 대기"라, 졸린 펫이 승인을 조르는 신호를
@@ -94,12 +96,13 @@ idle (row 0, 앉아서 깜박)
  │
  └─ 사용자 입력이 75초 없음 ────▶ sit (확장 sitting, 꾸벅)
      + 커서가 170px 밖                │
-     + 이동 중 아님                   └─ 2.4초 뒤 ──▶ 취침 자리 판정 (3.1)
+     + 이동 중 아님                   └─ 2.4초 뒤 ──▶ director의 답을 따른다 (3.1)
                                                         │
-                                       제자리 ──────────┤
+                                       SleepInPlace ────┤  제자리
                                                         │
-                                       findSleepSpot ───┤  row 1/2, 0.75배속 걷기
-                                       안전지대까지 걸어감    도착하면
+                                       RestAt(점) ──────┤  findSleepSpot, row 1/2, 0.75배속 걷기
+                                                        │  도착하면 director가 그 자리를 다시 잰다
+                                       NoRestSpot ──▶ 깨어 있음, 30초 뒤 재시도
                                                         ▼
                                                       sleep (확장 sleeping, 웅크림)
                                                         │
@@ -107,32 +110,53 @@ idle (row 0, 앉아서 깜박)
                                                         ▼
                                                  wake (확장 stretching 시작)
                                                    └ 0.7초 ─▶ stretch (확장 stretching, 기지개)
-                                                                └ 1.0초 ─▶ idle
+                                                                └ 1.9초 ─▶ idle
 ```
+
+**일어나는 2.6초 동안 펫을 가져갈 수 있는 것은 잡기뿐이다** (R21, `docs/placement.md` 3.6).
+커서·자리 이동·agent 반응은 버려지지 않고 `idle`이 된 뒤에 일어난다 — `finish_tick`의 else-if 사슬에서
+휴식 바로 다음에 있는 "일어나는 중" 분기가 그 tick을 갖고(`PetRuntime::is_waking`), `ActivityDirector`는
+일어나는 펫을 자는 펫과 같게 본다(`PetRuntime::cannot_react`). 승인 대기로 깬 펫은 기지개를 다 켠
+다음에 기다리는 포즈가 된다.
 
 ### 3.1 취침 자리 판정
 
-`sit`이 끝날 때 **지금 자리가 오래 자도 되는 자리인가**를 판단하고, 이동했다면 도착 뒤에도
-다시 확인한다. `sleep`에는 종료 타이머가 없으므로 새 캡처에서 내용이 펫 아래에 나타나면
-깨어난다. `rest_spot_is_busy`는 같은 위치·크기의 판정을 `set_luminance`가 다시 호출될 때까지
-재사용한다. Windows는 새 캡처 때 전달하지만 macOS는 매 tick 전달하므로 현재 캐시 효과가 다르다.
+**어디서 잘지는 휴식 층이 아니라 `PlacementDirector`가 정한다** (R20, 2026-09-19). 휴식 층
+(`pet_runtime/rest.rs`)은 언제 앉고 언제 깨는지만 알고 좌표를 고르지 않는다. `sit`이 끝나는 tick에
+`make_situation`이 휴식 단계(`RestPhase::Seeking`)를 실어 보내고, director의 답을 `follow_rest_answer`가
+그대로 따른다. 둘로 나뉘어 있던 때의 결함은 `docs/requests.md` B6.
 
-| 지금 자리 | 결정 | 판정 위치 |
+**agent를 지켜보는 중** — 자리가 곧 잠자리다. 다른 곳을 찾지 않는다 (`PlacementDirector::verdict` Priority 7).
+
+| 자리 | director의 답 | 펫 |
 |---|---|---|
-| 관측된 빈 자리이고, 경계 밖이며, 여유가 24pt 이상 개선되는 후보 없음 | 제자리 | `PetRuntime::begin_rest_travel` |
-| 내용과 겹치거나 여유가 더 큰 후보 있음 | 빈 후보 중 주변 여유가 가장 큰 곳으로 `findSleepSpot` | `BasicSafeZonePlanner::clear_destination` |
-| 관측한 후보가 전부 내용과 겹침 | 깨어 있고 30초 뒤 휴식 재시도 | `PetRuntime::defer_rest` |
-| 필드 없음 + 디렉터가 `.sleepInPlace`를 준 경계 밖 자리 | 기존처럼 제자리 | `PetRuntime::begin_rest_travel` |
-| 그 외 필드 없음 | 기존 모서리 배치 | `BasicSafeZonePlanner::destination` |
+| 유지 가능 · 몸체가 내용과 안 겹침 · 공유 경계 여유 밖 | `SleepInPlace` | 그 자리에서 잔다. 더 빈 곳이 멀리 있어도 가지 않는다 |
+| 유지 가능하지만 몸체 밑에 내용 | 더 나은 좌석이 있으면 `Travel(coveringWork)`, 없으면 `Hold` | 옮겨 앉아 거기서 자거나, 깨어서 자리를 지킨다 |
+| 자는 중에 답이 `Hold`로 바뀜 | — | 깬다, 30초 뒤 재시도 |
+
+**agent가 없을 때** — `PlacementDirector::rest_verdict` → `choose_rest_spot`.
+
+| 지금 자리 | director의 답 | 펫 |
+|---|---|---|
+| 관측된 빈 자리이고, 경계 밖이며, 여유가 24pt 이상 개선되는 후보 없음 | `SleepInPlace` | 제자리 |
+| 내용과 겹치거나 여유가 더 큰 후보 있음 | `RestAt(점)` — 모서리와 7×5 격자 중 주변 여유가 가장 큰 빈 곳 (`BasicSafeZonePlanner::clear_destination`) | `findSleepSpot`으로 걸어간다. 걷는 동안 다시 고르지 않는다 |
+| 관측한 후보가 전부 내용과 겹침 | `NoRestSpot` | 깨어 있고 30초 뒤 휴식 재시도 (`defer_rest`) |
+| 필드 없음 | 기존 모서리 배치 (`BasicSafeZonePlanner::destination`)로 `RestAt` | 걸어가서 잔다 |
+| 배회가 꺼져 있음 | 선 자리가 비었으면 `SleepInPlace`, 아니면 `NoRestSpot` | 자동 이동하지 않는다 |
+
+도착하면 그 tick에 director가 선 자리를 다시 잰다(`PlacementDirector::rest_arrival`) — 출발 뒤에 화면이
+바뀌었으면 잠들지 않는다. `sleep`에는 종료 타이머가 없으므로 자는 동안에도 매 tick 같은 질문을 하고,
+새 캡처에서 내용이 펫 아래에 나타나면 `NoRestSpot`이 돌아와 깬다. 이 판정은 같은 위치·크기에서
+캡처가 바뀔 때까지 재사용한다(`rest_check`, `PetRuntime::set_luminance`가 다른 필드를 받을 때 비운다) —
+Windows는 새 캡처 때만 필드를 넘기지만 macOS는 매 tick 넘긴다.
 
 여유 판정은 배회·작업 좌석과 같은 `ClearanceMap`을 쓴다. 모서리와 현재 화면의 7×5 격자를
 후보로 삼고, 내용과 겹치는 곳을 제외한 뒤 몸체에서 내용까지의 거리를 비교한다. 관측된 빈 후보가
 있으면 캡처 밖 후보가 우선할 수 없다. 후보 전체를 관측할 수 없을 때만 기존 배치 선호로 돌아간다.
 캡처가 없거나 캡처 밖이라는 사실은 내용이 없다는 검증을 뜻하지 않는다.
 
-배회가 꺼져 있으면 자동 이동하지 않는다. 이때도 `enter_sleep`은 현재 자리의 내용 겹침을
-검사하고, 겹치면 잠들지 않는다. 출발 후 화면 내용이 바뀌어도 같은 검사를 통과해야 잠든다.
-진단 로그 `rest`의 `no clear sleep spot, staying awake`로 휴식 보류를 확인할 수 있다.
+진단 로그에서는 `place`가 director의 답(`sleep in place` · `rest at x,y` · `no rest spot`)을,
+`rest`의 `no clear sleep spot, staying awake`가 휴식 보류를 보여 준다.
 
 **확장 시트가 들어오기 전에는** 이 네 상태가 전부 이미 보고 있던 두 그림(row 6, row 0)
 으로 처리됐다. 75초를 기다려 재운 결과가 "앉은 자세 그대로"라서 펫이 잤는지 아닌지
@@ -163,6 +187,7 @@ idle (row 0, 앉아서 깜박)
 ```
 
 자고 있을 때 커서가 가까이 오면 rest가 즉시 취소되고 `wake`로 간다(흐름 A의 오른쪽 경로).
+쳐다보거나 피하는 것은 기지개가 끝난 뒤다 — 그동안에도 잡을 수는 있다.
 
 **직접 클릭 (2026-09-18).** `finish_tick`은 셸이 몸체 위라고 판정하면 클릭 전달을 허용한다.
 `pointer_down`은 `touch_down`과 같은 몸체 범위·숨김·상호작용 설정·중복 누름 검사를 거쳐
@@ -438,10 +463,10 @@ differential 픽스처 10개가 위치로 이름을 부른다.
 | `idle` | 8.4~17.4초 | 배회 스케줄러 | `RuntimeTuning.wanderDelay` |
 | `wander` | 목적지까지 (160pt/s) | 도착 | `MovementController` |
 | `sit` | 2.4초 | 고정 타이머 | `RestConfiguration.sittingDuration` |
-| `findSleepSpot` | 목적지까지 (120pt/s) — 자리가 검증되면 아예 건너뜀 (3.1) | 도착 | `beginRestTravel` |
-| `sleep` | 무제한 | 입력 0.8초 or 커서 접근 | `updateRestLifecycle` |
-| `wake` | 0.7초 | 고정 | `BehaviorTiming.wake` |
-| `stretch` | 1.0초 | 고정 | `BehaviorTiming.stretch` |
+| `findSleepSpot` | 목적지까지 (120pt/s) — director가 `SleepInPlace`를 주면 아예 건너뜀 (3.1) | 도착 | `rest.rs` `follow_rest_answer` |
+| `sleep` | 무제한 | 입력 0.8초 · 커서 접근 · director의 `NoRestSpot` | `rest.rs` `update_rest_lifecycle` |
+| `wake` | 0.7초 | 고정 — 잡기만 끊는다 | `behavior.rs` `timing::WAKE` |
+| `stretch` | **1.9초** | 고정 — 잡기만 끊는다. 포팅 대조군은 1.0초(`timing::STRETCH`)로 비교되고 런타임이 `timing::FULL_STRETCH`를 넣는다 | `BehaviorController::with_stretch_duration` |
 | `dropped` | **0.84초** | 고정 — 점프 행을 빌리므로 Petdex `jumping` 표준 | `BehaviorTiming.dropped` |
 | `spark` | **0.84초** | 고정 — Petdex `jumping` 표준 | `BehaviorTiming.spark` |
 | `observe` | **1.03초** | 고정 — Petdex `review` 표준 | `BehaviorTiming.observe` |

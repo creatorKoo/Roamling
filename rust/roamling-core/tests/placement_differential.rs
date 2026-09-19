@@ -16,7 +16,7 @@
 use roamling_core::{
     DesktopWorldSnapshot, DisplaySnapshot, FocusSnapshot, LocationHint, LuminanceField,
     PetSituation, PlacementConfiguration, PlacementDirector, PlacementIntent, PlacementPolicy,
-    PlacementTravelReason, WorldPoint, WorldRect, WorldSize,
+    PlacementTravelReason, RestPhase, WorldPoint, WorldRect, WorldSize,
 };
 
 const NIL: f64 = -999.0;
@@ -127,6 +127,9 @@ fn encode(intent: &PlacementIntent) -> Vec<f64> {
         PlacementIntent::SleepInPlace => vec![3.0, NIL, NIL, NIL, NIL],
         PlacementIntent::Stroll(point) => vec![4.0, point.x, point.y, NIL, NIL],
         PlacementIntent::Escape(point) => vec![5.0, point.x, point.y, NIL, NIL],
+        PlacementIntent::RestAt(_) | PlacementIntent::NoRestSpot => {
+            unreachable!("the ported contract never chooses a rest spot")
+        }
     }
 }
 
@@ -148,6 +151,7 @@ fn situation(input: &[f64], scene: &Scene) -> PetSituation {
         is_evading: input[12] == 1.0,
         is_walking: input[13] == 1.0,
         is_resting: input[14] == 1.0,
+        rest_phase: RestPhase::from_resting(input[14] == 1.0),
         activity_source_id: (input[15] == 1.0).then(|| format!("s{}", input[16] as i64)),
         activity_hint: (input[17] == 1.0).then(|| scene.hint.clone()),
         user_idle_duration: input[18],
