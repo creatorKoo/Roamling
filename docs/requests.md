@@ -68,7 +68,14 @@
 - **들어가는 것** 0.6.7 뒤의 전부 — R16 리팩터 묶음, R19(데스크톱 0.5× · 1배 미만 부드럽게), R20 · B6 · B7(잠자리는
   director가), R21(기지개), B8(Codex 승인 대기 A · B), 녹화 기준 갱신, 보리 그림 라이선스 문구. Android 변경(R17 ·
   R18)은 저장소에 있지만 데스크톱 릴리스의 산출물이 아니다.
-- **상태** 진행.
+- **발행 (2026-09-19)** 버전 `5049fc7`. push가 띄운 Check macOS · Windows · Android 셋이 통과한 다음 그 커밋에
+  `v0.6.8`을 밀었고, [릴리스 워크플로](https://github.com/creatorKoo/Roamling/actions/runs/35445513945)의
+  macos · windows · publish 잡이 **다시 돌리지 않고 한 번에** 통과했다.
+  [v0.6.8](https://github.com/creatorKoo/Roamling/releases/tag/v0.6.8)에 공개 파일 6개(`Roamling-0.6.8.dmg` ·
+  `Roamling-0.6.8.zip` · `Roamling-Setup.exe` · `roamling.exe` · `appcast.json` · `appcast.json.sig`)가 올라갔고
+  `latest` 피드가 0.6.8의 두 플랫폼 URL을 가리킨다. 이 PC의 펫은 같은 커밋의 로컬 빌드(exe 버전 0.6.8)다.
+- **남은 것** 맥 실물 — 잠자리 · 기지개 · Codex 곁의 모습, R16의 맥 목록, 설치판이 자동 업데이트로 0.6.8을 받는지.
+- **상태** 완료.
 
 ### R20. 휴식과 자리를 한 층에서 보게 (2026-09-19)
 
