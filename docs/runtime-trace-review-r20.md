@@ -73,5 +73,7 @@
 
 ## 재현성 확인
 
-기준을 바꾼 뒤 일반 macOS 검증이 `ROAMLING_WRITE_TRACE` 없이 새 기준과 바이트로 맞아야 한다 — 산출
-실행은 비교를 하지 않았으므로 이것이 첫 비교다. 결과는 아래에 적는다.
+산출 실행은 비교를 하지 않았으므로 기준을 바꾼 뒤의 일반 검증이 첫 비교다.
+[Check macOS](https://github.com/creatorKoo/Roamling/actions/runs/35439561271)가 커밋 `c0d3bd6`에서
+`ROAMLING_WRITE_TRACE` 없이 통과했다 — `a recorded session replays tick for tick`이 새 기준과 바이트로
+맞았고, Rust 코어 89개와 differential, 서명 빌드와 패키징된 앱의 실행까지 같은 실행에서 통과했다.
