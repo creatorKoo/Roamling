@@ -25,12 +25,17 @@ public struct CodexHookPayload: Decodable, Sendable {
     public let event: CodexHookEvent
     /// The tool's name only, matched against a fixed list. See `ToolActivity`.
     public let toolName: String?
+    /// Where the session's record is. Kept for one question only -- who answers
+    /// an approval request -- and handed to `CodexApprovalReviewer`, which says
+    /// what it reads there.
+    public let transcriptPath: String?
 
     private enum CodingKeys: String, CodingKey {
         case sessionID = "session_id"
         case turnID = "turn_id"
         case hookEventName = "hook_event_name"
         case toolName = "tool_name"
+        case transcriptPath = "transcript_path"
     }
 
     public init(from decoder: Decoder) throws {
@@ -47,19 +52,44 @@ public struct CodexHookPayload: Decodable, Sendable {
         }
         self.event = event
         toolName = try container.decodeIfPresent(String.self, forKey: .toolName)
+        transcriptPath = try container.decodeIfPresent(String.self, forKey: .transcriptPath)
     }
 }
 
-/// Reads only lifecycle identifiers and the tool's name. Prompt text, transcript
-/// paths, tool input/output, source code, and assistant messages are
-/// intentionally absent. The name is matched against `ToolActivity`'s fixed list
-/// so the pet can tell reading from doing, which is the split Petdex draws.
+/// Reads only lifecycle identifiers and the tool's name. Prompt text, tool
+/// input/output, source code, and assistant messages are intentionally absent.
+/// The name is matched against `ToolActivity`'s fixed list so the pet can tell
+/// reading from doing, which is the split Petdex draws.
+///
+/// The transcript path is read for one purpose: an approval request is dropped
+/// when the session's record says Codex answers it itself. See
+/// `CodexApprovalReviewer`.
 public enum CodexEventNormalizer {
     public static func event(
         from data: Data,
         timestamp: TimeInterval
     ) throws -> CompanionEvent? {
+        try normalized(from: data, timestamp: timestamp) { payload in
+            CodexApprovalReviewer.answersItself(
+                transcriptPath: payload.transcriptPath,
+                turnID: payload.turnID
+            )
+        }
+    }
+
+    /// `event`, with the one question that needs a file asked through a closure
+    /// so the mapping can be tested without one.
+    public static func normalized(
+        from data: Data,
+        timestamp: TimeInterval,
+        codexAnswersItself: (CodexHookPayload) -> Bool
+    ) throws -> CompanionEvent? {
         let payload = try JSONDecoder().decode(CodexHookPayload.self, from: data)
+        // Codex asks its hooks before it decides who answers. Under auto-review
+        // that is Codex, and the pet asking the user would be asking nobody.
+        if payload.event == .permissionRequest, codexAnswersItself(payload) {
+            return nil
+        }
         guard let mapping = mapping(for: payload) else { return nil }
         return CompanionEvent(
             sourceID: "codex:\(payload.sessionID)",

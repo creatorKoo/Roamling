@@ -68,8 +68,9 @@ macOS는 UniFFI 바인딩과 `RustCore.swift`, Windows는 Rust 직접 링크, An
 - `ClaudeCodeSource`, `CodexSource`: receiver를 `ActivitySource` async stream으로 노출
 - `ClaudeCodeHookInstaller`: user settings를 보존하는 opt-in install/repair/remove
 - `CodexHookInstaller`: sibling hook과 기존 `config.toml`/`notify`를 보존하는 user hook installer
-- product-specific payload는 이 module 밖으로 나가지 않으며 prompt, transcript, tool input/output
-  key를 decode model에 선언하지 않는다.
+- product-specific payload는 이 module 밖으로 나가지 않으며 prompt, tool input/output key를 decode
+  model에 선언하지 않는다. **transcript는 한 경우에 한 값만 읽는다** — Codex의 승인 요청을 누가 답하는지
+  (`CodexApprovalReviewer` / `roamling-agent`의 `reviewer.rs`). 아래 Codex 절 참조.
 
 **agent가 아닌 activity source도 하나 있다.** 사용자가 지정한 앱에서 일할 때 반응하는
 `focus_activity.rs`(Rust core)다. 이 module에는 없는데, 훅도 transport도 payload도 없기
@@ -186,9 +187,25 @@ total timeout 뒤 실패를 삼키므로 Roamling이 꺼져 있어도 Codex turn
 installer는 `config.toml`을 열거나 수정하지 않으므로 이미 설정된 legacy `notify`와
 공존한다. Codex의 hook trust prompt는 자동 승인하지 않는다.
 
-Codex decoder가 읽는 값은 `session_id`, optional `turn_id`, `hook_event_name`뿐이다.
-Codex가 stdin에 함께 넣는 cwd, transcript path, prompt, model, tool input/output,
-assistant message는 decode model과 metadata에 없다. Claude/Codex listener는 transport만
+Codex decoder가 읽는 값은 `session_id`, optional `turn_id`, `hook_event_name`, `tool_name`, 그리고
+`transcript_path`다. Codex가 stdin에 함께 넣는 cwd, prompt, model, tool input/output, assistant message는
+decode model과 metadata에 없다.
+
+**`transcript_path`는 질문 하나에만 쓴다 — 이 승인 요청을 누가 답하는가** (사용자 결정 2026-09-19,
+`docs/requests.md` B8). Codex는 `PermissionRequest` 훅을 요청을 라우팅하기 **전에** 부르고 payload에 승인
+주체를 넣지 않는다(openai/codex #23465 · #28833). 자동 검토 세션에서는 그 요청 대부분이 사용자에게 가지
+않으므로, 그대로 두면 펫은 도는 내내 아무도 기다리지 않는 승인을 기다린다. 세션 기록의 `turn_context`
+줄에 `approvals_reviewer`가 있어서 그 값만 읽는다:
+
+- `"turn_context"`라고 적힌 줄만 JSON으로 풀고, 그 줄에서 `turn_id`와 `approvals_reviewer`만 본다. 메시지·
+  도구 출력이 든 나머지 줄은 풀지 않고 건너뛴다. 아무것도 저장하지 않는다(같은 턴의 다음 요청을 위한
+  답 하나만 메모리에 둔다).
+- 경로는 요청으로 들어오므로 **`~/.codex`(`CODEX_HOME`) 아래의 `.jsonl`만 연다.** 링크와 `..`은 풀어서 본다.
+- 묻는 턴은 가장 새 턴이라 파일 끝에서부터 1 MB · 16 MB · 전체 순으로 읽는다. 256 MB를 넘으면 읽지 않는다.
+- 값이 `auto_review`나 `guardian_subagent`면 그 `PermissionRequest`는 이벤트가 되지 않는다. **알 수 없으면
+  (경로 없음 · 못 읽음 · 줄 없음) 사용자 대기로 둔다** — 틀릴 거면 묻는 쪽으로 틀린다.
+- **못 아는 것:** 자동 검토자가 판단을 못 해 사용자에게 되묻는 순간. 그것을 알리는 훅이 없다. 자동 검토
+  세션에서는 그 질문도 같이 가려진다 — 알고 고른 것이다. Claude/Codex listener는 transport만
 공유하며 product event mapping은 각 adapter에 남는다.
 
 ## Context

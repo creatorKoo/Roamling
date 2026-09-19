@@ -72,10 +72,27 @@ pub const TOKEN_HEADER: &str = "X-Roamling-Token";
 /// `None` where the event is real but says nothing the pet should react to --
 /// a compaction, or a notification of a kind we do not answer.
 pub fn event(agent: Agent, body: &[u8], timestamp: f64) -> Option<CompanionEvent> {
+    event_with(agent, body, timestamp, crate::reviewer::codex_answers_itself)
+}
+
+/// `event`, with the one question that needs a file asked through a closure so
+/// the mapping can be tested without one.
+fn event_with(
+    agent: Agent,
+    body: &[u8],
+    timestamp: f64,
+    codex_answers_itself: impl Fn(&Value) -> bool,
+) -> Option<CompanionEvent> {
     let payload: Value = serde_json::from_slice(body).ok()?;
     let session = text(&payload, "session_id")?;
     let name = text(&payload, "hook_event_name")?;
     let tool = text(&payload, "tool_name");
+
+    // Codex asks its hooks before it decides who answers. Under auto-review
+    // that is Codex, and the pet asking the user would be asking nobody.
+    if agent == Agent::Codex && name == "PermissionRequest" && codex_answers_itself(&payload) {
+        return None;
+    }
 
     let (kind, intensity) = match agent {
         Agent::ClaudeCode => claude_code(name, tool, text(&payload, "notification_type"))?,
@@ -205,6 +222,20 @@ mod tests {
 
     /// A notification the pet has no answer for must not become an event, or
     /// every one of them would wake it.
+    #[test]
+    fn an_approval_codex_gives_itself_is_not_the_users_to_answer() {
+        let ask = body(r#"{"session_id":"s","turn_id":"t","hook_event_name":"PermissionRequest"}"#);
+        let asked = event_with(Agent::Codex, &ask, 1.0, |_| false).unwrap();
+        assert_eq!(asked.kind, CompanionEventKind::AttentionRequired);
+        assert!(event_with(Agent::Codex, &ask, 1.0, |_| true).is_none());
+
+        // Only the question is dropped. The work around it is still work.
+        let tool = body(r#"{"session_id":"s","hook_event_name":"PreToolUse","tool_name":"Edit"}"#);
+        assert!(event_with(Agent::Codex, &tool, 1.0, |_| true).is_some());
+        // Claude Code has no reviewer of its own: a person answers every one.
+        assert!(event_with(Agent::ClaudeCode, &ask, 1.0, |_| true).is_some());
+    }
+
     #[test]
     fn an_unanswered_notification_is_dropped() {
         let json = r#"{"session_id":"s","hook_event_name":"Notification","notification_type":"other"}"#;

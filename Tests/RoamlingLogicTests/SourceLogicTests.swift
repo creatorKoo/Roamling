@@ -197,6 +197,65 @@ func sourceLogicTests() -> [LogicTest] {
             try expect(end?.kind == .activityEnded)
             try expect(compact == nil)
         },
+        LogicTest(name: "An approval Codex gives itself is not the user's to answer") {
+            let ask = Data(#"{"session_id":"s","turn_id":"t","hook_event_name":"PermissionRequest"}"#.utf8)
+            let asked = try CodexEventNormalizer.normalized(from: ask, timestamp: 1) { _ in false }
+            try expect(asked?.kind == .attentionRequired)
+            let silent = try CodexEventNormalizer.normalized(from: ask, timestamp: 1) { _ in true }
+            try expect(silent == nil)
+            // Only the question is dropped. The work around it is still work.
+            let tool = Data(#"{"session_id":"s","hook_event_name":"PreToolUse","tool_name":"Edit"}"#.utf8)
+            let working = try CodexEventNormalizer.normalized(from: tool, timestamp: 1) { _ in true }
+            try expect(working?.kind == .highIntensity)
+        },
+        LogicTest(name: "The Codex reviewer is read from the asking turn, inside Codex home only") {
+            let manager = FileManager.default
+            let root = manager.temporaryDirectory
+                .appendingPathComponent("roamling-reviewer-\(ProcessInfo.processInfo.processIdentifier)")
+            let home = root.appendingPathComponent("home")
+            let elsewhere = root.appendingPathComponent("elsewhere")
+            try? manager.removeItem(at: root)
+            defer { try? manager.removeItem(at: root) }
+            for directory in [home, elsewhere] {
+                try manager.createDirectory(
+                    at: directory.appendingPathComponent("sessions"),
+                    withIntermediateDirectories: true
+                )
+            }
+            func turn(_ id: String, _ reviewer: String) -> String {
+                #"{"type":"turn_context","payload":{"turn_id":""# + id
+                    + #"","approval_policy":"on-request","approvals_reviewer":""# + reviewer + #""}}"#
+            }
+            func record(_ base: URL, _ name: String, _ lines: [String]) throws -> URL {
+                let url = base.appendingPathComponent("sessions").appendingPathComponent(name)
+                try Data((lines.joined(separator: "\n") + "\n").utf8).write(to: url)
+                return url
+            }
+            let filler = #"{"type":"response_item","payload":{"text":""#
+                + String(repeating: "x", count: 4_000) + #" turn_context auto_review"}}"#
+            let long = try record(
+                home, "long.jsonl",
+                [turn("old", "user")] + Array(repeating: filler, count: 600) + [turn("new", "auto_review")]
+            )
+            try expect(CodexApprovalReviewer.answersItself(record: long, turnID: "new", home: home))
+            try expect(!CodexApprovalReviewer.answersItself(record: long, turnID: "old", home: home))
+            try expect(CodexApprovalReviewer.answersItself(record: long, turnID: nil, home: home))
+
+            // Anything that cannot be read is the user's to answer.
+            let missing = home.appendingPathComponent("sessions/missing.jsonl")
+            try expect(!CodexApprovalReviewer.answersItself(record: missing, turnID: "t", home: home))
+            let empty = try record(home, "empty.jsonl", [#"{"type":"session_meta","payload":{}}"#])
+            try expect(!CodexApprovalReviewer.answersItself(record: empty, turnID: "t", home: home))
+            try expect(!CodexApprovalReviewer.answersItself(transcriptPath: nil, turnID: "t"))
+
+            // The path comes from a request. Nothing outside Codex home is opened.
+            let outside = try record(elsewhere, "rollout.jsonl", [turn("t", "auto_review")])
+            try expect(!CodexApprovalReviewer.answersItself(record: outside, turnID: "t", home: home))
+            let climbing = home.appendingPathComponent("sessions/../../elsewhere/sessions/rollout.jsonl")
+            try expect(!CodexApprovalReviewer.answersItself(record: climbing, turnID: "t", home: home))
+            let notARecord = try record(home, "notes.txt", [turn("t", "auto_review")])
+            try expect(!CodexApprovalReviewer.answersItself(record: notARecord, turnID: "t", home: home))
+        },
         LogicTest(name: "Codex hook install is idempotent and preserves siblings") {
             let folder = FileManager.default.temporaryDirectory
                 .appendingPathComponent("roamling-codex-hooks-\(UUID().uuidString)", isDirectory: true)

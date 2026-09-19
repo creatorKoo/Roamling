@@ -13,12 +13,18 @@
 //! the hook into the user's own config (`installer`).
 //!
 //! **Product-specific payload does not leave this crate**, and the decode never
-//! looks at prompt text, transcripts, tool input or output. That is the same
-//! line the Swift module draws, drawn in the same place.
+//! looks at prompt text, tool input or output. That is the same line the Swift
+//! module draws, drawn in the same place.
+//!
+//! A transcript is opened in exactly one case and for exactly one value: who
+//! answers a Codex approval request, which the hook does not say and the
+//! session's `turn_context` line does. `reviewer` is that case, and says what
+//! it does and does not read.
 
 pub mod installer;
 pub mod normalize;
 pub mod receiver;
+mod reviewer;
 
 pub use normalize::{Agent, TOKEN_HEADER};
 pub use receiver::Receiver;

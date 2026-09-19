@@ -117,6 +117,16 @@ Codex after installation and approve its hook trust prompt. The Codex receiver
 uses a separate authenticated `127.0.0.1` port and applies the same no-content-
 storage rule.
 
+There is one thing Roamling reads from a Codex session record, and it is not
+content. Codex's hook does not say whether an approval request goes to you or
+to Codex's own auto-reviewer, so when one arrives Roamling opens that session's
+record under `~/.codex` and reads a single setting from the line that opens the
+turn: `approvals_reviewer`. Messages, prompts and tool output in the same file
+are skipped without being parsed, nothing is stored, and no file outside
+`~/.codex` is opened. When the reviewer is Codex itself the pet does not ask
+you for anything — which also means that on the rare occasion the auto-reviewer
+hands a question back to you, the pet will not know.
+
 ## Windows
 
 Download `Roamling-Setup.exe` from the

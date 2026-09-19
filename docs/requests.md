@@ -87,9 +87,11 @@
 - **녹화 (2026-09-19)** 제안 녹화의 차이가 예고와 같았다 — 17개 구간 중 16개(agent 없는 휴식 420틱 포함)가
   난수 카운터까지 같고, 마지막 구간만 기지개 0.9초와 그 뒤 산책이 다르다. 사용자 "응 승인".
   `docs/runtime-trace-review-r20.md`, 이전 기준은 `Tests/Fixtures/runtime/RuntimeTrace-pre-r20.txt`.
-- **상태** 진행 — 구현·녹화 갱신. **사용자 실사용 확인이 남았다** ("나머지는 더 봐야해", 2026-09-19):
-  agent를 돌려 두고 자리를 비운 뒤 진단 로그에 6초 바퀴가 없는지, 그리고 반응 없이 깨는 기상
-  (`docs/placement.md` 3.5.6)이 새 로그에도 보이는지.
+- **사용자 확인 (2026-09-19, Windows)** B8을 고친 빌드로 Codex 곁에 두고 본 뒤 "6초 바퀴 일단 닫자 크게 문제
+  없는거 같애 또 생기면 알려줄께", "반응없이 깨는것도 고쳐진거 같기도 하고". 반응 없이 깨던 것은 원인을 확정하지
+  못한 채다 — B8(승인 요청이 이벤트가 되던 것)이 그 기상의 출처였을 수 있지만 증명한 것은 아니다. 다시 보이면
+  `docs/placement.md` 3.5.6에서 이어 간다.
+- **상태** 완료 — Windows 실사용 확인. macOS 실물은 다음에 맥에서 볼 때.
 
 ### R21. 일어날 때 기지개는 무조건, 그리고 좀 길게 (2026-09-19)
 
@@ -733,7 +735,8 @@
 - **미확정** 3번의 `CoveringWork`가 `departure_reason`의 두 분기(emptiness 미달 / 여유 개선) 중 어느
   쪽인지. 로그에는 같은 이름으로 찍힌다.
 - **상태** 고침(2026-09-19, R20). 회귀 테스트 `rest_b6_agent_sleeps_on_its_seat_for_sixty_seconds`와
-  느린 판 둘(`rest_sparse_content_…`, `clearance_tests.rs`). 사용자 실사용 확인 대기.
+  느린 판 둘(`rest_sparse_content_…`, `clearance_tests.rs`). 사용자 확인 2026-09-19 — "일단 닫자 … 또 생기면
+  알려줄께".
 
 ### B7. 서 있는 자리로 산책을 나간다, 다시 — 격자 후보는 걸러지지 않는다 (2026-09-19)
 
@@ -749,6 +752,77 @@
 - **상태** 고침(2026-09-19, R20). `PlacementDirector::comfortable`이 선 자리에서
   `minimum_travel_distance` 안쪽인 후보를 무작위·격자 모두 버린다. 회귀 테스트
   `rest_b7_stroll_does_not_choose_the_grid_point_under_its_feet`.
+
+### B8. Codex가 일하는 내내 갸웃거린다 — 승인이 난 것을 아무도 알려 주지 않는다 (2026-09-19)
+
+- **누가·언제** 사용자, 2026-09-19, Windows. B6을 확인하려고 Codex를 돌려 두고 기다리던 중.
+- **원문** "오래 있어도 안 자고 고개 갸웃하는 것으로 계속 있는데? 원래 agent 돌고 있을 때 running 이 아닌
+  상황이라면 안 자니?"
+- **안 자는 것은 설계다.** `BehaviorState::allows_rest_entry`(`behavior.rs`)에 `WaitingForUser`가 없다 —
+  승인을 기다리는 펫은 답이 올 때까지 계속 묻는다. R20이 바꾼 것이 아니고, B6의 로그에도 있다
+  (2307.3~2568.6초, 4분 21초 동안 `rest state waitingForUser`).
+- **결함은 그 앞이다 — 일하는 중인데 기다리는 포즈다.** (코드와 B6의 로그로 진단, 오늘의 로그는 아직 못 봤다)
+  1. Codex의 `PermissionRequest`는 `AttentionRequired`(0.95)가 된다(`roamling-agent/src/normalize.rs` `codex`).
+     `Paw`는 유지되는 반응이라 다음 이벤트가 올 때까지 입고 있는다(`activity_director.rs` `dispatch`).
+  2. **승인이 났다는 훅은 없다.** 그 뒤에 오는 것은 도구가 끝난 뒤의 `PostToolUse`뿐이고, 그것은
+     `Positive` 0.08이라 `ROUTINE_POSITIVE_INTENSITY`(0.15) 아래에서 통째로 버려진다(`handle_event` 첫 줄).
+  3. 그래서 기다리는 포즈는 **다음 도구의 `PreToolUse`까지**, 즉 승인받은 명령이 도는 내내 간다.
+     B6의 로그가 그 모양이다 — `33615.7 work` → `33616.2 waitingForUser`(0.5초 뒤) → `33621.7 work` →
+     `33622.1 waitingForUser` …: `PreToolUse` 0.5초 뒤에 `PermissionRequest`가 오고, `work`는 늘 0.5초뿐이다.
+  4. 그 구간에 이 PC에는 입력이 없었다(`rest`가 계속 `clear to rest`). 승인한 것은 사람이 아니다 — Codex의
+     `auto-review` 모드는 승인 요청을 검토 에이전트에게 보낸다. **사용자를 기다린 적이 없는데 사용자를
+     기다린다고 말하고 있었다.**
+- **미확정** 훅 payload에 "누가 승인하는가"가 들어 있는지. 들어 있으면 검토 에이전트에게 가는 요청은
+  처음부터 `AttentionRequired`로 만들지 않을 수 있다. 실제 payload를 하나 받아 봐야 안다.
+- **선택지** A. 승인 대기 중에 같은 agent의 `PostToolUse`가 오면 "다시 일하는 중"으로 읽는다(도구가 끝나야
+  풀린다) · B. 검토 에이전트에게 가는 승인 요청은 처음부터 사용자 대기로 만들지 않는다(payload 확인이 먼저) ·
+  C. 갸웃에 시한을 둔다(진짜 대기까지 풀려서 권하지 않음).
+- **결정 (2026-09-19)** "갸웃이랑 일하는거랑 왔다갔다 하는거 귀엽긴해서 A만 해도 될 것 같긴한데.. 클로드는
+  이런거 없으니까 통일성을 위해서 B까지 해야하나 싶기도하고.. ㅎ.. 일단 A를 먼저해볼까?" — **A를 먼저 한다.**
+  B는 A를 써 본 뒤에 정한다. 규칙은 director에 있어 Claude Code에도 같이 적용된다(같은 훅 모양이다).
+- **A 구현 (2026-09-19, Windows)** `ActivityDirector::resuming_after_approval` — 승인 대기(`Paw`)를 입고 있는
+  agent에게서 온 일상 `Positive`는 버리지 않고 `work`로 돌린다. `recent`와 `pending`에 남은 그 질문도
+  같이 치운다(안 그러면 다른 source가 자리를 놓을 때나 기지개 뒤에 다시 묻는다). 포팅 대조군의 기본값에서는
+  꺼져 있고 런타임이 켠다. 회귀 테스트 `a_tool_that_ran_means_the_approval_it_asked_for_was_given`.
+- **테스트를 짜다 나온 결함 하나 (같이 고침)** R21 뒤로 **승인 요청으로 깬 펫이 갸웃을 한 번도 보여 주지 않고
+  다시 잤다.** 창을 아는 agent의 반응은 곧바로 입지 않고 "자리에서 입을 빚"(`arrival_reaction`)으로 남는데,
+  그 빚은 tick의 뒤쪽(`hold_seat`)에서 갚고 휴식은 앞쪽에서 돈다 — 기지개가 끝난 tick에 휴식이 먼저 앉혀
+  버렸다. 예전에는 뒤따르는 이벤트가 `wake`를 끊고 들어와 가려져 있었다. 이제 빚이 있는 동안은 쉬지 않는다
+  (`rest.rs` `update_rest_lifecycle`, 진단 `rest reaction owed`). 회귀 테스트
+  `an_answered_question_lets_the_pet_doze_beside_the_running_tool`(고치기 전: 110초에 `WaitingForUser`여야
+  하는데 `Sleep`).
+- **확인** `scripts/test.ps1` 전체 통과(코어 91 · differential 10묶음 · 셸 57 · 릴리스 빌드), 새 빌드로 펫 재실행.
+  두 테스트 모두 고치기 전 코드에서 실패하는 것을 먼저 봤다. macOS와 `RuntimeTrace`는 아직 — 녹화의 휴식은
+  agent가 끝난 뒤라 빚이 없어 그대로일 것으로 보지만 CI가 말한다.
+- **B 조사 (2026-09-19)** "응 B 도 그럼 같이 해줘 승인". 훅 payload에는 승인 주체가 없다 — upstream에 그것을
+  요청하는 이슈가 열려 있다(openai/codex #23465, #28833). Codex는 훅을 검토 에이전트에게 넘기기 **전에**
+  부른다. 정보가 있는 곳은 둘: 세션 기록(rollout `.jsonl`)의 `turn_context.approvals_reviewer`(턴 단위로 정확,
+  payload의 `transcript_path` · `turn_id`로 찾는다)와 `~/.codex/config.toml`의 같은 키(전역 기본값).
+- **충돌 둘을 올렸다.** ① 세션 기록을 여는 것은 이 프로젝트가 적어 둔 선("the decode never looks at …
+  transcripts" — `README.md`, `roamling-agent/src/lib.rs`, `docs/architecture.md`, Swift `CodexEventNormalizer`)을
+  넘는다. ② 사용자가 짚은 것 — "codex가 필요하면, 나한테 물어볼때도 있어서 실제로 놓칠 수도 있을 것 같애":
+  검토 에이전트가 사용자에게 되묻는 순간을 알리는 훅이 없어서, 어느 쪽으로 가리든 자동 검토 세션의 진짜
+  질문까지 같이 가려진다.
+- **결정 (2026-09-19)** 셋(A만 · config · 세션 기록)을 놓고 사용자가 **세션 기록**을 골랐다. 놓칠 수 있다는 것을
+  알고 고른 것이다. 선은 이렇게 다시 긋는다: **세션 기록에서 `turn_context` 줄의 `approvals_reviewer` 한 값만
+  읽는다. 프롬프트·메시지·도구 입출력은 읽지 않고, 아무것도 저장하지 않으며, `~/.codex`(`CODEX_HOME`) 밖의
+  경로는 열지 않는다.** 알 수 없으면(경로 없음 · 못 읽음 · 줄 없음) 지금처럼 사용자 대기로 둔다.
+- **B 구현 (2026-09-19)** Rust `roamling-agent/src/reviewer.rs`와 Swift `CodexApprovalReviewer.swift`, 규칙은
+  같다. Codex의 `PermissionRequest`에서만 부르고, 자동 검토면 그 요청은 이벤트가 되지 않는다. 묻는 턴이 가장
+  새 턴이라 파일 끝에서부터 읽는다 — 실제 39 MB 기록을 통째로 읽으면 디버그 빌드에서 1.5초였다.
+  고친 문장: `README.md` · `README.ko.md`의 연동 절, `docs/architecture.md`의 Codex 절, 두 모듈의 머리 주석.
+- **실물 확인 (Windows)** 돌고 있는 펫의 수신기에 훅을 직접 넣고 상태 로그를 받아 봤다. 오늘의 실제 Codex
+  세션 기록(`auto_review`)을 가리키는 `PermissionRequest`는 **이벤트가 되지 않았고**(바로 앞의 `PreToolUse`는
+  `HighIntensity`로 들어왔다), 같은 기록을 `~/.codex` 밖에 복사해 가리키면 `AttentionRequired` →
+  `WaitingForUser`였다. 기록이 없는 세션은 사용자 대기 → `PostToolUse`에 `Work`(A) → 곧 그 자리에서 잠.
+  **첫 시도는 아무것도 증명하지 못했다** — bash가 Windows 경로의 역슬래시를 접어 JSON이 깨졌고, 수신기는
+  깨진 payload에도 204를 주므로 "조용했다"가 "가려냈다"처럼 보였다. 앞의 `PreToolUse`까지 안 찍힌 것을 보고
+  알았다. 가짜 입력이 실물과 다른 모양이면 조용한 것도 아무것도 증명하지 않는다.
+- **확인** `scripts/test.ps1` 전체 통과(코어 91 · agent 18 · 셸 57 · 릴리스 빌드). Swift는 여기서 컴파일하지
+  못했다 — 같은 기대를 적은 하네스 테스트 둘(`SourceLogicTests.swift`)과 함께 macOS CI가 본다.
+- **사용자 확인 (2026-09-19, Windows)** "응 잘된다 codex에서 문제 없는거 확인" — 새 빌드(21:10 빌드, 21:12 실행)로
+  Codex(auto-review) 곁에서 직접 봤다.
+- **상태** 완료 — A·B 구현, Windows 실사용 확인. macOS CI 결과는 커밋 기록에.
 
 ## 거절·보류
 
