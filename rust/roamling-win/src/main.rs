@@ -263,7 +263,9 @@ fn main() -> Result<()> {
     let cursor_aware = stored.bool(settings::CURSOR_AWARENESS, false);
     let auto_update = stored.bool(settings::AUTO_UPDATE, true);
     // Clamped to the range the menu offers, so a hand-edited settings file
-    // cannot produce a pet too small to catch or too big to walk around.
+    // cannot produce a pet too small to see or too big to walk around. The
+    // floor is the menu's smallest size: a tenth and a quarter were tried on a
+    // desktop and looked wrong (R19), so half is as small as it goes.
     let scale = stored
         .number(settings::SCALE)
         .unwrap_or(1.0)
@@ -882,7 +884,7 @@ fn draw(hwnd: HWND, app: &mut App, position: WorldPoint, scale: f64) {
     if app.drawn != Some((frame, scale)) {
         if let Some(rect) = app.asset.frame_rect(frame) {
             if let Some(sheet) = app.asset.sheet(rect.sheet) {
-                surface.draw_frame(sheet, rect);
+                surface.draw_frame(sheet, rect, app.scale < 1.0);
                 app.drawn = Some((frame, scale));
             }
         }

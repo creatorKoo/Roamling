@@ -327,7 +327,8 @@ pub struct MenuState {
 }
 
 /// The sizes the menu offers, matching `ShellMenu.scaleChoices`.
-pub const SCALE_CHOICES: [(&str, f64); 4] = [
+pub const SCALE_CHOICES: [(&str, f64); 5] = [
+    ("0.5x", 0.5),
     ("0.75x", 0.75),
     ("1.0x", 1.0),
     ("1.25x", 1.25),

@@ -481,7 +481,8 @@ final class FakeOverlay: PetOverlayProviding {
     func setPosition(_ position: WorldPoint) { self.position = position }
     func setVisible(_ visible: Bool) { isVisible = visible }
     func setInteractionEnabled(_ enabled: Bool) { isInteractionEnabled = enabled }
-    func setScale(_ scale: Double) { self.scale = scale.clamped(to: 0.6...1.8) }
+    // The same range as `PetOverlayPanel.setScale`, so the size menu test means something.
+    func setScale(_ scale: Double) { self.scale = scale.clamped(to: 0.5...1.8) }
     func setHitRegionScale(_ scale: Double) { hitRegionScale = scale }
     private(set) var lastFrame: PetFrame?
     func setFrameImage(_ frame: PetFrame?) {

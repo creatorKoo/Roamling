@@ -314,6 +314,7 @@ public enum ShellMenu {
     }
 
     public static let scaleChoices: [(label: String, value: Double)] = [
+        ("0.5×", 0.5),
         ("0.75×", 0.75), ("1.0×", 1.0), ("1.25×", 1.25), ("1.5×", 1.5)
     ]
 

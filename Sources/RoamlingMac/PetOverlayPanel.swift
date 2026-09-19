@@ -27,6 +27,13 @@ public final class PetOverlayView: NSView {
         }
     }
 
+    /// Pixel art is drawn unfiltered at the authored size and above. Shrunk below
+    /// it, unfiltered sampling drops whole rows of the drawing, so the smaller
+    /// sizes are interpolated (user decision 2026-09-19, R19).
+    public var smooth: Bool = false {
+        didSet { if smooth != oldValue { needsDisplay = true } }
+    }
+
     private var image: CGImage?
     private var dragOrigin: NSPoint?
     private var draggedDistance: CGFloat = 0
@@ -42,7 +49,8 @@ public final class PetOverlayView: NSView {
     public override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
         guard let image else { return }
-        NSGraphicsContext.current?.imageInterpolation = .none
+        let interpolation: NSImageInterpolation = smooth ? .high : .none
+        NSGraphicsContext.current?.imageInterpolation = interpolation
         let appKitImage = NSImage(cgImage: image, size: bounds.size)
         appKitImage.draw(
             in: bounds,
@@ -50,7 +58,7 @@ public final class PetOverlayView: NSView {
             operation: .sourceOver,
             fraction: 1,
             respectFlipped: true,
-            hints: [.interpolation: NSImageInterpolation.none]
+            hints: [.interpolation: interpolation]
         )
     }
 
@@ -162,13 +170,14 @@ public final class MacOverlayProvider: PetOverlayProviding, PetOverlayViewDelega
         coordinateSpace: @escaping () -> DesktopCoordinateSpace
     ) {
         readCoordinateSpace = coordinateSpace
-        self.scale = scale.clamped(to: 0.6...1.8)
+        self.scale = scale.clamped(to: 0.5...1.8)
         let size = NSSize(
             width: Self.baseSize.width * self.scale,
             height: Self.baseSize.height * self.scale
         )
         view = PetOverlayView(frame: NSRect(origin: .zero, size: size))
         view.hitRegionScale = hitRegionScale
+        view.smooth = self.scale < 1
         panel = PetOverlayPanel(contentView: view, size: size)
         view.delegate = self
     }
@@ -247,9 +256,10 @@ public final class MacOverlayProvider: PetOverlayProviding, PetOverlayViewDelega
     }
 
     public func setScale(_ newScale: Double) {
-        let next = newScale.clamped(to: 0.6...1.8)
+        let next = newScale.clamped(to: 0.5...1.8)
         guard abs(next - scale) > 0.001 else { return }
         scale = next
+        view.smooth = scale < 1
         let size = NSSize(width: Self.baseSize.width * scale, height: Self.baseSize.height * scale)
         panel.setContentSize(size)
         view.frame = NSRect(origin: .zero, size: size)
