@@ -21,12 +21,18 @@ internal class PreviewRuntime(
     initial: FfiPoint,
     private val clock: () -> Double = { SystemClock.elapsedRealtimeNanos() / 1_000_000_000.0 },
     seed: ULong = SystemClock.elapsedRealtimeNanos().toULong(),
+    initialScale: Double = MAX_SCALE,
 ) : AutoCloseable {
     private val pet = PetLoop(initial.x, initial.y, defaultTuning(), seed)
     private val player = Player(atlas)
     private var lastTouchAt = clock()
     private var finger: FfiPoint? = null
     private var downAt: FfiPoint? = null
+    /** The user's size choice. World units are dp, so this carries nothing about density. */
+    var scale: Double = clampScale(initialScale)
+        private set
+    val width: Double get() = BASE_WIDTH * scale
+    val height: Double get() = BASE_HEIGHT * scale
     var frame: AtlasFrame? = null
         private set
     var capability: UByte = 0u
@@ -38,7 +44,7 @@ internal class PreviewRuntime(
     val interval: Double get() = pet.preferredTickInterval(clock())
 
     init {
-        pet.setObjectSize(WIDTH, HEIGHT)
+        pet.setObjectSize(width, height)
         pet.handleDisplayChange(listOf(display), initial.x, initial.y, clock())
         // Wire order is declared once in core's PET_CAPABILITIES; no frame timings here.
         pet.setAnimationDurations(player.duration(13u), player.duration(14u))
@@ -55,8 +61,8 @@ internal class PreviewRuntime(
             now = now, pointerX = point?.x ?: -10_000.0, pointerY = point?.y ?: -10_000.0,
             primaryButtonDown = point != null, userIdleDuration = (now - lastTouchAt).coerceAtLeast(0.0),
             captureAuthorized = false, focusAuthorized = false, didQueryFocus = false, queriedFocus = null,
-            pointerIsOverPet = point != null && kotlin.math.abs(point.x - origin.x) <= WIDTH / 2 &&
-                kotlin.math.abs(point.y - origin.y) <= HEIGHT / 2,
+            pointerIsOverPet = point != null && kotlin.math.abs(point.x - origin.x) <= width / 2 &&
+                kotlin.math.abs(point.y - origin.y) <= height / 2,
             affectionHeld = false,
         ))
         capability = result.capability
@@ -82,7 +88,7 @@ internal class PreviewRuntime(
         finger = FfiPoint(x, y)
         val result = pet.pointerDragged(x, y, hypot(x - start.x, y - start.y), clock())
         // Use the core's clamp during contact too, not just at drop.
-        pet.setScale(WIDTH, HEIGHT)
+        pet.setScale(width, height)
         return apply(result)
     }
 
@@ -102,6 +108,19 @@ internal class PreviewRuntime(
         return result.rescheduleAfter ?: interval
     }
 
+    /** A new footprint changes where the pet may stand; the core clamps it. */
+    fun resize(newScale: Double) {
+        scale = clampScale(newScale)
+        pet.setScale(width, height)
+    }
+
+    /** The area the pet may use changed -- rotation, a fold, or the keyboard. */
+    fun setWorld(display: FfiDisplay, roaming: Boolean) {
+        val here = position
+        pet.handleDisplayChange(listOf(display), here.x, here.y, clock())
+        pet.setRoamingEnabled(roaming, clock())
+    }
+
     fun setHidden(hidden: Boolean) {
         if (hidden) up() else noteInput()
         pet.setHidden(hidden)
@@ -113,7 +132,11 @@ internal class PreviewRuntime(
     }
 
     companion object {
-        const val WIDTH = 96.0
-        const val HEIGHT = 104.0
+        const val BASE_WIDTH = 96.0
+        const val BASE_HEIGHT = 104.0
+        const val MIN_SCALE = 0.1
+        const val MAX_SCALE = 1.0
+        fun clampScale(value: Double): Double =
+            if (value.isFinite()) value.coerceIn(MIN_SCALE, MAX_SCALE) else MAX_SCALE
     }
 }

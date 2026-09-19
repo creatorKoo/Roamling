@@ -17,5 +17,6 @@
     <string name="show_failed">보리를 표시하지 못했어요. 표시 권한을 확인하고 다시 눌러 주세요.</string>
     <string name="ready">준비됐어요. 보리를 불러 주세요.</string>
     <string name="showing">보리가 여기 있어요. 잡아서 옮겨 보세요.</string>
+    <string name="size_label">보리 크기 %1$.2f배</string>
     <string name="preview_space">보리가 쉬어 가는 자리</string>
 </resources>

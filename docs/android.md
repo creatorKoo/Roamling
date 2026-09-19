@@ -651,6 +651,105 @@ macOS 빌드·동일 소스의 바인딩 비교, ARM64 실행, Samsung One UI, �
 CI에 브리지 검사와 계측 APK 빌드를 추가했으나 원격 CI 실행은 하지 않았다.
 다른 앱을 사용하는 동안의 상시 표시·걷기·드래그·잠금 뒤 자동 복귀는 A1 범위에 포함되지 않는다.
 
+## 실기기 첫날의 요청 둘 — 키보드 회피(R17)와 크기(R18), 2026-09-19
+
+**상태: 방향 결정됨(2026-09-19) — 키보드는 "가"(위쪽 띠로 비켜 앉기), 크기는 0.1~1.0 전 범위.** 사용자가
+써 보고 이상하면 다시 말하기로 했다. 원문과 결정은 `docs/requests.md` R17 · R18.
+
+### R17. 키보드 — 잰 것
+
+지금 오버레이는 펫 크기의 창 하나다(`MochiOverlay.show`, `FLAG_NOT_FOCUSABLE | FLAG_WATCH_OUTSIDE_TOUCH |
+FLAG_LAYOUT_IN_SCREEN`, `setFitInsetsTypes(0)`). 이 창이 키보드를 알 수 있는지 임시 로그 빌드로 쟀다
+(Android 17 에뮬레이터, 설정 검색창으로 키보드를 띄우고 `dumpsys input_method`의 `mInputShown`과 대조.
+계측 코드는 지웠다).
+
+| 신호 | 키보드 닫힘 | 열림 |
+|---|---|---|
+| 지금 펫 창의 `rootWindowInsets.isVisible(ime())` | false | **false** |
+| `WindowManager.currentWindowMetrics`의 같은 값 | false | **false** |
+| 새 감지용 창(1px 폭 · 세로 전체 · 터치 안 받음) + `FLAG_ALT_FOCUSABLE_IM`의 `isVisible(ime())` | false | **true** |
+| 같은 감지용 창, 그 플래그 없이 | false | false |
+| 감지용 창에서 키보드 **높이** — `getInsets(ime()).bottom`, 창 높이, `getWindowVisibleDisplayFrame` | 0 | **0** (셋 다) |
+
+- **키보드가 떠 있는지는 알 수 있다.** `FLAG_NOT_FOCUSABLE`에 `FLAG_ALT_FOCUSABLE_IM`을 더한 창만 IME 상태를
+  받는다. 닫으면 false로 돌아오는 것까지 확인했다.
+- **높이는 알 수 없다.** 오버레이 층은 키보드보다 위라 시스템이 inset을 0으로 준다.
+  `getInsetsIgnoringVisibility(ime())`는 예외를 던진다(계측 중 앱이 그것으로 한 번 죽었다). 숨은 API는 안 쓴다.
+- **삼성 키보드에서도 같다 (2026-09-19, SM-F946N · One UI 7.0 · 접은 커버 화면 904×2316).** 구현한 감지용
+  창이 `dumpsys input_method`의 `mInputShown`과 같은 순간에 `keyboard visible=true/false`를 찍었다.
+  펼친 화면과 분할·플로팅 키보드는 사용자가 써 보며 확인한다.
+
+### R17. 흐름과 선택지
+
+감지: `CompanionService`가 펫 창과 함께 감지용 창을 띄우고 닫는다 → `setOnApplyWindowInsetsListener`로
+`imeVisible`의 변화를 받는다 → `MochiOverlay`에 전달. 높이를 모르므로 "키보드 바로 위까지"는 만들 수 없다.
+남는 선택지는 셋이다.
+
+- **가. 위쪽으로 비켜서 앉아 있기.** 키보드가 뜨면 보리가 갈 수 있는 영역을 화면 위쪽 띠(상태바 아래)로
+  줄이고, 닫히면 원래대로 돌린다. 코어는 이미 이것을 한다 — `PetLoop.handleDisplayChange`
+  (`pet_runtime.rs` `handle_display_change`)가 새 영역 안으로 위치를 **clamp**한다. 다만 지금은 **순간이동**
+  이라, 걸어서 올라가게 하려면 코어에 손을 대야 한다(데스크톱과 공유하는 코드). 타이핑 중에는 배회도
+  멈춘다(`setRoamingEnabled(false)`, FFI에 이미 있다).
+- **나. 타이핑하는 동안 숨기.** 키보드가 뜨면 기존 숨김 경로(`MochiOverlay.pause`)로 사라지고 닫히면
+  그 자리에 돌아온다. 플로팅·분할 키보드에서도 틀릴 수가 없다. 대신 타이핑 중에는 보리가 없다.
+- **다. 아래쪽 고정 비율을 키보드로 가정.** 추측이라 폴드의 플로팅 키보드에서 틀리고, 폰에서는 키보드
+  바로 위가 **지금 쓰고 있는 글**이라 거기로 밀어 올리면 오히려 더 거슬린다. 권하지 않는다.
+
+**추천은 가.** 요청의 말("피해 주었으면")에 맞고, 위쪽 띠는 대개 앱 제목줄이라 쓰는 글을 가리지 않는다.
+첫 판은 순간이동으로 만들어 체감을 보고, 어색하면 그때 걷기를 코어에 더한다.
+
+### R18. 크기 — 지금과 선택지
+
+- 크기는 `PreviewRuntime.WIDTH/HEIGHT`(96×104 dp) 상수다. 코어에는 이미 길이 있다 —
+  `PetLoop.setObjectSize` / `setScale`(`pet_runtime.rs` `set_scale`, 새 크기로 위치를 clamp). 창 크기
+  (`MochiOverlay.show`의 `width/height`)와 그리기(`SpriteView.onDraw`는 창 크기에 맞춰 늘린다)가 같이 따라야 한다.
+- 슬라이더가 설 곳은 `MainActivity`뿐이다(유일한 화면). 값은 위치와 같은 `SharedPreferences("companion")`에
+  두고, 보리가 떠 있으면 움직이는 동안 바로 반영한다.
+- **하한이 문제다.** 1 dp는 1/160 인치다.
+
+  | 배율 | 크기 | 실제 |
+  |---|---|---|
+  | 1.0 | 96×104 dp | 약 15×16.5 mm |
+  | 0.5 | 48×52 dp | 약 7.6 mm — Android가 권하는 최소 터치 크기(48 dp)와 같다 |
+  | 0.3 | 29×31 dp | 약 4.6 mm |
+  | 0.1 | 10×10 dp | **약 1.5 mm** — 보이지 않고 잡을 수 없다 |
+
+  창이 곧 터치 영역이라 작아질수록 잡기도 같이 어려워진다. 터치 영역만 크게 두면 그 투명한 여백이 밑의
+  앱 터치를 가로채므로 하지 않는다.
+- 걷는 속도는 크기와 무관한 dp/s라, 작게 하면 몸에 비해 빨리 걷는 것처럼 보인다. 첫 판은 그대로 두고 본다.
+- 1배 미만에서는 픽셀 아트가 비정수 배율로 줄어 거칠어진다. 줄일 때만 bilinear 필터를 켠다.
+
+### R17 · R18 구현과 확인 (2026-09-19)
+
+**키보드.** `MochiOverlay.watchKeyboard`가 펫 창과 같이 감지용 창을 띄우고 `pause`에서 같이 내린다.
+`onImeChanged` → `applyWorld`가 코어의 세계를 바꾼다: 키보드가 있으면 상태바 아래의 띠(펫 키의 1.5배와
+쓸 수 있는 화면의 28% 중 큰 쪽 — `KEYBOARD_BAND_BODIES`, `KEYBOARD_BAND_SHARE`), 없으면 전체.
+`PreviewRuntime.setWorld`는 `PetLoop.handleDisplayChange`(그 영역 안으로 clamp, 순간이동)와
+`setRoamingEnabled`를 부른다 — 띠 안에서는 앉아 있고, 키보드가 내려가면 다시 돌아다닌다. Kotlin에는
+"어디로 갈지"가 없다. 세계의 모양만 알려 주고 나머지는 코어가 한다.
+
+**크기.** `PreviewRuntime`의 `WIDTH/HEIGHT` 상수가 `BASE_WIDTH/BASE_HEIGHT × scale`이 됐다(0.1~1.0,
+`clampScale`). `MainActivity`의 바(0.01 단위 90칸) → `CompanionService.setScale`이 `SharedPreferences`
+`"scale"`에 적고 `MochiOverlay.resize`를 부른다 → 코어 `setScale`이 새 몸집으로 위치를 다시 clamp하고 창
+크기가 따라간다. 1배 미만에서는 `SpriteView.smooth`로 bilinear 필터를 켠다. 보리가 떠 있는 동안 바를
+움직이면 바로 반영된다.
+
+**실기기 확인 (SM-F946N).**
+
+| 한 것 | 결과 |
+|---|---|
+| 설정 검색창으로 키보드를 띄움 | 로그 `keyboard visible=true`, 보리 창 y 1802 → **401**(위쪽 띠), 그대로 앉아 있음 |
+| 키보드를 닫음 | `keyboard visible=false`. 화면을 터치하는 동안 띠 밖으로 나와 다시 돌아다님 |
+| 닫은 뒤 1분간 제자리였던 것 | 버그가 아니다 — adb의 키 입력만 있고 **터치가 없어서** 코어가 자리 비움으로 보고 재웠다. 터치하자 움직였다 |
+| 바를 네 군데 탭 | 1.00 → 0.55 → 0.28 → 0.10 → 1.00, 창 크기 252×273 → 139×150 → 71×76 → 25×27 px |
+| 0.55로 두고 앱을 강제 종료 후 다시 실행 | 바와 보리 둘 다 0.55로 돌아옴 |
+
+크래시 로그 없음. 에뮬레이터 계측은 새 테스트 `sizeIsClampedAndTheKeyboardBandHoldsTheCompanionStill`
+(`PreviewTest.kt`)을 더해 6개 통과, `lintDebug` 통과.
+
+**아직 모르는 것.** 0.1~0.3배에서 실제로 잡을 수 있는지, 걷는 속도가 몸집에 비해 어색한지, 순간이동이
+거슬리는지, 폴드를 펼친 화면과 플로팅 키보드에서의 동작 — 전부 사용자가 써 보고 말해 주기로 했다.
+
 ## 게이트
 
 **각 게이트는 사용자의 실사용 확인으로 닫는다.** 한 단계의 체감 품질을 닫고 피드백을 받은 뒤에

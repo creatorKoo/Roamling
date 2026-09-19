@@ -26,6 +26,7 @@ import android.view.WindowInsets
 import android.widget.Button
 import android.widget.LinearLayout
 import android.widget.ScrollView
+import android.widget.SeekBar
 import android.widget.TextView
 import kotlin.math.roundToInt
 
@@ -39,6 +40,9 @@ class MainActivity : Activity() {
     private lateinit var hideButton: Button
     private lateinit var stopButton: Button
     private lateinit var status: TextView
+    private lateinit var sizeBar: SeekBar
+    private lateinit var sizeLabel: TextView
+    private var draggingSize = false
     private lateinit var stage: View
     internal val previewIsAttached: Boolean get() = service?.visible == true
     internal val previewOverlay: MochiOverlay? get() = service?.overlay
@@ -142,6 +146,8 @@ class MainActivity : Activity() {
         showButton.isEnabled = session != null && (!session.running || session.hidden)
         hideButton.isEnabled = session?.running == true && !session.hidden
         stopButton.isEnabled = session?.running == true
+        sizeBar.isEnabled = session != null
+        if (session != null && !draggingSize) showSize(session.scale)
         status.setText(when {
             session?.error != null -> checkNotNull(session.error)
             !Settings.canDrawOverlays(this) -> R.string.permission_needed
@@ -190,6 +196,23 @@ class MainActivity : Activity() {
             setOnClickListener { service?.stopCompanion() }
         }
         controls.addView(stopButton, LinearLayout.LayoutParams(-1, dp(56)))
+        sizeLabel = label(R.string.size_label, 14f).apply { id = R.id.size_label; setPadding(0, dp(16), 0, 0) }
+        controls.addView(sizeLabel)
+        sizeBar = SeekBar(this).apply {
+            id = R.id.size_bar
+            max = SIZE_STEPS
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(bar: SeekBar, progress: Int, fromUser: Boolean) {
+                    val scale = scaleAt(progress)
+                    sizeLabel.text = getString(R.string.size_label, scale)
+                    if (fromUser) service?.setScale(scale)
+                }
+                override fun onStartTrackingTouch(bar: SeekBar) { draggingSize = true }
+                override fun onStopTrackingTouch(bar: SeekBar) { draggingSize = false }
+            })
+        }
+        controls.addView(sizeBar, LinearLayout.LayoutParams(-1, dp(48)))
+        showSize(PreviewRuntime.MAX_SCALE)
         status = label(R.string.loading, 14f).apply { id = R.id.preview_status; setPadding(0, dp(16), 0, dp(16)) }
         controls.addView(status)
         val scroll = ScrollView(this).apply {
@@ -212,5 +235,19 @@ class MainActivity : Activity() {
         setContentView(root)
     }
 
+    private fun showSize(scale: Double) {
+        sizeBar.progress = ((scale - PreviewRuntime.MIN_SCALE) / SIZE_STEP).roundToInt().coerceIn(0, SIZE_STEPS)
+        sizeLabel.text = getString(R.string.size_label, scaleAt(sizeBar.progress))
+    }
+
+    private fun scaleAt(progress: Int): Double =
+        PreviewRuntime.clampScale(PreviewRuntime.MIN_SCALE + progress * SIZE_STEP)
+
     private fun dp(value: Int) = (value * resources.displayMetrics.density).roundToInt()
+
+    private companion object {
+        /** 0.10x to 1.00x in hundredths: fine enough to feel continuous, coarse enough to land on a round number. */
+        const val SIZE_STEP = 0.01
+        const val SIZE_STEPS = 90
+    }
 }

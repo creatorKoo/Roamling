@@ -167,7 +167,7 @@ class CompanionService : Service() {
         if (hidden || locked) overlay?.pause()
         else if (images != null) {
             try {
-                if (overlay == null) overlay = MochiOverlay(this, checkNotNull(images), ::savePosition) {
+                if (overlay == null) overlay = MochiOverlay(this, checkNotNull(images), ::savePosition, scale) {
                     Log.e("Roamling", "Overlay update failed", it)
                     fail(R.string.show_failed)
                 }
@@ -186,6 +186,16 @@ class CompanionService : Service() {
         overlay?.close() // saves its center before rebuilding against new metrics/density
         overlay = null
         if (running) reconcileVisibility()
+    }
+
+    /** The size bar's value. Kept beside the seat, so it survives the service and the app. */
+    val scale: Double get() = PreviewRuntime.clampScale(
+        preferences.getFloat("scale", PreviewRuntime.MAX_SCALE.toFloat()).toDouble())
+
+    fun setScale(value: Double) {
+        val clamped = PreviewRuntime.clampScale(value)
+        preferences.edit().putFloat("scale", clamped.toFloat()).apply()
+        overlay?.resize(clamped)
     }
 
     internal fun savedPosition(): FfiPoint? {

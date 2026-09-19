@@ -5,4 +5,6 @@
     <item name="stop_mochi" type="id" />
     <item name="preview_status" type="id" />
     <item name="mochi_stage" type="id" />
+    <item name="size_label" type="id" />
+    <item name="size_bar" type="id" />
 </resources>

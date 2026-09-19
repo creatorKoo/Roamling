@@ -68,6 +68,44 @@ class PreviewTest {
         } finally { images.close() }
     }
 
+    @Test fun sizeIsClampedAndTheKeyboardBandHoldsTheCompanionStill() {
+        val images = MochiImages.load()
+        var now = 100.0
+        val full = FfiRect(0.0, 24.0, 412.0, 800.0)
+        try {
+            PreviewRuntime(images.atlas, FfiDisplay("test", full, full), FfiPoint(200.0, 700.0), { now }, 7u,
+                initialScale = 0.5).use { pet ->
+                assertEquals(48.0, pet.width, 0.0001)
+                pet.resize(0.01); assertEquals(PreviewRuntime.MIN_SCALE, pet.scale, 0.0)
+                pet.resize(7.0); assertEquals(PreviewRuntime.MAX_SCALE, pet.scale, 0.0)
+                pet.resize(Double.NaN); assertEquals(PreviewRuntime.MAX_SCALE, pet.scale, 0.0)
+                pet.resize(0.25)
+                // A smaller body may stand closer to every edge; the core owns that clamp.
+                pet.down(pet.position.x, pet.position.y); pet.move(-500.0, 5000.0); pet.up()
+                assertEquals(12.0, pet.position.x, 0.001)
+                assertEquals(824.0 - 13.0, pet.position.y, 0.001)
+
+                // The keyboard is up: the world becomes a band under the status bar.
+                val band = FfiRect(full.x, full.y, full.width, 224.0)
+                pet.setWorld(FfiDisplay("test", band, band), roaming = false)
+                assertTrue("the companion left the keyboard's half", pet.position.y <= 24.0 + 224.0 - 13.0)
+                val seat = pet.position
+                repeat(3000) { pet.noteInput(); pet.tick(); now += pet.interval }
+                assertEquals("it sits still while the user types", seat.x, pet.position.x, 0.001)
+                assertEquals(seat.y, pet.position.y, 0.001)
+
+                // The keyboard is gone: the whole screen is back and so are the walks.
+                pet.setWorld(FfiDisplay("test", full, full), roaming = true)
+                var moved = false
+                repeat(6000) {
+                    pet.noteInput(); pet.tick(); now += pet.interval
+                    moved = moved || kotlin.math.abs(pet.position.x - seat.x) > 5.0 || kotlin.math.abs(pet.position.y - seat.y) > 5.0
+                }
+                assertTrue("roaming came back with the full screen", moved)
+            }
+        } finally { images.close() }
+    }
+
     @Test fun premultipliedRgbaReachesAndroidWithoutChannelSwapOrDoubleMultiply() {
         val image = FfiPetImage(3u, 1u, byteArrayOf(
             64, 32, 16, 128.toByte(), // premultiplied half-transparent brown
