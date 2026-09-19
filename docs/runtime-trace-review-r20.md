@@ -5,15 +5,18 @@
 **전에** `placement.md` 3.5.5에 적어 두었다. 이 기록은 제안 녹화가 그 예고와 맞는지 대조한 것이다.
 통과시키려고 다시 만든 것이 아니다 — 예고에 없는 차이가 있었다면 갱신하지 않고 원인을 찾는다.
 
-사용자는 2026-09-19에 "차이를 검토하고 갱신한다"는 절차를 승인했다(`requests.md` R20). **차이 자체의
-승인은 아직이다** — 아래 표를 보고 정한다.
+사용자는 2026-09-19에 "차이를 검토하고 갱신한다"는 절차를 승인했고(`requests.md` R20), 같은 날 아래
+차이를 보고 "응 승인"이라고 했다. 기지개는 새 빌드로 직접 보고 "더 자연스러워서 좋음".
 
 ## 원본과 산출 근거
 
-- 지금 기준: `Tests/RoamlingLogicTests/RuntimeTrace.txt`, Git blob `17a72083e324f75d70c394c4128776ba34760e52`,
+- 이전 기준: `Tests/Fixtures/runtime/RuntimeTrace-pre-r20.txt`. 교체 전 기준과 보존본의 Git blob이 모두
+  `17a72083e324f75d70c394c4128776ba34760e52`,
   LF 기준 SHA-256 `ae56e315dd41b5e1dc1edeb9a4b18c8ad048531f89a99bbc3c7871a279222737`
   (0.6.5 검토가 적은 새 기준의 값과 같다 — 그 뒤로 바뀐 적이 없다).
-- 제안 녹화: SHA-256 `4d2e7f8e0b52d13a845a68b8c3a4101bbc144d617630df18df9b70dfddd9dc84`.
+- 새 기준: `Tests/RoamlingLogicTests/RuntimeTrace.txt`. 산출물 SHA-256
+  `4d2e7f8e0b52d13a845a68b8c3a4101bbc144d617630df18df9b70dfddd9dc84`, 놓은 뒤의 Git blob
+  `c8fb7868074f17cf7bed814d7d9765e90167d1d7` — 산출물을 LF로 해시한 값과 같다. 손대지 않았다.
 - 산출 커밋: `3bbb6994b456e723e2a881d8aeb646a16342c52a` (`rest-one-layer` 브랜치).
 - [검토용 macOS 녹화 실행](https://github.com/creatorKoo/Roamling/actions/runs/35439013320): `scripts/test.sh`
   전체가 산출 모드로 통과했다 — Swift 하네스(내장 `stretching` 2.60초 검사 포함), Rust 코어와
@@ -68,8 +71,7 @@
 화면 캡처는 녹화 시나리오에서 꺼져 있으므로 agent 곁의 잠자리(B6), 격자 후보(B7)의 근거로 이 녹화를
 쓰지 않는다. 그것은 `clearance_tests.rs`의 `rest_*` 넷이, 기지개는 `pet_runtime/rest_tests.rs`의 일곱이 본다.
 
-## 갱신 절차 (승인 뒤)
+## 재현성 확인
 
-1. 지금 기준을 `Tests/Fixtures/runtime/RuntimeTrace-pre-r20.txt`로 보존한다(0.6.5의 선례).
-2. 제안 녹화를 `Tests/RoamlingLogicTests/RuntimeTrace.txt`로 놓는다 — 산출물 그대로, 손대지 않는다.
-3. push 뒤 일반 macOS 검증이 `ROAMLING_WRITE_TRACE` 없이 새 기준과 바이트로 맞는지 확인하고 여기에 적는다.
+기준을 바꾼 뒤 일반 macOS 검증이 `ROAMLING_WRITE_TRACE` 없이 새 기준과 바이트로 맞아야 한다 — 산출
+실행은 비교를 하지 않았으므로 이것이 첫 비교다. 결과는 아래에 적는다.
