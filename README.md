@@ -208,6 +208,10 @@ Roamling source code is licensed under the
 and sell the software under that license; covered derivative works must preserve
 the same freedoms and provide their corresponding source.
 
+**The built-in mascot Bori is not covered by the GPL.** The character and its
+artwork are copyrighted with all rights reserved; [ARTWORK.md](ARTWORK.md) says
+what you may do with them and what needs permission.
+
 Pet packages remain subject to their own authors' licenses. Installing or
 loading a pet does not change its license. The Roamling name and branding are
 handled separately from the source license; see [TRADEMARKS.md](TRADEMARKS.md).

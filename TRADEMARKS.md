@@ -16,8 +16,9 @@ that a fork, service, or pet package is produced or endorsed by the Roamling
 project.
 
 Pet packages and third-party assets remain governed by their respective
-owners' licenses. Future official artwork or mascot assets may carry separate
-license notices; those notices control for the identified files.
+owners' licenses. Official artwork and mascot assets may carry separate
+license notices; those notices control for the identified files. The built-in
+mascot's is [ARTWORK.md](ARTWORK.md).
 
 This policy concerns branding, not the rights to source code granted by the
 GPL. Reasonable descriptive and legally protected uses are not restricted.
