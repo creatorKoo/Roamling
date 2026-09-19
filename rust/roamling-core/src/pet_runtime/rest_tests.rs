@@ -116,6 +116,31 @@ fn waking_shows_what_the_agent_is_doing_now_not_what_woke_it() {
     assert_ne!(tick(&mut pet, 110.0), BehaviorState::WaitingForUser);
 }
 
+/// B8: the pet beside a Codex run sat in the asking pose for the whole run
+/// and so never slept, because a waiting pet does not rest and nothing ended
+/// the wait.
+#[test]
+fn an_answered_question_lets_the_pet_doze_beside_the_running_tool() {
+    let mut pet = sleeping_with_agent(true);
+    event(&mut pet, CompanionEventKind::AttentionRequired, 104.0);
+    let mut now = 104.0;
+    while now < 110.0 {
+        now += 1.0 / 30.0;
+        tick(&mut pet, now);
+    }
+    assert_eq!(pet.state(), BehaviorState::WaitingForUser);
+    // The tool ran and finished, so someone said yes.
+    pet.handle_activity_event(CompanionEvent::new(
+        "post", "codex:turn", now, CompanionEventKind::Positive, 0.08, None,
+    ), now);
+    assert_eq!(pet.state(), BehaviorState::Work);
+    while now < 120.0 {
+        now += 1.0 / 30.0;
+        tick(&mut pet, now);
+    }
+    assert_eq!(pet.state(), BehaviorState::Sleep);
+}
+
 #[test]
 fn waking_caret_travel_waits_for_stretch() {
     let mut pet = sleeping_with_agent(true);

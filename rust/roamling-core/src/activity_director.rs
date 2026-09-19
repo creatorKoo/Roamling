@@ -92,6 +92,9 @@ pub struct ActivityDirector {
     /// Off in the ported contract, which the Swift original is compared
     /// against; on in the shipping runtime. See `keeping_pending_current`.
     keeps_pending_current: bool,
+    /// Off in the ported contract, on in the shipping runtime. See
+    /// `resuming_after_approval`.
+    resumes_after_approval: bool,
 }
 
 impl ActivityDirector {
@@ -101,6 +104,18 @@ impl ActivityDirector {
     /// that long: asked for approval, answered, and working again inside the
     /// stretch, it left the pet asking for an approval already given until
     /// its next event, which can be minutes.
+    /// Routine progress from the agent the pet is asking on behalf of ends the
+    /// asking. No hook says an approval was granted; the only thing heard
+    /// afterwards is the approved tool finishing, a `Positive` too small to
+    /// be an event. Dropped like any other, it left the pet asking until the
+    /// agent's *next* tool -- through the whole run of the one it had asked
+    /// about, which under Codex's auto-review was every run, and which kept
+    /// the pet from ever sleeping beside one.
+    pub fn resuming_after_approval(mut self) -> Self {
+        self.resumes_after_approval = true;
+        self
+    }
+
     pub fn keeping_pending_current(mut self) -> Self {
         self.keeps_pending_current = true;
         self
@@ -198,6 +213,12 @@ impl ActivityDirector {
         if event.kind == CompanionEventKind::Positive
             && event.intensity < ROUTINE_POSITIVE_INTENSITY
         {
+            if self.resumes_after_approval
+                && self.active_source_id.as_deref() == Some(event.source_id.as_str())
+                && self.active_reaction == Some(CompanionReaction::Paw)
+            {
+                self.resume_after_approval(&event, is_resting, now, &mut effects);
+            }
             return effects;
         }
 
@@ -715,6 +736,38 @@ impl ActivityDirector {
         });
     }
 
+    /// The tool the agent asked about has run, so the question was answered.
+    /// The pet goes back to what a working agent gets, on the seat it has.
+    fn resume_after_approval(
+        &mut self,
+        event: &CompanionEvent,
+        is_resting: bool,
+        now: f64,
+        effects: &mut Vec<ActivityEffect>,
+    ) {
+        self.heard_at = now;
+        self.active_reaction = Some(CompanionReaction::Work);
+        if self.arrival_reaction == Some(CompanionReaction::Paw) {
+            self.arrival_reaction = Some(CompanionReaction::Work);
+        }
+        // The question is still what `recent` and `pending` remember of this
+        // agent. Left there it is asked again: by the queue when another
+        // source lets go, or on `Idle` if the pet was still getting up.
+        if let Some(latest) = self.recent.get_mut(&event.source_id) {
+            if latest.kind == CompanionEventKind::AttentionRequired {
+                latest.kind = CompanionEventKind::HighIntensity;
+                latest.timestamp = event.timestamp;
+            }
+        }
+        if self.pending.as_ref().is_some_and(|waiting| {
+            waiting.source_id == event.source_id
+                && waiting.kind == CompanionEventKind::AttentionRequired
+        }) {
+            self.pending = None;
+        }
+        self.apply_reaction(CompanionReaction::Work, is_resting, now, effects);
+    }
+
     /// Reactions never wake the creature by themselves. Callers that mean to
     /// interrupt rest emit `CancelRest` first, so a session that simply ends
     /// leaves a sleeping pet asleep.
@@ -783,6 +836,57 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    /// The shape Codex sends under auto-review, and Claude Code whenever a
+    /// tool needs a yes: the tool is announced, permission is asked half a
+    /// second later, and nothing says it was granted. The next thing heard is
+    /// the tool finishing -- a routine `Positive` this director otherwise drops.
+    #[test]
+    fn a_tool_that_ran_means_the_approval_it_asked_for_was_given() {
+        let mut director = ActivityDirector::default().resuming_after_approval();
+        director.handle_event(
+            event("pre", AGENT, CompanionEventKind::HighIntensity, 0.72, 10.0, terminal(), 1.0),
+            false, false, 0.5, 10.0,
+        );
+        director.deliver_arrival_reaction(false, 10.1);
+        director.handle_event(
+            event("ask", AGENT, CompanionEventKind::AttentionRequired, 0.95, 10.5, terminal(), 1.0),
+            false, false, 0.5, 10.5,
+        );
+        director.deliver_arrival_reaction(false, 10.6);
+        assert_eq!(director.sustained_reaction(), Some(CompanionReaction::Paw));
+
+        let effects = director.handle_event(
+            event("post", AGENT, CompanionEventKind::Positive, 0.08, 40.0, terminal(), 1.0),
+            false, false, 0.5, 40.0,
+        );
+        assert_eq!(reactions(&effects), [CompanionReaction::Work]);
+        assert_eq!(director.sustained_reaction(), Some(CompanionReaction::Work));
+        // The seat is held, not re-walked, and the question is not asked again.
+        assert!(director.is_watching_window());
+        assert_eq!(reactions(&director.sustain_on_seat(false, 41.0)), [CompanionReaction::Work]);
+
+        // Routine progress from an agent that is not asking is still nothing.
+        let effects = director.handle_event(
+            event("post-2", AGENT, CompanionEventKind::Positive, 0.08, 45.0, terminal(), 1.0),
+            false, false, 0.5, 45.0,
+        );
+        assert!(effects.is_empty());
+
+        // And somebody else's tool finishing answers nobody's question.
+        let mut director = ActivityDirector::default().resuming_after_approval();
+        director.handle_event(
+            event("ask", AGENT, CompanionEventKind::AttentionRequired, 0.95, 10.0, terminal(), 1.0),
+            false, false, 0.5, 10.0,
+        );
+        director.deliver_arrival_reaction(false, 10.1);
+        let effects = director.handle_event(
+            event("post", "codex:other", CompanionEventKind::Positive, 0.08, 12.0, editor(), 1.0),
+            false, false, 0.5, 12.0,
+        );
+        assert!(effects.is_empty());
+        assert_eq!(director.sustained_reaction(), Some(CompanionReaction::Paw));
     }
 
     #[test]

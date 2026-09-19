@@ -75,6 +75,11 @@ impl PetRuntime {
             "travelling".to_string()
         } else if self.activity.is_watching_window() && !may_nap_on_seat {
             "on duty, seat not nappable".to_string()
+        } else if self.activity.has_arrival_reaction() {
+            // Owed since the pet finished getting up, and put on by the seat
+            // later in this same tick. Rest runs first, and a pet woken to ask
+            // for approval sat straight back down without ever asking.
+            "reaction owed".to_string()
         } else if proximity != PointerProximity::Far {
             format!("pointer {}", proximity_name(proximity))
         } else if !self.behavior.state().allows_rest_entry() {
@@ -88,6 +93,7 @@ impl PetRuntime {
             && now >= self.rest_retry_at
             && !self.placement.is_travelling()
             && (!self.activity.is_watching_window() || may_nap_on_seat)
+            && !self.activity.has_arrival_reaction()
             && proximity == PointerProximity::Far
             && self.behavior.state().allows_rest_entry())
         {

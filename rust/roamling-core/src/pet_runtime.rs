@@ -255,7 +255,9 @@ impl PetRuntime {
                 PlacementPolicy::ClearOfContent,
                 PlacementConfiguration::default(),
             ),
-            activity: ActivityDirector::default().keeping_pending_current(),
+            activity: ActivityDirector::default()
+                .keeping_pending_current()
+                .resuming_after_approval(),
             tuning,
             rng: Aimlessness::new(seed),
             displays: Vec::new(),
