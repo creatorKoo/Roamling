@@ -53,8 +53,8 @@ The current desktop implementation includes:
 Accessibility/caret tracking and visual placement are implemented behind their
 platform permissions/settings. Coarse visual sampling cannot identify every
 glyph. See [behavior](docs/behavior-flow.md) and [capture](docs/capture.md).
-Android service/overlay development and remaining device checks are tracked
-separately in [the Android guide](docs/android.md).
+The Android companion is a separate, closed-source app built on this core; see
+[docs/android.md](docs/android.md) for what that means for this repository.
 
 ## Build and run
 
@@ -195,8 +195,6 @@ rust/roamling-agent/    Claude Code and Codex hooks, normalization, receiver
 rust/roamling-pet/      built-in mascots and pet packages
 rust/roamling-update/   version feed parsing and release signature checking
 rust/roamling-win/      the Windows shell: window, tray, input, tick loop
-rust/roamling-android/  Android bindings for the shared core and player
-android/               Android app, overlay, service, and device tests
 installer/roamling.iss  the Windows installer
 Tests/                  pure and loader tests
 docs/README.md          documentation map and current maintenance review

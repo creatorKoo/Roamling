@@ -25,7 +25,7 @@
 
 ## 대기
 
-### R22. 팔 수 있게 라이선스를 어떻게 할지 (2026-09-19)
+### R23. 팔 수 있게 라이선스를 어떻게 할지 (2026-09-19)
 
 - **원문** "그럼 팔수있게 라이센스를 바꾸자. 아님 오픈 소스를 철회하니..? 너는 뭐가 좋다고 생각?"
 - **확인한 사실 (2026-09-19)**
@@ -51,7 +51,30 @@
   repo를 파야하니?" — 아직 정하지 않았다. 답: 공개 저장소 안에 비공개 폴더는 둘 수 없다. Android만 닫으려면
   비공개 저장소가 하나 더 필요하고, 전부 닫으려면 이 저장소의 공개 설정을 바꾸면 된다. 어느 쪽이든 지금까지
   공개된 커밋(`android/`의 A0~A3 포함)은 GPL로 남는다.
-- **상태** 결정 1은 완료, 결정 2는 대기.
+- **결정 2 확정 (2026-09-20)** "응 안드로이드 레포 나누자 프라이빗으로 진행해줘". **Android만 닫는다.** 코어와
+  데스크톱은 이 공개 저장소에 GPL로 남고, 공개 CI·릴리스·자동 업데이트는 그대로다.
+- **옮기는 것** 비공개 저장소 `creatorKoo/Roamling-android`로:
+  `android/`(Gradle 프로젝트 전체), `rust/roamling-android/`(UniFFI 진입점 크레이트),
+  `scripts/build-android-core.{sh,ps1}` · `scripts/test-android{,-preview}.ps1`,
+  `.github/workflows/check-android.yml`, `docs/android.md`.
+- **비공개 저장소의 모양** 이 공개 저장소를 `core/` **서브모듈**로 고정해 쓴다. `roamling-android` 크레이트는
+  `core/rust/roamling-core` · `roamling-pet`을 path 의존성으로 읽고, 자기 Cargo 워크스페이스와 lock을 갖는다.
+  앱 버전은 그 워크스페이스의 `version`에서 읽는다(`android/app/build.gradle.kts`가 이미 그렇게 한다) —
+  폰에 깔린 빌드보다 낮아지면 덮어 설치가 안 되므로 지금 값에서 이어 간다. 옮긴 파일의 SPDX 머리는
+  GPL에서 비공개용 표기로 바꾼다.
+- **공개 저장소에 남는 것** 코어의 Kotlin 바인딩 설정(`rust/roamling-core/uniffi.toml`)과 Android용 링커 플래그
+  (`rust/.cargo/config.toml`)는 코어를 Android로 빌드하는 데 필요한 공개 코어의 일부라 남긴다. 지금까지의
+  Android 커밋(A0~A3, R17·R18)은 공개 이력에 GPL로 남는다 — 이력은 다시 쓰지 않는다. R6 · R17 · R18의
+  기록도 이 파일에 남기고, 앞으로의 Android 요청은 비공개 저장소의 문서에 적는다.
+- **한 것 (2026-09-20)** 비공개 저장소 [`creatorKoo/Roamling-android`](https://github.com/creatorKoo/Roamling-android)를
+  만들었다(GitHub가 `PRIVATE`로 답하는 것을 확인). 이 저장소의 `a61fccd`를 `core/` 서브모듈로 고정했고, 거기서
+  두 ABI 코어·Kotlin 바인딩·진입점 크레이트 테스트·APK·lint가 통과했으며 에뮬레이터에서 A0 smoke와 계측 6개가
+  통과했다. 그다음 이 저장소에서 위 목록을 지우고 워크스페이스·`.gitignore`·README 둘·`docs/README.md`·
+  `docs/architecture.md`·`CLAUDE.md`를 맞췄다. `docs/android.md`는 지우지 않고 **"옮겼다, 그리고 FFI는 여전히
+  Android와의 계약이다"**를 적는 자리로 바꿨다 — 이 파일의 옛 링크도 그리로 간다.
+- **잃은 것** 이 저장소의 Check Android. FFI를 바꾸는 변경은 이제 비공개 저장소에서 코어를 올려 빌드해 봐야
+  Android에 대해 확인된 것이다.
+- **상태** 완료.
 
 ---
 

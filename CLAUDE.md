@@ -103,6 +103,11 @@ rust/roamling-win/    Windows 셸. 코어를 rlib으로 직접 링크한다 — 
 `scripts/test.sh`가 grep으로 막고 걸리면 non-zero로 끝난다. 런타임이 플랫폼에 닿는 통로는
 `PlatformServices` 하나이고, macOS 쪽 조립은 `MacPlatform.makeServices()` 한 함수다.
 
+**Android 셸은 이 저장소에 없다 (2026-09-20, 비공개 저장소로 분리).** 그 앱은 이 저장소를 서브모듈로
+고정해 코어를 그대로 빌드한다. 그래서 **`rust/roamling-core/src/ffi/`의 표면은 Swift만의 것이 아니다** —
+이름·인자·레코드를 바꾸면 Android의 Kotlin 바인딩이 같이 바뀌고, 이 저장소의 CI는 그것을 못 잡는다.
+무엇이 남고 무엇이 갔는지는 `docs/android.md`.
+
 **`roamling-win`은 workspace `default-members`에 없다** — 맨 `cargo test`가 macOS에서
 `windows` 크레이트를 빌드하려다 깨진다. Windows에서는 `cargo build -p roamling-win`.
 

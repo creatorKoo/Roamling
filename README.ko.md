@@ -45,8 +45,8 @@ Roamling은 macOS와 Windows용 네이티브 동반자 런타임입니다. Petde
 
 접근성·캐럿 추적과 화면 인식은 플랫폼별 권한·설정 뒤에서 동작합니다. 작은 휘도 격자를
 사용하므로 모든 글자를 인식하는 것은 아닙니다. [동작 흐름](docs/behavior-flow.md)과
-[화면 인식](docs/capture.md)을 참고하세요. Android 서비스·오버레이 구현과 남은 실기기
-검증은 [Android 문서](docs/android.md)에서 별도로 관리합니다.
+[화면 인식](docs/capture.md)을 참고하세요. Android 앱은 이 코어 위에 만든 별도의
+비공개 앱입니다. 그것이 이 저장소에 뜻하는 바는 [docs/android.md](docs/android.md)에 있습니다.
 
 ## Windows
 
@@ -178,8 +178,6 @@ rust/roamling-agent/    Claude Code·Codex 훅, 정규화, 수신기
 rust/roamling-pet/      내장 마스코트와 펫 패키지
 rust/roamling-update/   버전 피드 파싱과 릴리스 서명 검증
 rust/roamling-win/      Windows 셸: 창·트레이·입력·틱 루프
-rust/roamling-android/  공유 코어와 플레이어의 Android 바인딩
-android/               Android 앱·오버레이·서비스·기기 테스트
 installer/roamling.iss  Windows 설치 파일
 Tests/                  순수 로직과 로더 테스트
 docs/README.md          문서 지도와 현재 유지보수 검토

@@ -25,7 +25,7 @@ Claude / Codex / future game/media      AppKit / AX / ScreenCaptureKit
 
 결정 로직의 정본은 `rust/roamling-core`이며 OS framework나 product SDK에 의존하지 않는다.
 macOS는 UniFFI 바인딩과 `RustCore.swift`, Windows는 Rust 직접 링크, Android는
-`roamling-android`의 UniFFI/JNA를 통해 사용한다. `Sources/RoamlingCore`의 Swift 구현은
+같은 UniFFI 표면을 JNA로 부른다(그 셸은 비공개 저장소에 있다 — `docs/android.md`). `Sources/RoamlingCore`의 Swift 구현은
 포팅 비교 대조군이다. 언어 결정 근거는 `docs/history/windows.md` 3절에 있다.
 
 ## Modules
@@ -657,11 +657,14 @@ detection은 opt-in fallback이다. injection, process memory, anti-cheat-sensit
 Roamling의 관찰자 모델과 맞지 않아 금지한다. 붙일 때의 상태 낱말은
 `docs/state-sources.md`가 이미 자리를 잡아 뒀다.
 
-Android A0는 `android/app/src/debug/kotlin/io/github/creatorkoo/roamling/CoreSmokeActivity.kt`
+**Android 셸은 2026-09-20에 비공개 저장소로 옮겼다(`docs/android.md`).** 아래는 옮기던 날의 모습이고,
+이 저장소에는 더 이상 그 파일들이 없다. 코어가 세 번째 플랫폼에 어떻게 닿는지의 기록으로 남긴다.
+
+Android A0는 `CoreSmokeActivity.kt`
 의 단발성 호출이다. `MainActivity`가 권한을 받고 `MochiOverlay`로 미리보기를 띄우며,
 A2 `PreviewRuntime`이 공유 `PetLoop`의 걷기·휴식·터치를 연결한다. A3부터 창과 이미지는
 `CompanionService`가 소유하며 Activity는 LocalBinder로 상태와 제어만 연결한다.
-아래 Android 열은 현재 코드만 적으며 전체 오버레이 계획은 `docs/android.md`에 있다.
+아래 Android 열은 옮기던 날의 코드를 적은 것이다.
 
 | 자리 | macOS | Windows | Android A0–A3 |
 |---|---|---|---|
@@ -678,7 +681,7 @@ A2 `PreviewRuntime`이 공유 `PetLoop`의 걷기·휴식·터치를 연결한�
 | coordinateSpace | world 변환 | DPI로 나눔 | px ÷ density, y 아래 방향 |
 
 Kotlin → JNA → `libroamling_android.so` 안의 UniFFI → 기존 `PetLoop` 순서다.
-`rust/roamling-android/src/lib.rs::default_tuning`은 코어 기본값을 내보내며 행동을 복제하지 않는다.
+진입점 크레이트의 `default_tuning`은 코어 기본값을 내보내며 행동을 복제하지 않는다.
 A1의 `MascotAtlas`·`Player`도 같은 라이브러리의 UniFFI를 통해 기존 에셋과
 `AnimationResolver`·`PetAnimationPlayer`를 호출한다. A2 `PreviewRuntime.tick`은 코어의 capability·
 delta_time·locomotion_rate를 플레이어로 전달하고, `MochiOverlay.schedule`은 코어가 요청한 주기로

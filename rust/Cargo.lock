@@ -645,15 +645,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "roamling-android"
-version = "0.6.8"
-dependencies = [
- "roamling-core",
- "roamling-pet",
- "uniffi",
-]
-
-[[package]]
 name = "roamling-core"
 version = "0.6.8"
 dependencies = [
