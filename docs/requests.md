@@ -72,6 +72,8 @@
   통과했다. 그다음 이 저장소에서 위 목록을 지우고 워크스페이스·`.gitignore`·README 둘·`docs/README.md`·
   `docs/architecture.md`·`CLAUDE.md`를 맞췄다. `docs/android.md`는 지우지 않고 **"옮겼다, 그리고 FFI는 여전히
   Android와의 계약이다"**를 적는 자리로 바꿨다 — 이 파일의 옛 링크도 그리로 간다.
+- **CI (2026-09-20)** 분리 커밋 `da47d89` 뒤 이 저장소의 Check macOS · Check Windows와, 비공개 저장소의 Check
+  Android(서브모듈을 받아 코어를 빌드하는 첫 실행)가 모두 통과했다.
 - **잃은 것** 이 저장소의 Check Android. FFI를 바꾸는 변경은 이제 비공개 저장소에서 코어를 올려 빌드해 봐야
   Android에 대해 확인된 것이다.
 - **상태** 완료.
