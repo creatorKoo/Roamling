@@ -136,6 +136,7 @@ func runtimeLogicTests() -> [LogicTest] {
                     }
                 }
                 try expect(sat, "the pet never sat for the hand, state \(runtime.behaviorState)")
+                try expect(!platform.overlay.effects.isEmpty, "petting never produced hearts")
                 try expect(
                     runtime.position.distance(to: start) < 1,
                     "the pet moved \(runtime.position.distance(to: start)) points while being petted"
@@ -472,6 +473,8 @@ final class FakeOverlay: PetOverlayProviding {
     private(set) var isInteractionEnabled = false
     private(set) var hitRegionScale: Double = 1
     private(set) var renderedFrames = 0
+    private(set) var effects: [PetEffectFrame] = []
+    func setEffects(_ effects: [PetEffectFrame]) { self.effects = effects }
     weak var inputHandler: (any PetOverlayInputHandling)?
 
     var objectSize: WorldSize {

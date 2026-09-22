@@ -63,6 +63,16 @@ pub struct FfiTickOutput {
     pub persist_position: bool,
 }
 
+/// Polygon points use pet-width units, relative to its centre (y down).
+#[derive(uniffi::Record)]
+pub struct FfiEffectFrame {
+    pub points: Vec<FfiPoint>,
+    pub red: u8,
+    pub green: u8,
+    pub blue: u8,
+    pub opacity: f64,
+}
+
 #[derive(uniffi::Record)]
 pub struct FfiInteractionOutput {
     pub x: f64,
@@ -169,6 +179,13 @@ impl PetLoop {
             )
         });
         self.inner.lock().unwrap().set_luminance(field);
+    }
+
+    pub fn effect_frames(&self) -> Vec<FfiEffectFrame> {
+        self.inner.lock().unwrap().effect_frames().into_iter().map(|frame| FfiEffectFrame {
+            points: frame.points.into_iter().map(|point| FfiPoint { x: point.x, y: point.y }).collect(),
+            red: frame.red, green: frame.green, blue: frame.blue, opacity: frame.opacity,
+        }).collect()
     }
 
     pub fn set_object_size(&self, width: f64, height: f64) {

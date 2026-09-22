@@ -16,6 +16,14 @@
   - `rust/roamling-core/uniffi.toml` — Kotlin 바인딩 설정(`android = true`, `Pointer` 이름 바꿈).
   - `rust/.cargo/config.toml`의 `*-linux-android` 링커 플래그(16 KB 페이지).
 
+## 쓰다듬기 이펙트 코어 추가 (2026-09-22, R25)
+
+`PetLoop.effect_frames()`와 `FfiEffectFrame`을 추가했다. 폴리곤 좌표는 펫 중심 기준,
+펫 너비 단위이며 y는 아래 방향이다. RGB와 투명도를 함께 전달한다.
+기존 tick 입력·출력 레코드 필드는 바꾸지 않았다. Android 앱의 고정 코어 버전과 셸은
+이번 작업에서 갱신하지 않았다. 후속 통합에서 바인딩을 재생성하고 입력 통과 레이어와
+길게 누르기 제스처를 함께 검증해야 한다. 설계는 [이펙트 문서](pet-effects-design.md).
+
 ## 이 저장소에서 일할 때 지킬 것
 
 - **FFI 표면(`rust/roamling-core/src/ffi/`)은 Android와의 계약이다.** Swift만 보고 이름·인자·레코드를 바꾸면

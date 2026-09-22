@@ -9,6 +9,7 @@
 
 | 묻는 것 | 문서 |
 |---|---|
+| 쓰다듬기 하트와 공통 이펙트 구조 | [`pet-effects-design.md`](pet-effects-design.md) |
 | 사용자 요청과 처리 상태 | [`requests.md`](requests.md) |
 | 모듈이 어떻게 갈리고 의존이 어디로 흐르나 | [`architecture.md`](architecture.md) |
 | 어떤 상황에 펫이 어떤 그림을 입나, 얼마나 오래 | [`behavior-flow.md`](behavior-flow.md) |

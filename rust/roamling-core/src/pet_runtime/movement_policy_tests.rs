@@ -125,6 +125,105 @@ fn direct_mouse_click_respects_body_visibility_and_interaction_gates() {
         "duplicate down must not reset the grab offset");
 }
 
+
+#[test]
+fn hearts_belong_to_pet_contact_and_clear_on_hide_or_pet_change() {
+    let origin = WorldPoint::new(500.0, 400.0);
+    let mut pet = PetRuntime::new(origin, RuntimeTuning::default(), 7);
+    pet.set_displays(vec![display("main", 0.0, 0.0)]);
+    let mut saw_hearts = false;
+    for tick in 0..60 {
+        let now = 10.0 + f64::from(tick) / 30.0;
+        pet.begin_tick(now);
+        let mut sample = input(now, origin);
+        sample.affection_held = true;
+        sample.pointer_is_over_pet = true;
+        pet.finish_tick(&sample);
+        saw_hearts |= !pet.effect_frames().is_empty();
+    }
+    assert!(saw_hearts);
+    assert_eq!(pet.position(), origin);
+    pet.set_hidden(true);
+    assert!(pet.effect_frames().is_empty());
+    pet.set_hidden(false);
+    for tick in 0..60 {
+        let now = 12.0 + f64::from(tick) / 30.0;
+        pet.begin_tick(now);
+        let mut sample = input(now, origin);
+        sample.affection_held = true;
+        sample.pointer_is_over_pet = true;
+        pet.finish_tick(&sample);
+    }
+    assert!(!pet.effect_frames().is_empty());
+    pet.clear_click_reaction(true);
+    assert!(pet.effect_frames().is_empty());
+    let mut beside = input(14.0, origin.offset(WorldVector::new(130.0, 0.0)));
+    beside.affection_held = true;
+    for tick in 0..60 {
+        beside.now = 14.0 + f64::from(tick) / 30.0;
+        pet.begin_tick(beside.now);
+        pet.finish_tick(&beside);
+        assert!(pet.effect_frames().is_empty());
+    }
+}
+
+#[test]
+fn petting_follows_strokes_then_settles_without_moving_the_pet() {
+    for hz in [30, 60] {
+        let origin = WorldPoint::new(500.0, 400.0);
+        let mut pet = PetRuntime::new(origin, RuntimeTuning::default(), 7);
+        pet.set_displays(vec![display("main", 0.0, 0.0)]);
+        let mut rate = 0.0;
+        for tick in 0..=hz * 4 {
+            let now = 10.0 + f64::from(tick) / f64::from(hz);
+            pet.begin_tick(now);
+            // One second still, a second stroking back and forth across the
+            // body, then two seconds still. Coordinates stay on the body.
+            let x = if tick > hz && tick <= hz * 2 {
+                20.0 * (std::f64::consts::TAU * 5.0 * (now - 11.0)).sin()
+            } else { 0.0 };
+            let mut sample = input(now, origin.offset(WorldVector::new(x, 0.0)));
+            sample.affection_held = true;
+            sample.pointer_is_over_pet = true;
+            let out = pet.finish_tick(&sample);
+            assert_eq!(out.state, BehaviorState::LookAtPointer);
+            assert_eq!(out.capability, PetCapability::Paw);
+            assert_eq!(pet.position(), origin);
+            assert!((0.5..=2.5).contains(&out.locomotion_rate));
+            if tick <= hz { assert_eq!(out.locomotion_rate, 0.5); }
+            if tick == hz * 2 { assert!(out.locomotion_rate > 1.7); }
+            if tick > hz * 2 { assert!(out.locomotion_rate <= rate); }
+            rate = out.locomotion_rate;
+        }
+        assert!((rate - 0.5).abs() < 0.004);
+        // Leaving and returning starts a new, calm touch even after a jump.
+        pet.finish_tick(&input(14.1, WorldPoint::new(900.0, 400.0)));
+        let mut returning = input(14.2, origin);
+        returning.affection_held = true;
+        returning.pointer_is_over_pet = true;
+        assert_eq!(pet.finish_tick(&returning).locomotion_rate, 0.5);
+    }
+}
+
+#[test]
+fn approval_wait_uses_the_slow_tilt_even_when_the_pointer_moves() {
+    let mut pet = PetRuntime::new(WorldPoint::new(500.0, 400.0), RuntimeTuning::default(), 7);
+    pet.set_displays(vec![display("main", 0.0, 0.0)]);
+    pet.handle_activity_event(CompanionEvent::new(
+        "approval", "codex:turn", 10.0, CompanionEventKind::AttentionRequired, 1.0, None,
+    ), 10.0);
+    for tick in 0..60 {
+        let now = 10.0 + f64::from(tick) / 30.0;
+        pet.begin_tick(now);
+        let pointer = WorldPoint::new(if tick % 2 == 0 { 800.0 } else { 950.0 }, 400.0);
+        let out = pet.finish_tick(&input(now, pointer));
+        assert_eq!(out.state, BehaviorState::WaitingForUser);
+        assert!(pet.effect_frames().is_empty());
+        assert_eq!(out.capability, PetCapability::Paw);
+        assert_eq!(out.locomotion_rate, 0.5);
+    }
+}
+
 #[test]
 fn codex_work_ignores_glance_but_not_affection_or_close_evasion() {
     let mut pet = PetRuntime::new(WorldPoint::new(500.0, 400.0), RuntimeTuning::default(), 7);
@@ -150,10 +249,24 @@ fn codex_work_ignores_glance_but_not_affection_or_close_evasion() {
     }
     let mut affection = input(13.1, WorldPoint::new(635.0, 400.0));
     affection.affection_held = true;
-    assert_eq!(
-        pet.finish_tick(&affection).state,
-        BehaviorState::LookAtPointer
-    );
+    // Beside the pet, affection still uses the distance-paced gaze. On its
+    // body, the head tilt must slow down instead of inheriting that haste.
+    let gaze = pet.finish_tick(&affection);
+    assert_eq!(gaze.state, BehaviorState::LookAtPointer);
+    assert_eq!(gaze.capability, PetCapability::Gaze);
+    assert!(gaze.locomotion_rate > 1.0);
+    affection.now = 13.12;
+    affection.pointer = pet.position();
+    affection.pointer_is_over_pet = true;
+    let petted = pet.finish_tick(&affection);
+    assert_eq!(petted.capability, PetCapability::Paw);
+    assert_eq!(petted.locomotion_rate, 0.5);
+    affection.now = 13.15;
+    affection.pointer = WorldPoint::new(635.0, 400.0);
+    affection.pointer_is_over_pet = false;
+    let beside = pet.finish_tick(&affection);
+    assert_eq!(beside.capability, PetCapability::Gaze);
+    assert_eq!(beside.locomotion_rate, gaze.locomotion_rate);
     // Work without a window hint must also recover after explicit affection.
     assert_eq!(
         pet.finish_tick(&input(13.2, WorldPoint::new(635.0, 400.0)))

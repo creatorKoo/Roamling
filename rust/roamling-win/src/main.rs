@@ -20,6 +20,7 @@ mod autostart;
 mod capture;
 mod diagnostics;
 mod duplication;
+mod effects;
 mod focus;
 mod palette_debug;
 mod persistence;
@@ -109,6 +110,7 @@ struct App {
     /// Presentation only and deliberately not persisted: every launch shows
     /// the pet again even if the previous one ended while hidden.
     hidden: bool,
+    effects: effects::EffectOverlay,
     /// Windows has no permission prompt for either of these, so consent is a
     /// setting instead -- and both start off. `docs/windows.md`, the permission model.
     visual: bool,
@@ -327,6 +329,7 @@ fn main() -> Result<()> {
     }
 
     let hwnd = create_window()?;
+    let effects = effects::EffectOverlay::new(hwnd)?;
     let tray_ok = tray::add(hwnd);
     APP.with(|slot| {
         *slot.borrow_mut() = Some(App {
@@ -348,6 +351,7 @@ fn main() -> Result<()> {
             avoiding,
             interactive,
             hidden: false,
+            effects,
             visual,
             cursor_aware,
             catalog,
@@ -789,6 +793,8 @@ fn refresh_luminance(app: &mut App, requests: &[roamling_core::LuminanceRequest]
 /// the old sheet's idea of where its frames are.
 fn adopt(app: &mut App, asset: PetAsset, package: Option<PathBuf>) {
     println!("pet: {}", asset.display_name);
+    app.pet.clear_click_reaction(true);
+    app.effects.hide();
     app.resolver = AnimationResolver::new(asset.tracks.clone(), asset.behavior_mappings.clone());
     app.player = PetAnimationPlayer::new(&app.resolver);
     app.asset = asset;
@@ -898,6 +904,12 @@ fn draw(hwnd: HWND, app: &mut App, position: WorldPoint, scale: f64) {
         y: (position.y * world_scale - height as f64 / 2.0).round() as i32,
     };
     surface.present(hwnd, corner);
+    if app.hidden {
+        app.effects.hide();
+    } else {
+        app.effects.draw(&app.pet.effect_frames(),
+            (position.x * world_scale, position.y * world_scale), (width, height));
+    }
 }
 
 fn set_click_through(hwnd: HWND, through: bool) {
@@ -974,6 +986,8 @@ fn apply_palette(app: &mut App, palette: roamling_core::Palette) {
         if app.current_package.is_some() {
             adopt(app, asset, None);
         } else {
+            app.pet.clear_click_reaction(false);
+            app.effects.hide();
             app.asset = asset;
             app.drawn = None;
         }
@@ -1046,6 +1060,7 @@ unsafe fn perform(hwnd: HWND, chosen: usize, app: &mut App, now: f64) {
         tray::CMD_HIDE => {
             app.hidden = !app.hidden;
             app.pet.set_hidden(app.hidden);
+            if app.hidden { app.effects.hide(); }
             let _ = ShowWindow(
                 hwnd,
                 if app.hidden {

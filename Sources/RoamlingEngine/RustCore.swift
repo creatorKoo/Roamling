@@ -1078,6 +1078,14 @@ public final class RustPetLoop {
     public var isWatchingWindow: Bool { handle.isWatchingWindow() }
     public var activeSourceID: String? { handle.activeSourceId() }
     public var randomDraws: UInt64 { handle.draws() }
+    public var effectFrames: [PetEffectFrame] {
+        handle.effectFrames().map { frame in
+            PetEffectFrame(
+                points: frame.points.map { WorldPoint(x: $0.x, y: $0.y) },
+                red: frame.red, green: frame.green, blue: frame.blue, opacity: frame.opacity
+            )
+        }
+    }
 
     public func preferredTickInterval(at now: TimeInterval) -> TimeInterval {
         handle.preferredTickInterval(now: now)

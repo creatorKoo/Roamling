@@ -57,6 +57,14 @@ const RESTING_LUMINANCE_REFRESH_INTERVAL: f64 = 6.0;
 const ROAMING_LUMINANCE_REFRESH_INTERVAL: f64 = 6.0;
 const FOCUS_REFRESH_INTERVAL: f64 = 0.5;
 const WANDER_CANDIDATE_COUNT: usize = 6;
+/// A thoughtful head tilt: the built-in 1.01 s waiting loop takes 2.02 s.
+const HEAD_TILT_BASE_RATE: f64 = 0.5;
+const PETTING_MAX_RATE: f64 = 2.5;
+/// Ignore tiny hand jitter; a deliberate stroke reaches the upper cadence.
+const PETTING_SPEED_DEAD_ZONE: f64 = 20.0;
+const PETTING_FULL_SPEED: f64 = 400.0;
+const PETTING_RESPONSE_SECONDS: f64 = 0.12;
+const PETTING_SETTLE_SECONDS: f64 = 0.30;
 
 /// Sitting and waking are authored pacing rather than a preference, so only the
 /// idle threshold is tunable. Ported from `RestConfiguration`.
@@ -231,6 +239,8 @@ pub struct PetRuntime {
     crossing_clear: Option<WorldPoint>,
     /// The affection key is held and the cursor is on the pet: see `TickInput`.
     is_petted: bool,
+    petting_animation_rate: f64,
+    effects: crate::effects::EffectSystem,
     rest_retry_at: f64,
     caught_transition_duration: f64,
     dragged_cycle_duration: f64,
@@ -284,6 +294,8 @@ impl PetRuntime {
             escape_route_active: false,
             crossing_clear: None,
             is_petted: false,
+            petting_animation_rate: HEAD_TILT_BASE_RATE,
+            effects: crate::effects::EffectSystem::default(),
             rest_retry_at: 0.0,
             caught_transition_duration: 0.0,
             dragged_cycle_duration: 0.4,
@@ -323,13 +335,17 @@ impl PetRuntime {
         self.tuning
     }
 
-    /// How soon the caller should come back. A pet asleep is worth a beat every
-    /// half second; one being reached for is worth every frame.
+    /// Geometry for the independent, click-through decoration layer.
+    pub fn effect_frames(&self) -> Vec<crate::effects::EffectFrame> {
+        self.effects.frames()
+    }
+
+    /// Effects can raise a slow display cadence, never lower a fast one.
     pub fn preferred_tick_interval(&self, now: f64) -> f64 {
         if now <= self.approach_hold_until {
             return 1.0 / 60.0;
         }
-        match self.behavior.state() {
+        let interval: f64 = match self.behavior.state() {
             BehaviorState::Wander
             | BehaviorState::EvadePointer
             | BehaviorState::FindSleepSpot
@@ -342,7 +358,8 @@ impl PetRuntime {
             BehaviorState::LookAtPointer => 1.0 / 16.0,
             BehaviorState::Sleep => 1.0 / 2.0,
             _ => 1.0 / 12.0,
-        }
+        };
+        if self.effects.is_active() { interval.min(1.0 / 30.0) } else { interval }
     }
 
     // --------------------------------------------------------------- setters
@@ -405,6 +422,7 @@ impl PetRuntime {
     pub fn set_interactions_enabled(&mut self, enabled: bool) -> bool {
         self.are_interactions_enabled = enabled;
         if !enabled {
+            self.effects.clear();
             self.approach_hold_until = 0.0;
         }
         !enabled
@@ -416,6 +434,7 @@ impl PetRuntime {
     pub fn set_hidden(&mut self, hidden: bool) {
         self.is_hidden = hidden;
         if hidden {
+            self.effects.clear();
             self.approach_hold_until = 0.0;
             self.luminance_requests.clear();
         }
@@ -436,6 +455,7 @@ impl PetRuntime {
     /// swapping the sprite sheet both do this; only the swap also drops the
     /// caught pose, because its length came from the sheet being replaced.
     pub fn clear_click_reaction(&mut self, clear_caught_transition: bool) {
+        self.effects.clear();
         self.click_reaction_until = 0.0;
         self.is_click_reaction_pending = false;
         self.landing_until = 0.0;
@@ -563,7 +583,23 @@ impl PetRuntime {
         let is_adored = input.affection_held && decision.proximity != PointerProximity::Far;
         // Only a hand actually on the pet is petting it. Beside it, the pet
         // just watches as it would any cursor -- minus the stepping away.
+        let was_petted = self.is_petted;
         self.is_petted = is_adored && input.pointer_is_over_pet;
+        if self.is_petted && was_petted {
+            let motion = ((decision.kinematics.speed - PETTING_SPEED_DEAD_ZONE)
+                / (PETTING_FULL_SPEED - PETTING_SPEED_DEAD_ZONE)).clamp(0.0, 1.0);
+            let target = HEAD_TILT_BASE_RATE + motion * (PETTING_MAX_RATE - HEAD_TILT_BASE_RATE);
+            let response = if target > self.petting_animation_rate {
+                PETTING_RESPONSE_SECONDS
+            } else {
+                PETTING_SETTLE_SECONDS
+            };
+            let blend = 1.0 - (-delta_time / response).exp();
+            self.petting_animation_rate += (target - self.petting_animation_rate) * blend;
+        } else {
+            // Enter calmly: the approach onto the body is not a stroke yet.
+            self.petting_animation_rate = HEAD_TILT_BASE_RATE;
+        }
         let allows_pointer_glance = is_adored
             || (self.activity.sustained_reaction() != Some(CompanionReaction::Work)
                 && matches!(self.behavior.state(),
@@ -758,6 +794,15 @@ impl PetRuntime {
             && !self.is_click_reaction_pending && input.pointer_is_over_pet;
         let owns_pointer = self.behavior.state().is_held() && !self.is_click_reaction_pending;
 
+        if self.is_hidden || !self.are_interactions_enabled {
+            self.effects.clear();
+        } else {
+            let petting = self.is_petted && self.behavior.state() == BehaviorState::LookAtPointer;
+            let motion = (self.petting_animation_rate - HEAD_TILT_BASE_RATE)
+                / (PETTING_MAX_RATE - HEAD_TILT_BASE_RATE);
+            self.effects.update(delta_time, petting, motion);
+        }
+
         TickOutput {
             delta_time,
             position: self.movement.position(),
@@ -844,11 +889,15 @@ impl PetRuntime {
     /// Only the states that actually travel at the tuned walking speed scale
     /// their cadence. Watching the pointer scales too, but on distance rather
     /// than on tuning: the closer the pointer, the faster the pet's tail goes.
+    /// Waiting and a still petting hand share an unhurried head tilt. Strokes
+    /// accelerate only petting, using pointer motion rather than proximity.
     fn locomotion_rate(&self) -> f64 {
         match self.behavior.state() {
             BehaviorState::Wander
             | BehaviorState::FindSleepSpot
             | BehaviorState::TravelToInterest => self.tuning.locomotion_animation_rate(),
+            BehaviorState::WaitingForUser => HEAD_TILT_BASE_RATE,
+            BehaviorState::LookAtPointer if self.is_petted => self.petting_animation_rate,
             BehaviorState::LookAtPointer => self
                 .last_pointer_decision
                 .map_or(1.0, |decision| decision.attention_rate),

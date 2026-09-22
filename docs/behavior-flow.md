@@ -232,6 +232,24 @@ Windows는 새 캡처 때만 필드를 넘기지만 macOS는 매 tick 넘긴다.
 `CGEventSource.keyState`(권한 불필요, `NSEvent.modifierFlags`는 좌우를 구분 못 한다), Windows는
 `GetAsyncKeyState(VK_LCONTROL)`.
 
+쓰다듬는 손이 가만히 있거나 **승인·입력 대기(`WaitingForUser`) 중이면 원래 트랙의 0.5배 속도**로
+갸웃한다(2026-09-22, R24). 보리의 `waiting` 한 주기는 1.01초이므로 실제로는 **2.02초**다.
+쓰다듬는 동안에는 커서 이동 속도에 따라 0.5~2.5배(주기 2.02~약 0.40초) 사이로 가속한다.
+20pt/s 이하의 작은 떨림은 무시하고 400pt/s에서 상한에 도달한다. 가속은 0.12초, 감속은 0.30초
+시정수로 완화한다. 손이 처음 몸체에 닿는 순간의 접근 속도는 무시하고 기본 속도로 시작한다.
+커서가 몸체를 벗어나면 일반 응시의 거리별 속도로 돌아간다. 승인 대기는 포인터 속도에 영향받지 않는다.
+근거: `PetRuntime::finish_tick`·`locomotion_rate`의 `HEAD_TILT_BASE_RATE`·`PETTING_*`;
+Windows `main.rs`와 macOS
+`RoamlingRuntime.swift`는 반환된 `locomotion_rate`를 애니메이션 경과 시간에 곱한다.
+
+**쓰다듬기 하트 (2026-09-22, R25).** 애정 키와 몸체 접촉이 함께 있고 실제 상태가
+`LookAtPointer`이면 0.35초 뒤 하트가 시작된다. 가만히 있으면 0.7초, 빠르게 쓰다듬으면
+0.2초 간격이며 각 하트는 펫 너비의 0.60배/초 속도로 1.2초 동안 떠올라 사라진다(최대 6개). 손을 떼면 새 하트만 멈추고,
+숨김·펫 교체·상호작용 끄기는 즉시 비운다. 승인 대기의 같은 `Paw`에는 하트가 없다.
+근거: `PetRuntime::finish_tick`·`set_hidden`·`clear_click_reaction`·`set_interactions_enabled`,
+`effects.rs::EffectSystem`. 양쪽 셸은 클릭을 받지 않는 별도 레이어에 공통 도형 좌표를 그린다.
+구조·확장 방법·검증 범위는 [이펙트 문서](pet-effects-design.md).
+
 끌지 않고 그냥 클릭하면 `caught → dragged`를 한 바퀴 돌린 뒤 `dropped`로 끝난다. 즉
 **클릭도 드래그도 row 6 → row 4 순서로 같은 그림을 본다.**
 

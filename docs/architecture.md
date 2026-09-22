@@ -44,6 +44,11 @@ macOS는 UniFFI 바인딩과 `RustCore.swift`, Windows는 Rust 직접 링크, An
 - `ClearanceMap`: runtime-only content exclusion and distance ranking for roaming, seats and rest
 - `display_policy`: shared-edge placement margins and committed monitor crossings
 - `PetRuntime`: tick orchestration, direct body-click/touch catch, rest rechecks
+- `effects::EffectSystem`: bounded visual particles, first emitter = petting hearts.
+  `EffectDefinition` sets colour, lifetime, size and rise speed; `EffectFrame` supplies filled polygons
+  in pet-width units. No platform types or behavior RNG. `PetLoop.effect_frames` exposes the same
+  geometry through additive FFI; Windows `effects.rs` and macOS `PetEffectsOverlay.swift` render it
+  in a separate click-through layer. See [effects](pet-effects-design.md).
 - `RestConfiguration`: MVP 0.7 idle/sit/wake timing
 - `CompanionEvent`, `UserContext`, `ActivitySource`
 - `AttentionModel`, `ReactionPolicy`, candidate scoring

@@ -38,6 +38,7 @@ public protocol PetOverlayProviding: OverlayProviding {
     func setScale(_ scale: Double)
     func setHitRegionScale(_ scale: Double)
     func setFrameImage(_ frame: PetFrame?)
+    func setEffects(_ effects: [PetEffectFrame])
 
     /// Whether a world point lands on the pet rather than the transparent
     /// padding around it. Used to decide whether a click belongs to the pet

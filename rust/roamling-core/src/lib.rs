@@ -19,6 +19,7 @@ mod clearance;
 mod clearance_tests;
 mod display_policy;
 pub mod emptiness;
+pub mod effects;
 pub mod ffi;
 pub mod focus_activity;
 pub mod interest;

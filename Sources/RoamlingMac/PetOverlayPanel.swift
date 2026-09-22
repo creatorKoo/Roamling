@@ -163,6 +163,9 @@ public final class MacOverlayProvider: PetOverlayProviding, PetOverlayViewDelega
     private var frameImages: [FrameKey: CGImage] = [:]
     private var worldPosition: WorldPoint = .zero
     private var interactionEnabled = false
+    private let effectsOverlay = PetEffectsOverlay()
+    private var effects: [PetEffectFrame] = []
+    private var visible = false
 
     public init(
         scale: Double = 1,
@@ -245,6 +248,11 @@ public final class MacOverlayProvider: PetOverlayProviding, PetOverlayViewDelega
         view.setImage(cropped)
     }
 
+    public func setEffects(_ effects: [PetEffectFrame]) {
+        self.effects = effects
+        if effects.isEmpty { effectsOverlay.update([], owner: panel, visible: visible) }
+    }
+
     public func setPosition(_ position: WorldPoint) {
         worldPosition = position
         let appKitCenter = coordinateSpace.pointToAppKit(position)
@@ -253,6 +261,7 @@ public final class MacOverlayProvider: PetOverlayProviding, PetOverlayViewDelega
             y: appKitCenter.y - panel.frame.height / 2
         )
         panel.setFrameOrigin(origin)
+        effectsOverlay.update(effects, owner: panel, visible: visible)
     }
 
     public func setScale(_ newScale: Double) {
@@ -267,6 +276,9 @@ public final class MacOverlayProvider: PetOverlayProviding, PetOverlayViewDelega
     }
 
     public func setVisible(_ visible: Bool) {
+        self.visible = visible
+        if !visible { effects = [] }
+        effectsOverlay.update(effects, owner: panel, visible: visible)
         if visible {
             panel.orderFrontRegardless()
         } else {

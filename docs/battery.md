@@ -34,7 +34,10 @@ macOS `RoamlingRuntime.tick`은 같은 필드도 매 tick 전달하여 이 캐�
 - **tick 속도가 상태를 따라 물러난다.** `PetRuntime::preferred_tick_interval`:
   잡히는 중 1/60 · 걷는 중 1/60 · 잡힘/드롭 1/30 · 커서 응시 1/16 · **수면 1/2** ·
   그 밖(idle · 앉음 · 관찰 · 작업) 1/12.
-- **재그리기는 프레임이 바뀔 때만 일어난다.** `PetOverlayView.setImage`이
+- **하트가 살아 있는 동안의 이펙트 레이어는 최소 30Hz로 진행한다** (2026-09-22, R25).
+  `PetRuntime::preferred_tick_interval`은 원래 60Hz인 상태를 낮추지 않고, 입자가 모두 사라지면
+  원래 간격으로 돌아간다. 기본 스프라이트 캐시는 유지한다. 이펙트 비용의 실측값은 아직 없다.
+- **기본 스프라이트 재그리기는 프레임이 바뀔 때만 일어난다.** `PetOverlayView.setImage`이
   `self.image !== image`로 막고, `MacOverlayProvider.setFrameImage`이 크롭을 캐시해
   같은 칸이면 **동일 객체**를 넘긴다. 여기에 조건을 더 얹어 봐야 아무것도 안 준다.
 - **capture 주기가 상황을 따라 늘어난다.** 창을 볼 때 3초, 배회·수면 중 6초.

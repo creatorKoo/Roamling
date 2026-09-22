@@ -55,6 +55,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         didSet {
             defaults.set(areInteractionsEnabled, forKey: DefaultsKey.interactions)
             if core.setInteractionsEnabled(areInteractionsEnabled) {
+                overlay.setEffects([])
                 overlay.setInteractionEnabled(false)
             }
         }
@@ -761,6 +762,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             pointerDegrees: output.lookDirectionDegrees
         )
         animationPlayer.update(deltaTime: output.deltaTime * output.locomotionRate)
+        overlay.setEffects(core.effectFrames)
         overlay.setPosition(output.position)
         renderCurrentFrame()
     }
@@ -1049,6 +1051,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     private func install(asset newAsset: PetAsset) {
         asset = newAsset
         core.clearClickReaction(clearCaughtTransition: true)
+        overlay.setEffects([])
         animationPlayer = PetAnimationPlayer(asset: newAsset)
         core.setAnimationDurations(
             caught: Self.caughtTransitionDuration(of: newAsset),

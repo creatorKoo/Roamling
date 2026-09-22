@@ -19,13 +19,15 @@
 use roamling_pet::{FrameRect, PetImage};
 use windows::Win32::Foundation::{COLORREF, HWND, POINT, SIZE};
 use windows::Win32::Graphics::Gdi::{
-    CreateCompatibleDC, CreateDIBSection, DeleteDC, SelectObject, AC_SRC_ALPHA, AC_SRC_OVER,
+    CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, SelectObject, HBITMAP, HGDIOBJ, AC_SRC_ALPHA, AC_SRC_OVER,
     BITMAPINFO, BITMAPINFOHEADER, BLENDFUNCTION, DIB_RGB_COLORS, HDC,
 };
 use windows::Win32::UI::WindowsAndMessaging::{UpdateLayeredWindow, ULW_ALPHA};
 
 pub struct Surface {
     dc: HDC,
+    bitmap: HBITMAP,
+    previous_bitmap: HGDIOBJ,
     bits: *mut u8,
     pub width: i32,
     pub height: i32,
@@ -54,10 +56,15 @@ impl Surface {
                 ..Default::default()
             };
             let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
-            let bitmap = CreateDIBSection(dc, &info, DIB_RGB_COLORS, &mut bits, None, 0).ok()?;
-            SelectObject(dc, bitmap);
+            let bitmap = match CreateDIBSection(dc, &info, DIB_RGB_COLORS, &mut bits, None, 0) {
+                Ok(bitmap) => bitmap,
+                Err(_) => { let _ = DeleteDC(dc); return None; }
+            };
+            let previous_bitmap = SelectObject(dc, bitmap);
             Some(Self {
                 dc,
+                bitmap,
+                previous_bitmap,
                 bits: bits as *mut u8,
                 width,
                 height,
@@ -73,6 +80,13 @@ impl Surface {
         };
         sample(sheet, rect, self.width, self.height, smooth, destination);
     }
+    pub fn draw_effects(&mut self, frames: &[roamling_core::effects::EffectFrame]) {
+        let pixels = unsafe {
+            std::slice::from_raw_parts_mut(self.bits, (self.width * self.height * 4) as usize)
+        };
+        paint_effects(frames, self.width as usize, self.height as usize, pixels);
+    }
+
     /// Move the window and blend the bitmap in one call, so the pet never tears
     /// between where it is and what it looks like.
     pub fn present(&self, hwnd: HWND, corner: POINT) {
@@ -106,8 +120,126 @@ impl Surface {
 impl Drop for Surface {
     fn drop(&mut self) {
         unsafe {
+            SelectObject(self.dc, self.previous_bitmap);
+            let _ = DeleteObject(self.bitmap);
             let _ = DeleteDC(self.dc);
         }
+    }
+}
+
+
+/// Fill common-core polygons into premultiplied BGRA. Four coverage samples
+/// keep small hearts smooth without touching the character's pixel sampling.
+fn paint_effects(frames: &[roamling_core::effects::EffectFrame], width: usize, height: usize, pixels: &mut [u8]) {
+    pixels.fill(0);
+    let body_width = width as f64 / 2.0;
+    for frame in frames {
+        if frame.points.len() < 3 || frame.opacity <= 0.0 { continue; }
+        let points: Vec<(f64, f64)> = frame.points.iter().map(|p|
+            (body_width + p.x * body_width, height as f64 * 0.75 + p.y * body_width)
+        ).collect();
+        let left = points.iter().map(|p| p.0).fold(f64::INFINITY, f64::min).floor().max(0.0) as usize;
+        let top = points.iter().map(|p| p.1).fold(f64::INFINITY, f64::min).floor().max(0.0) as usize;
+        let right = points.iter().map(|p| p.0).fold(0.0, f64::max).ceil().min(width as f64) as usize;
+        let bottom = points.iter().map(|p| p.1).fold(0.0, f64::max).ceil().min(height as f64) as usize;
+        for y in top..bottom {
+            for x in left..right {
+                let mut coverage = 0;
+                for dy in [0.25, 0.75] {
+                    for dx in [0.25, 0.75] {
+                        if polygon_contains(&points, x as f64 + dx, y as f64 + dy) { coverage += 1; }
+                    }
+                }
+                if coverage == 0 { continue; }
+                let alpha = (frame.opacity.clamp(0.0, 1.0) * coverage as f64 * 255.0 / 4.0).round() as u32;
+                let offset = (y * width + x) * 4;
+                for (channel, colour) in [frame.blue, frame.green, frame.red, 255].into_iter().enumerate() {
+                    pixels[offset + channel] = ((colour as u32 * alpha
+                        + pixels[offset + channel] as u32 * (255 - alpha) + 127) / 255) as u8;
+                }
+            }
+        }
+    }
+}
+
+fn polygon_contains(points: &[(f64, f64)], x: f64, y: f64) -> bool {
+    let mut inside = false;
+    let mut previous = points[points.len() - 1];
+    for &next in points {
+        if (next.1 > y) != (previous.1 > y)
+            && x < (previous.0 - next.0) * (y - next.1) / (previous.1 - next.1) + next.0
+        {
+            inside = !inside;
+        }
+        previous = next;
+    }
+    inside
+}
+
+#[cfg(test)]
+mod effect_tests {
+    use super::*;
+
+    /// Opt-in artifact made by the production sprite and effect compositors.
+    #[test]
+    fn preview_pet_with_hearts() {
+        let Ok(path) = std::env::var("ROAMLING_EFFECTS_PREVIEW") else { return; };
+        let asset = roamling_pet::built_in_mochi().unwrap();
+        let rect = asset.frame_rect(50).unwrap();
+        let mut pet = vec![0; 96 * 104 * 4];
+        sample(asset.sheet(rect.sheet).unwrap(), rect, 96, 104, false, &mut pet);
+        let mut engine = roamling_core::effects::EffectSystem::default();
+        for _ in 0..48 { engine.update(1.0 / 30.0, true, 1.0); }
+        let mut overlay = vec![0; 192 * 208 * 4];
+        paint_effects(&engine.frames(), 192, 208, &mut overlay);
+        let mut canvas = vec![0u8; 192 * 208 * 4];
+        for y in 0..208 {
+            for x in 0..192 {
+                let i = (y * 192 + x) * 4;
+                canvas[i..i + 4].copy_from_slice(&[240, 243, 246, 255]);
+                if (48..144).contains(&x) && y >= 104 {
+                    let src = ((y - 104) * 96 + x - 48) * 4;
+                    let alpha = pet[src + 3] as u32;
+                    for c in 0..3 {
+                        canvas[i + c] = (pet[src + c] as u32
+                            + (canvas[i + c] as u32 * (255 - alpha) + 127) / 255) as u8;
+                    }
+                }
+                let alpha = overlay[i + 3] as u32;
+                for c in 0..3 {
+                    canvas[i + c] = (overlay[i + c] as u32
+                        + (canvas[i + c] as u32 * (255 - alpha) + 127) / 255) as u8;
+                }
+            }
+        }
+        // Top-down 32-bit BMP, written without any image-library dependency.
+        let mut bmp = Vec::new();
+        bmp.extend_from_slice(b"BM");
+        bmp.extend_from_slice(&(54u32 + canvas.len() as u32).to_le_bytes());
+        bmp.extend_from_slice(&[0; 4]);
+        bmp.extend_from_slice(&54u32.to_le_bytes());
+        bmp.extend_from_slice(&40u32.to_le_bytes());
+        bmp.extend_from_slice(&192i32.to_le_bytes());
+        bmp.extend_from_slice(&(-208i32).to_le_bytes());
+        bmp.extend_from_slice(&1u16.to_le_bytes());
+        bmp.extend_from_slice(&32u16.to_le_bytes());
+        bmp.extend_from_slice(&[0; 24]);
+        bmp.extend_from_slice(&canvas);
+        std::fs::write(path, bmp).unwrap();
+    }
+
+
+    #[test]
+    fn particles_have_transparent_padding_and_premultiplied_edges() {
+        let mut engine = roamling_core::effects::EffectSystem::default();
+        for _ in 0..20 { engine.update(1.0 / 30.0, true, 1.0); }
+        let mut pixels = vec![0; 192 * 208 * 4];
+        paint_effects(&engine.frames(), 192, 208, &mut pixels);
+        assert!(pixels.chunks_exact(4).any(|p| p[3] > 0));
+        assert!(pixels.chunks_exact(4).all(|p| p[0] <= p[3] && p[1] <= p[3] && p[2] <= p[3]));
+        assert!(pixels[..192 * 4].iter().all(|p| *p == 0));
+        paint_effects(&[], 192, 208, &mut pixels);
+        assert!(pixels.iter().all(|p| *p == 0));
     }
 }
 
