@@ -31,11 +31,6 @@
 
 ## 진행
 
-### R26. 쓰다듬기 개선 버전 발행 (2026-09-22)
-
-- **원문** "버전 발행도 해줄래?"
-- **상태** 진행. 승인·병합한 R24·R25를 0.6.9로 발행한다. 사용 안내 revision 2와 한·영 쓰다듬기 설명을 갱신하고 Windows·macOS 릴리스 검증 후 태그·배포 파일·업데이트 피드를 확인한다.
-
 ### R19. 데스크톱도 0.1배까지 줄일 수 있게 (2026-09-19)
 
 - **누가·언제** 사용자, 2026-09-19. 폰에서 작은 보리를 써 본 직후.
@@ -133,6 +128,12 @@
 
 ## 완료
 
+### R26. 쓰다듬기 개선 버전 발행 (2026-09-22)
+
+- **원문** "버전 발행도 해줄래?"
+- **상태** 완료. 승인·병합한 R24·R25와 한·영 사용 안내 revision 2를 [v0.6.9](https://github.com/creatorKoo/Roamling/releases/tag/v0.6.9)로 발행했다. 태그 커밋 `70c9cf7`.
+- **검증** [Windows 사전 검증](https://github.com/creatorKoo/Roamling/actions/runs/35698030912)·[macOS 사전 검증](https://github.com/creatorKoo/Roamling/actions/runs/35698030869) 및 [정식 릴리스](https://github.com/creatorKoo/Roamling/actions/runs/35699253799) 모두 통과. 공개 파일 6개의 SHA-256, appcast와 Windows exe·Mac ZIP의 Ed25519 서명, Mac 버전·안내 revision을 내려받아 확인했다. 실제 Mac의 쓰다듬기 체감과 Android 통합은 별도다.
+
 ### R25. 별도 워크트리에서 범용 이펙트와 쓰다듬기 하트 (2026-09-22)
 
 - **원문** "이거 수정안 워크트리에서 계속 진행가능? 그리고 하트 효과도 만들어줄수 있나? 기본캐릭터 두고 그 위에 그리는 이펙트 식으로. 이펙트 나중에 더 추가할 수 있게 범용적인 엔진느낌으루"
@@ -147,7 +148,7 @@
   투명 레이어의 입력 통과·owner·크기 변경·수명과 합성 결과를 검증했다.
   `output/petting-hearts.png` 합성 샘플 육안 확인, 실행 smoke exit 0.
   `output/run/roamling.exe`로 워크트리 빌드를 재실행했다.
-  Swift 바인딩 생성은 성공했으나 macOS 컴파일·실화면과 Android 통합은 미검증이다.
+  Swift 바인딩 생성 성공. 이후 0.6.9의 [macOS 사전 검증](https://github.com/creatorKoo/Roamling/actions/runs/35698030869)에서 테스트·컴파일·서명·패키징·실행도 통과했다. 실제 Mac의 실화면·체감과 Android 통합은 별도다.
 - **하트 체감 조정 (2026-09-22)** "조금더 빨라도 될것 같은데.. 하트만" → 빈도·상승 속도 선택에 "둘 다 조금 빠르게". 생성 간격 0.9~0.25초 → 0.7~0.2초, 상승 속도 0.45 → 0.60 펫 너비/초. 고개 속도와 하트 수명·최대 개수는 유지한다. 이펙트·합성 검사 4개와 Windows 릴리스 빌드 통과, 갱신한 합성 샘플의 잘림 없음 확인 후 재실행했다 (`output/heart-faster-*.log`).
 - **빌드 위치** 기존 캐시 `../Roamling/rust/target`을 `CARGO_TARGET_DIR`로 사용했다.
   실행본은 이 워크트리의 `output/run`에 별도 복사했다. 로그는 `output/effects-full-tests.log`.

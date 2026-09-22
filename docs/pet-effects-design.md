@@ -100,7 +100,9 @@ flowchart LR
   `sprite::effect_tests`는 투명 여백·premultiplied 합성과 빈 프레임의 잔상 제거를 확인한다.
 - `ROAMLING_EFFECTS_PREVIEW=<BMP 경로>`로 `preview_pet_with_hearts` 테스트를 실행하면
   실제 캐릭터 샘플러와 효과 합성기를 사용한 이미지를 얻는다. 아틀라스는 변경하지 않는다.
-- Swift 바인딩 생성이 성공했다(`output/swift-effects`). macOS 컴파일·패널 육안 확인은 미검증이다.
+- Swift 바인딩 생성이 성공했다(`output/swift-effects`). 0.6.9 준비 커밋 `70c9cf7`의
+  [macOS 사전 검증](https://github.com/creatorKoo/Roamling/actions/runs/35698030869)에서 테스트·컴파일·서명·DMG/ZIP·패키지 실행이 통과했다.
+  실제 Mac에서의 패널 육안·쓰다듬기 체감 확인과 Android 통합은 별도다.
 - `scripts/test.ps1` 전체 통과: 코어 96개·Windows 셸 60개(기존 네트워크 1개 ignored), differential·릴리스 빌드 포함.
   `output/petting-hearts.png` 합성 샘플을 육안 확인했고 실행 smoke는 exit 0. 워크트리 실행본을 다시 켰다.
   검증 상세와 실사용 확인 상태는 `docs/requests.md` R25에 있다.
