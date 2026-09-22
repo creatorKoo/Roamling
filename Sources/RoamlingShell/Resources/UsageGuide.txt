@@ -1,7 +1,8 @@
 # App version and guide revision are independent. Keep earlier change entries.
-revision|1
+revision|2
 basic|guide.catch
 basic|guide.customize
 basic|guide.work
 basic|guide.hide
 1|guide.changed.catch
+2|guide.changed.petting

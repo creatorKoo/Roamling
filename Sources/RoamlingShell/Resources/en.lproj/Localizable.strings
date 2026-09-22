@@ -157,7 +157,7 @@
 "guide.modifier.windows" = "Left Ctrl";
 "guide.modifier.mac" = "Left ⌘ (Command)";
 "guide.catch.title" = "1. Catch and play";
-"guide.catch.body" = "Hold %@ as you move toward Bori to stop it dodging. Click and drag its body to pick it up; release to put it down. Moving or working pets can be caught too.";
+"guide.catch.body" = "Hold %@ as you approach Bori to stop it dodging. Rest the pointer on its body to make hearts appear; move the pointer faster for quicker head tilts. Click and drag its body to move it, then release to put it down.";
 "guide.customize.title" = "2. Make it yours";
 "guide.customize.body" = "Open the tray or menu bar menu to change Bori's colour and size. Movement settings control roaming, pointer avoidance and catching.";
 "guide.work.title" = "3. Keep you company at work";
@@ -165,4 +165,6 @@
 "guide.hide.title" = "4. Take a little break";
 "guide.hide.body" = "Choose Hide for a while from the menu to get Bori out of the way, then use the same menu to bring it back.";
 "guide.changed.catch.title" = "An easier way to catch Bori";
+"guide.changed.petting.title" = "Pet Bori with hearts";
+"guide.changed.petting.body" = "Hold %@ with the pointer over Bori's body. Keep still for gentle head tilts, or move faster for livelier tilts and more hearts. Bori also tilts its head slowly while waiting for your input.";
 "guide.changed.catch.body" = "A body click now works while Bori is moving or working. Hold %@ when approaching to stop it dodging. Ordinary tail wags happen only when seated.";
