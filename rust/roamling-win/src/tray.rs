@@ -362,6 +362,17 @@ unsafe fn attach(parent: HMENU, submenu: HMENU, title: &str) {
     );
 }
 
+thread_local! {
+    static MENU_OPEN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Whether the tray menu is up. Ticks keep running inside its nested message
+/// loop, so a tick can ask -- and an update must not restart the pet from
+/// under an open menu.
+pub fn is_menu_open() -> bool {
+    MENU_OPEN.with(std::cell::Cell::get)
+}
+
 /// Show the menu and return the chosen command, or 0.
 ///
 /// `TPM_RETURNCMD` keeps the answer here instead of routing a `WM_COMMAND`
@@ -378,6 +389,7 @@ pub fn show_menu(hwnd: HWND, state: MenuState) -> usize {
         // Without the foreground dance the menu will not dismiss when the user
         // clicks away from it. A tray menu has needed both halves since Win95.
         let _ = SetForegroundWindow(hwnd);
+        MENU_OPEN.with(|open| open.set(true));
         let chosen = TrackPopupMenu(
             menu,
             TPM_RETURNCMD | TPM_RIGHTBUTTON,
@@ -387,6 +399,7 @@ pub fn show_menu(hwnd: HWND, state: MenuState) -> usize {
             hwnd,
             None,
         );
+        MENU_OPEN.with(|open| open.set(false));
         let _ = PostMessageW(hwnd, WM_NULL, WPARAM(0), LPARAM(0));
         let _ = DestroyMenu(menu);
         chosen.0 as usize

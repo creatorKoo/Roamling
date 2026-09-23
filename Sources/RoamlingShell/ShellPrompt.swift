@@ -192,14 +192,6 @@ public enum ShellPrompt {
         )
     }
 
-    public static func updateStaged(version: String) -> AlertModel {
-        AlertModel(
-            title: localizedFormat("result.update.ready", version),
-            body: localized("result.update.ready.detail"),
-            buttons: []
-        )
-    }
-
     public static func updateFailure(_ detail: String) -> AlertModel {
         AlertModel(
             title: localized("error.update.failed"),

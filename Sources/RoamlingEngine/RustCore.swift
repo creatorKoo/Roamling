@@ -1077,6 +1077,9 @@ public final class RustPetLoop {
     public var isPlacementTravelling: Bool { handle.isPlacementTravelling() }
     public var isWatchingWindow: Bool { handle.isWatchingWindow() }
     public var activeSourceID: String? { handle.activeSourceId() }
+    public func isQuietForRestart(at now: TimeInterval) -> Bool {
+        handle.isQuietForRestart(now: now)
+    }
     public var randomDraws: UInt64 { handle.draws() }
     public var effectFrames: [PetEffectFrame] {
         handle.effectFrames().map { frame in

@@ -112,11 +112,42 @@ macOS도 같은 이유로 `CGEventSource.secondsSinceLastEventType(_:eventType:)
 확인할 수 없는 빌드는 업데이트하지 않는다. 지금은 실제 키가 들어 있고 양 플랫폼의 자동
 업데이트가 켜져 있다.
 
-**실행 중인 exe는 이름을 바꿔서 교체한다.** Windows는 실행 중인 파일을 지우거나 덮어쓰지
-못하지만 이름은 바꿀 수 있다 — 잠금이 이름이 아니라 내용에 걸린다. `roamling.exe` →
-`roamling.exe.old`, 새 바이트를 `roamling.exe`로. 헬퍼 프로세스도 예약 작업도 재시작 요구도
-없다. 두 번째 rename이 실패하면 옛 파일을 되돌린다. macOS는 여기서 갈린다 — 프로세스가
-경로가 아니라 inode를 들고 있어서 실행 중에 번들을 바꿀 수 있다.
+**교체와 재실행은 붙어 있다 (사용자 결정 2026-09-23, `docs/requests.md` R27).** 받은 것은 옆에
+풀어만 두고, 실행 중인 파일을 바꾸는 것은 다시 켜기 바로 앞에서만 한다. 팝업은 없다.
+
+```
+확인        하루 한 번, 시작 직후(macOS 10초 · Windows 30초), 또는 메뉴
+  ↓         받기 → 매니페스트·아티팩트 서명 검증 (roamling-update)
+준비        macOS   .Roamling-update/Roamling.app   MacUpdater.check → stage (ditto + codesign --verify)
+            Windows roamling.exe.new                update::check → stage
+  ↓         펫이 한가할 때 — PetRuntime::is_quiet_for_restart. 메뉴로 물었으면 기다리지 않는다
+교체·재실행  macOS   번들 교체 → 새 인스턴스로 연다      MacUpdater.install · relaunch
+            Windows 이름 바꾸기 둘 → 새 exe 실행      update::install · relaunch
+  ↓         둘 다 새 프로세스에 --after <pid>를 넘기고 자기는 평소 종료 경로로 끝난다
+새 프로세스  옛 pid가 끝날 때까지(최대 10초) 기다린 뒤에 시작한다
+```
+
+- **한가함**은 코어가 답한다 — 숨겨져 있지 않고, agent도 일하는 앱도 자리를 잡고 있지 않고
+  (`active_source_id`가 없음), 서 있고(`Idle`), 손이 다가오는 중이 아닐 때. 숨긴 펫을 다시 켜면
+  숨김이 풀린다(`docs/hiding.md` — 숨김은 저장하지 않는다). 일하는 옆에서 사라지면 성가시다.
+- **준비만 된 채로 사용자가 끄면 교체만 하고 끈다.** 다음 실행이 새 버전이다.
+- **`--after`를 기다리는 이유.** Windows는 한 개 실행 잠금(`claim_single_instance`)이 있어서 옛
+  프로세스가 살아 있으면 새 프로세스가 바로 끝난다. macOS는 잠금이 없지만 같은 번들 id가 떠 있으면
+  `open`이 새로 띄우지 않고 떠 있는 것을 앞으로 가져온다 — 그래서 새 인스턴스를 명시해서 열고,
+  두 벌이 같이 도는 시간은 새 쪽이 기다려서 없앤다.
+- **위치는 이어진다.** macOS는 종료 때 `RoamlingRuntime.stop()`이 저장하고, Windows는 재실행 직전에
+  `remember`로 적는다.
+
+**macOS에서 교체만 하면 안 된다.** 프로세스는 inode를 들고 있어서 번들이 바뀌어도 계속 돌지만,
+**그 순간부터 ScreenCaptureKit이 그 프로세스에 화면 목록을 주지 않는다** — 펫이 다시 켜질
+때까지 글자를 못 본다. 이전에는 교체만 하고 "다음에 켜면 적용"이라고 알렸고, 사용자는 다시 켤
+이유가 없었다. 실측은 `docs/capture.md` §2 "2026-09-23".
+
+**Windows는 이름을 바꿔서 교체한다.** 실행 중인 파일을 지우거나 덮어쓰지 못하지만 이름은 바꿀 수
+있다 — 잠금이 이름이 아니라 내용에 걸린다. `roamling.exe` → `roamling.exe.old`, `roamling.exe.new`
+→ `roamling.exe`. 두 번째 rename이 실패하면 옛 파일을 되돌린다. 새 프로세스가 시작하며
+`update::clean_up`으로 `.old`를 지운다. Windows에서 캡처가 교체로 끊기는지는 확인하지 않았다 —
+다시 켜는 이유는 새 버전을 바로 쓰기 위해서다.
 
 **피드는 GitHub 릴리스에 얹혀 있다.** `/releases/latest/download/appcast.json`이 항상 최신
 릴리스의 자산으로 리다이렉트된다. 매니페스트 안의 아티팩트 URL은 **태그가 박힌 주소**다 —

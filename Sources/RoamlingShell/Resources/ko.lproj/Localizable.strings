@@ -104,12 +104,10 @@
 "menu.update.check" = "업데이트 확인";
 "menu.launchAtLogin" = "로그인할 때 시작";
 "menu.update.auto" = "자동 업데이트";
-"status.update.ready" = "업데이트 %@ 준비됨 — 다시 켜면 적용";
+"status.update.ready" = "업데이트 %@ 준비됨 — 펫이 한가할 때 다시 켜짐";
 "status.update.checking" = "업데이트 확인 중…";
 "result.update.upToDate" = "최신 버전입니다.";
 "result.update.upToDate.detail" = "지금 버전은 %@입니다.";
-"result.update.ready" = "업데이트 %@를 받았습니다.";
-"result.update.ready.detail" = "다음에 Roamling을 켜면 새 버전으로 실행됩니다. 따로 할 일은 없습니다.";
 "error.update.failed" = "업데이트를 확인하지 못했습니다";
 "alert.launchAtLogin.failed" = "로그인 항목을 바꾸지 못했습니다";
 

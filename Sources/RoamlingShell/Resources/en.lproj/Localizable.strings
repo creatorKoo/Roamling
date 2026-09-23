@@ -104,12 +104,10 @@
 "menu.update.check" = "Check for Updates";
 "menu.launchAtLogin" = "Start at Login";
 "menu.update.auto" = "Automatic Updates";
-"status.update.ready" = "Update %@ ready — restart to apply";
+"status.update.ready" = "Update %@ ready — restarts when the pet is idle";
 "status.update.checking" = "Checking for updates…";
 "result.update.upToDate" = "Roamling is up to date.";
 "result.update.upToDate.detail" = "You are running version %@.";
-"result.update.ready" = "Update %@ is ready.";
-"result.update.ready.detail" = "It will be running the next time Roamling starts. Nothing else is needed.";
 "error.update.failed" = "Couldn’t check for updates";
 "alert.launchAtLogin.failed" = "Could not change the login item";
 

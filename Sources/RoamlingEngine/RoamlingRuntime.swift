@@ -776,6 +776,10 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     /// locate is not a reason for the pet to stand still.
     public var isWatchingWindow: Bool { core.isWatchingWindow }
 
+    /// Whether restarting now to put an update in place would go unnoticed.
+    /// The core decides, so Windows asks the same question.
+    public var isQuietForRestart: Bool { core.isQuietForRestart(at: now()) }
+
     /// Why the pet is doing what it is doing, kept in memory and copyable from
     /// the menu. Standing and sitting look identical from outside the app, so
     /// without this the only way to tell them apart was to add a log and ship a
@@ -789,6 +793,13 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
 
     public var diagnosticsText: String {
         diagnostics.text(now: now())
+    }
+
+    /// The updater's steps, in the same log as the pet's. On 2026-09-23 the
+    /// moment an update replaced the bundle had to be worked out from file
+    /// dates, because nothing here said so (`docs/capture.md` §2).
+    public func recordUpdate(_ message: String) {
+        record("update", message, at: now())
     }
 
     private func record(_ category: String, _ message: String, at timestamp: TimeInterval) {

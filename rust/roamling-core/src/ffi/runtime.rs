@@ -427,6 +427,10 @@ impl PetLoop {
             .map(str::to_owned)
     }
 
+    pub fn is_quiet_for_restart(&self, now: f64) -> bool {
+        self.inner.lock().unwrap().is_quiet_for_restart(now)
+    }
+
     /// How many random numbers the pet has spent. Only the recorded-session
     /// test reads it, and it is the fastest way to see two runs part company.
     pub fn draws(&self) -> u64 {

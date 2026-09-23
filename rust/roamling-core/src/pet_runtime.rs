@@ -29,6 +29,8 @@ mod hidden_tests;
 mod movement_policy_tests;
 #[cfg(test)]
 mod rest_tests;
+#[cfg(test)]
+mod restart_tests;
 
 use names::{describe, proximity_name, state_name};
 
@@ -325,6 +327,18 @@ impl PetRuntime {
 
     pub fn active_source_id(&self) -> Option<&str> {
         self.activity.active_source_id()
+    }
+
+    /// Whether the shell may restart the process now, to put a new version in
+    /// place, without the user seeing more than a blink. Not while hidden: a
+    /// fresh launch always shows the pet (`docs/hiding.md`). Not while an agent
+    /// or a working app holds it, not while it is doing anything but standing,
+    /// and not while a hand is on its way. `docs/windows.md` "자동 업데이트".
+    pub fn is_quiet_for_restart(&self, now: f64) -> bool {
+        !self.is_hidden
+            && self.activity.active_source_id().is_none()
+            && self.behavior.state() == BehaviorState::Idle
+            && now > self.approach_hold_until
     }
 
     pub fn draws(&self) -> u64 {

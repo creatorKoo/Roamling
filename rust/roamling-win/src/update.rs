@@ -1,32 +1,37 @@
 // SPDX-FileCopyrightText: 2026 GooBeom Jeoung
 // SPDX-License-Identifier: GPL-3.0-only
 
-//! Getting the new version onto the disk.
+//! Getting the new version onto the disk, and into the running pet.
 //!
 //! The decisions -- is it newer, is it ours -- are `roamling-update`'s, and
-//! macOS shares them. What is here is the two things that touch this machine:
-//! fetching bytes, and replacing a file that is currently running.
+//! macOS shares them. What is here is what touches this machine: fetching
+//! bytes, putting them beside the executable, swapping them in, and starting
+//! the new one.
 //!
 //! ## Replacing a running executable
 //!
 //! Windows will not let the file backing a running process be deleted or
 //! overwritten. It *will* let it be renamed: the lock is on the file's contents,
-//! not on its name. So the swap is
+//! not on its name. So a check writes `roamling.exe.new` (`stage`), and when the
+//! pet is idle the swap (`install`) is
 //!
 //! ```text
-//! roamling.exe -> roamling.exe.old      the running process keeps running
-//! (new bytes)  -> roamling.exe          the next launch gets the new version
+//! roamling.exe     -> roamling.exe.old  the running process keeps running
+//! roamling.exe.new -> roamling.exe      and starts this one on its way out
 //! ```
 //!
-//! and the next launch deletes the leftover. No helper process, no scheduled
-//! task, no restart prompt. This is the same lock that makes `scripts/run.ps1`
-//! stop the pet before building.
+//! followed at once by `relaunch`. The new copy waits for the old one to be
+//! gone (`wait_for_previous_instance`) and deletes the leftover. Swap and
+//! restart go together on both platforms because on macOS a process whose
+//! bundle was swapped loses the screen (`docs/windows.md` "자동 업데이트").
+//! This is the same lock that makes `scripts/run.ps1` stop the pet before
+//! building.
 //!
 //! ## Never annoying
 //!
 //! Nothing here shows a window on its own. An automatic check that finds
-//! nothing says nothing; one that finds something stages it quietly and adds a
-//! line to the tray menu. Only a check the user asked for reports back.
+//! nothing says nothing; one that finds something stages it and restarts the
+//! pet when it is idle. Only a check the user asked for reports back.
 
 use roamling_update::{Appcast, Decision, Version};
 use std::path::PathBuf;
@@ -56,7 +61,8 @@ const MAXIMUM_ARTIFACT_BYTES: usize = 64 * 1_024 * 1_024;
 #[derive(Debug)]
 pub enum Outcome {
     UpToDate,
-    /// Downloaded, verified and swapped in. Takes effect on the next launch.
+    /// Downloaded, verified and written beside the executable. `install` puts
+    /// it in place.
     Staged(Version),
     Failed(String),
 }
@@ -119,24 +125,33 @@ fn paths() -> Result<(PathBuf, PathBuf, PathBuf), String> {
     Ok((current, PathBuf::from(staged), PathBuf::from(previous)))
 }
 
-/// Puts verified bytes in place of the running executable.
+/// Writes verified bytes beside the running executable. Nothing the running
+/// process uses is touched.
 fn stage(bytes: &[u8]) -> Result<(), String> {
+    let (_, staged, _) = paths()?;
+    std::fs::write(&staged, bytes).map_err(|error| format!("{}: {error}", staged.display()))
+}
+
+/// Puts the staged executable in place of the running one. Right before
+/// `relaunch`, or at quit.
+pub fn install() -> Result<(), String> {
     let (current, staged, previous) = paths()?;
-    stage_at(bytes, &current, &staged, &previous)
+    install_at(&current, &staged, &previous)
 }
 
 /// The swap itself, against named paths so a test can drive it somewhere other
 /// than over the executable it is running from.
-fn stage_at(
-    bytes: &[u8],
+fn install_at(
     current: &std::path::Path,
     staged: &std::path::Path,
     previous: &std::path::Path,
 ) -> Result<(), String> {
+    if !staged.exists() {
+        return Err(format!("{} is gone", staged.display()));
+    }
     // A leftover from an interrupted attempt, or from a launch that could not
     // clean up. Either way it is in the way.
     let _ = std::fs::remove_file(previous);
-    std::fs::write(staged, bytes).map_err(|error| format!("{}: {error}", staged.display()))?;
 
     // Renaming the running executable is allowed; deleting it is not.
     if let Err(error) = std::fs::rename(current, previous) {
@@ -153,7 +168,49 @@ fn stage_at(
     Ok(())
 }
 
-/// Clears the previous version left behind by a swap. Called once at startup.
+const AFTER_FLAG: &str = "--after";
+
+/// Starts the executable that `install` just put in place, telling it which
+/// process to wait for. The caller then quits the ordinary way.
+pub fn relaunch() -> Result<(), String> {
+    let (current, _, _) = paths()?;
+    std::process::Command::new(&current)
+        .arg(AFTER_FLAG)
+        .arg(std::process::id().to_string())
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("{}: {error}", current.display()))
+}
+
+/// The other half of `relaunch`, and it has to come before the single-instance
+/// claim: the copy being replaced still holds that mutex, and a new one that
+/// found it taken would quietly exit -- no pet at all. Bounded, so a copy that
+/// will not quit cannot keep the pet away forever.
+pub fn wait_for_previous_instance() {
+    use windows::Win32::Foundation::CloseHandle;
+    use windows::Win32::System::Threading::{OpenProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE};
+
+    let arguments: Vec<String> = std::env::args().collect();
+    let Some(pid) = previous_instance(&arguments) else {
+        return;
+    };
+    unsafe {
+        // Already gone is the usual case by the time this runs, and also fine.
+        if let Ok(process) = OpenProcess(PROCESS_SYNCHRONIZE, false, pid) {
+            let _ = WaitForSingleObject(process, 10_000);
+            let _ = CloseHandle(process);
+        }
+    }
+}
+
+fn previous_instance(arguments: &[String]) -> Option<u32> {
+    let flag = arguments.iter().position(|argument| argument == AFTER_FLAG)?;
+    arguments.get(flag + 1)?.parse().ok()
+}
+
+/// Clears what a swap left behind, and a staged file that never got swapped in
+/// (the process was killed first; the next check fetches it again). Called once
+/// at startup.
 ///
 /// Failure is ignored on purpose: another copy may still be running from it,
 /// and a file that could not be deleted this launch will be deleted the next.
@@ -341,6 +398,17 @@ mod tests {
         assert!(FEED_SIGNATURE.starts_with(FEED.trim_end_matches(".json")));
     }
 
+    /// A copy started by `relaunch` has to find the id it was handed, and a
+    /// copy started any other way must not wait for anything.
+    #[test]
+    fn the_new_copy_reads_which_process_to_wait_for() {
+        let args = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(previous_instance(&args(&["roamling.exe", "--after", "4242"])), Some(4242));
+        assert_eq!(previous_instance(&args(&["roamling.exe"])), None);
+        assert_eq!(previous_instance(&args(&["roamling.exe", "--after"])), None);
+        assert_eq!(previous_instance(&args(&["roamling.exe", "--after", "soon"])), None);
+    }
+
     fn scratch(name: &str) -> PathBuf {
         let root =
             std::env::temp_dir().join(format!("roamling-update-{}-{name}", std::process::id()));
@@ -361,15 +429,21 @@ mod tests {
         );
         std::fs::write(&current, b"old version").expect("seed");
 
-        stage_at(b"new version", &current, &staged, &previous).expect("the swap failed");
+        std::fs::write(&staged, b"new version").expect("stage");
+        install_at(&current, &staged, &previous).expect("the swap failed");
         assert_eq!(std::fs::read(&current).expect("current"), b"new version");
         assert_eq!(std::fs::read(&previous).expect("previous"), b"old version");
         assert!(!staged.exists(), "the staging file should be gone");
 
         // A second update finds the previous `.old` in the way and replaces it.
-        stage_at(b"newer still", &current, &staged, &previous).expect("the second swap failed");
+        std::fs::write(&staged, b"newer still").expect("stage");
+        install_at(&current, &staged, &previous).expect("the second swap failed");
         assert_eq!(std::fs::read(&current).expect("current"), b"newer still");
         assert_eq!(std::fs::read(&previous).expect("previous"), b"new version");
+
+        // Nothing staged is nothing to do, and the running file stays put.
+        install_at(&current, &staged, &previous).expect_err("there was nothing to install");
+        assert_eq!(std::fs::read(&current).expect("current"), b"newer still");
 
         let _ = std::fs::remove_dir_all(&root);
     }
@@ -378,16 +452,28 @@ mod tests {
     /// and the user is left with nothing to run. It has to roll back.
     #[test]
     fn a_failed_swap_puts_the_old_file_back() {
-        let root = scratch("rollback");
-        let current = root.join("roamling.exe");
-        // A directory cannot be replaced by a file rename, which stands in for
-        // whatever real reason the second rename might fail.
-        let staged = root.join("roamling.exe.new");
-        std::fs::create_dir_all(&staged).expect("dir");
-        std::fs::write(&current, b"old version").expect("seed");
+        use std::os::windows::fs::OpenOptionsExt;
 
-        let error = stage_at(b"new version", &current, &staged, &root.join("roamling.exe.old"))
-            .expect_err("writing over a directory should not succeed");
+        let root = scratch("rollback");
+        let (current, staged, previous) = (
+            root.join("roamling.exe"),
+            root.join("roamling.exe.new"),
+            root.join("roamling.exe.old"),
+        );
+        std::fs::write(&current, b"old version").expect("seed");
+        std::fs::write(&staged, b"new version").expect("stage");
+        // Held open with no sharing, the staged file cannot be renamed. The
+        // first rename (the running file aside) still succeeds, so this is the
+        // second one failing -- the case that would leave nothing to run.
+        let lock = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&staged)
+            .expect("lock");
+
+        let error = install_at(&current, &staged, &previous)
+            .expect_err("renaming a locked file should not succeed");
+        drop(lock);
         assert!(!error.is_empty());
         assert_eq!(
             std::fs::read(&current).expect("current"),

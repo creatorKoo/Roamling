@@ -57,6 +57,10 @@ mismatch가 나면 `ROAMLING_SWIFT_SDK=/path/to/MacOSX.sdk`로 우회한다. 새
 워크플로가 실패시킨다. 목록과 이유는 `docs/windows.md`, macOS 쪽 서명·dmg는
 `docs/release.md`. **버전 올리기와 태그는 사용자가 말할 때만 한다.**
 
+**자동 업데이트는 교체와 재실행을 붙여서 한다.** 맥에서 실행 중인 번들만 바꿔 두면 그 프로세스는
+ScreenCaptureKit을 잃고 다시 켜질 때까지 글자를 못 본다 — 2026-09-23의 "글자 위에 앉는다"가
+이것이었다. 흐름은 `docs/windows.md` "자동 업데이트".
+
 ## 절대 하지 않는 것
 
 - **ad-hoc 빌드.** identity 없이 서명하면 designated requirement가 cdhash로 고정돼

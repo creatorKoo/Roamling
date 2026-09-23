@@ -21,6 +21,10 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
     }
 
     public func applicationDidFinishLaunching(_ notification: Notification) {
+        // A copy started by an update waits here until the one it replaces has
+        // gone, so the two never hold the agent ports or the pet at once.
+        MacUpdater.waitForPreviousInstance()
+        MacUpdater.discardLeftovers()
         NSApp.setActivationPolicy(.accessory)
         let runtime = RoamlingRuntime(
             services: MacPlatform.makeServices(),
@@ -51,6 +55,17 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
 
     public func applicationWillTerminate(_ notification: Notification) {
         usageGuideWindowController?.prepareForTermination()
+        // A version still waiting for a quiet moment goes in on the way out:
+        // no process is left behind to lose the screen, and the next launch
+        // is the new one.
+        if let version = updater.staged {
+            do {
+                try updater.install()
+                runtime?.recordUpdate("installed \(version) at quit")
+            } catch {
+                runtime?.recordUpdate("install at quit failed: \(error.localizedDescription)")
+            }
+        }
         runtime?.stop()
     }
 
@@ -146,6 +161,8 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
     /// are already shared with Windows in `roamling-update`.
     private let updater = MacUpdater()
     private var updateTimer: Timer?
+    /// Runs only while a staged version waits for the pet to be idle.
+    private var restartTimer: Timer?
 
     private static let automaticUpdatesKey = "roamling.automaticUpdates"
     private static let launchAtLoginOfferedKey = "roamling.launchAtLoginOffered"
@@ -233,6 +250,8 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
     ///   nothing is silent, which is what `Never annoying` requires of
     ///   something that runs on a timer all day.
     private func checkForUpdates(asked: Bool) {
+        // One is already unpacked and waiting; fetching it again finds nothing new.
+        guard updater.staged == nil else { return }
         ShellMenu.updateStatus = .checking
         rebuildMenu()
         updater.check { [weak self] outcome in
@@ -247,15 +266,73 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
             }
             self.rebuildMenu()
 
-            guard asked || !outcome.isQuiet else { return }
             switch outcome {
             case let .upToDate(current):
-                self.apply(.present(ShellPrompt.updateResult(upToDate: current)))
+                if asked { self.apply(.present(ShellPrompt.updateResult(upToDate: current))) }
             case let .staged(version):
-                self.apply(.present(ShellPrompt.updateStaged(version: version)))
+                // No alert: the pet blinking back as the new version is the news.
+                // Someone who asked does not wait for a quiet moment.
+                self.runtime?.recordUpdate("staged \(version)")
+                if asked { self.restartIntoUpdate() } else { self.waitForQuietMoment() }
             case let .failed(detail):
-                self.apply(.present(ShellPrompt.updateFailure(detail)))
+                self.runtime?.recordUpdate("check failed: \(detail)")
+                if asked { self.apply(.present(ShellPrompt.updateFailure(detail))) }
             }
+        }
+    }
+
+    /// Looks every two seconds, which is plenty: the pet stands idle for tens
+    /// of seconds between strolls. `.default` rather than `.common`, so it
+    /// holds off while a menu is open or an alert is up.
+    private func waitForQuietMoment() {
+        restartTimer?.invalidate()
+        let timer = Timer(timeInterval: 2, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, self.isQuietForRestart else { return }
+                self.restartIntoUpdate()
+            }
+        }
+        restartTimer = timer
+        RunLoop.main.add(timer, forMode: .default)
+    }
+
+    /// The pet's side is the core's to judge; a window of ours the user has
+    /// open is this side's -- restarting would close it under them.
+    private var isQuietForRestart: Bool {
+        guard runtime?.isQuietForRestart == true else { return false }
+        let windows = [
+            tuningWindowController?.window,
+            paletteWindowController?.window,
+            usageGuideWindowController?.window,
+        ]
+        return !windows.contains { $0?.isVisible == true }
+    }
+
+    /// Swaps the new version in and starts it, together. Only on the way out:
+    /// the process left behind by a swap can no longer capture the screen
+    /// (`docs/capture.md` section 2).
+    private func restartIntoUpdate() {
+        restartTimer?.invalidate()
+        restartTimer = nil
+        guard let version = updater.staged else { return }
+        do {
+            try updater.install()
+        } catch {
+            runtime?.recordUpdate("install failed: \(error.localizedDescription)")
+            ShellMenu.updateStatus = .idle
+            rebuildMenu()
+            return
+        }
+        runtime?.recordUpdate("restarting into \(version)")
+        updater.relaunch { [weak self] error in
+            guard let error else {
+                NSApp.terminate(nil)
+                return
+            }
+            // The new bundle is in place and nothing started it. A pet that
+            // stays is better than one that vanishes unexplained; the next
+            // launch, by hand or at login, is the new version.
+            self?.runtime?.recordUpdate("relaunch failed: \(error.localizedDescription)")
         }
     }
 

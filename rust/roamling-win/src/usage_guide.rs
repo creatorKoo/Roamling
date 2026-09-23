@@ -122,6 +122,16 @@ thread_local! {
 pub fn take_acknowledged() -> Option<u32> {
     ACKNOWLEDGED.with(|v| v.borrow_mut().take())
 }
+
+/// Whether the panel is on screen. Closing only hides it, so being built is
+/// not the same thing. An update waits rather than close it under the user.
+pub fn is_visible() -> bool {
+    PANEL.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .is_some_and(|panel| unsafe { IsWindowVisible(panel.window).as_bool() })
+    })
+}
 fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(Some(0)).collect()
 }

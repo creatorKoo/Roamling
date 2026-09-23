@@ -171,6 +171,10 @@ fn main() -> Result<()> {
     //
     // `Local\` scopes the name to the logon session, so two users signed in at
     // once still get a pet each.
+    //
+    // A copy started by an update first waits for the one it replaces, which
+    // still holds the claim until it is gone.
+    update::wait_for_previous_instance();
     if !claim_single_instance() {
         println!("another copy of Roamling is already running");
         return Ok(());
@@ -455,6 +459,14 @@ fn main() -> Result<()> {
     // rather than an excuse for skipping this.
     if let Some(mut app) = APP.with(|slot| slot.borrow_mut().take()) {
         remember_guide(&mut app.settings);
+        // A version still waiting for a quiet moment goes in on the way out,
+        // and the next launch is the new one.
+        if let Some(version) = app.staged.take() {
+            match update::install() {
+                Ok(()) => println!("update {version} put in place at quit"),
+                Err(error) => println!("update {version} could not be put in place: {error}"),
+            }
+        }
         app.capturer.release();
         drop(app);
     }
@@ -463,6 +475,42 @@ fn main() -> Result<()> {
     // teardown that should be able to keep the process -- and the pet -- on
     // screen. Nothing after this point needs to run.
     std::process::exit(0);
+}
+
+/// The pet's side is the core's to judge. The menu and the panels are this
+/// side's: restarting would close them under the user's hand.
+fn is_quiet_for_restart(app: &App, now: f64) -> bool {
+    app.pet.is_quiet_for_restart(now)
+        && !tray::is_menu_open()
+        && !usage_guide::is_visible()
+        && !tuning::is_visible()
+        && !palette_debug::is_visible()
+}
+
+/// Swaps the staged version in and starts it, then closes the window the way
+/// Quit does. Both platforms keep these two together -- `update.rs` says why.
+/// True when the window is on its way out.
+fn restart_into_update(hwnd: HWND, app: &mut App) -> bool {
+    let Some(version) = app.staged.take() else {
+        return false;
+    };
+    if let Err(error) = update::install() {
+        println!("update {version} could not be put in place: {error}");
+        return false;
+    }
+    // Where the pet stands now, so the new copy comes back there.
+    remember(&mut app.settings, app.pet.position());
+    if let Err(error) = update::relaunch() {
+        // In place, and nothing started it. A pet that stays beats one that
+        // vanishes; the next launch is the new version.
+        println!("update {version} is in place but did not start: {error}");
+        return false;
+    }
+    println!("restarting into {version}");
+    unsafe {
+        let _ = DestroyWindow(hwnd);
+    }
+    true
 }
 
 /// Whether this process is the first one.
@@ -614,14 +662,12 @@ fn tick(hwnd: HWND, app: &mut App) {
                 }
             }
             update::Outcome::Staged(version) => {
+                // No alert: the pet blinking back as the new version is the
+                // news. Someone who asked does not wait for a quiet moment.
                 app.staged = Some(version);
-                println!("update {version} staged; it runs on the next launch");
-                if report.asked {
-                    shell::report(
-                        hwnd,
-                        &strings::localized_format("result.update.ready", &[&version.to_string()]),
-                        localized("result.update.ready.detail"),
-                    );
+                println!("update {version} staged");
+                if report.asked && restart_into_update(hwnd, app) {
+                    return;
                 }
             }
             update::Outcome::Failed(error) => {
@@ -632,7 +678,11 @@ fn tick(hwnd: HWND, app: &mut App) {
             }
         }
     }
-    if app.auto_update && !app.checking && now >= app.update_at {
+    if app.staged.is_some() && is_quiet_for_restart(app, now) && restart_into_update(hwnd, app) {
+        return;
+    }
+    // One already staged is not fetched again.
+    if app.auto_update && !app.checking && app.staged.is_none() && now >= app.update_at {
         app.update_at = now + update::INTERVAL;
         app.checking = true;
         update::check(app.update_sender.clone(), false);
