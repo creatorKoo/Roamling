@@ -31,6 +31,8 @@ mod movement_policy_tests;
 mod rest_tests;
 #[cfg(test)]
 mod restart_tests;
+#[cfg(test)]
+mod walk_cut_short_tests;
 
 use names::{describe, proximity_name, state_name};
 
@@ -414,7 +416,7 @@ impl PetRuntime {
         let changed = self.is_roaming_enabled != enabled;
         self.is_roaming_enabled = enabled;
         if !enabled {
-            self.movement.cancel_route(false);
+            self.abandon_walk(false, now);
             self.next_wander_at = f64::INFINITY;
         } else if changed {
             self.next_wander_at = now + 0.8;
@@ -509,10 +511,22 @@ impl PetRuntime {
         self.set_displays(displays);
         let clamped = self.world.clamp(carried_position, self.object_size);
         self.is_evade_transitioning = false;
-        self.movement.cancel_route(true);
+        self.abandon_walk(true, now);
         self.movement.teleport(clamped, true);
         self.next_wander_at = now + 1.0;
         clamped
+    }
+
+    /// Drops the route of a stroll or a walk to something interesting, and
+    /// the walk with it. Only arriving ends those states, so with the route
+    /// cancelled and nothing else said the pet played its walk frames on the
+    /// spot -- until the next stroll, or for as long as roaming stayed off.
+    /// A phone keyboard taking the bottom of the screen mid-stroll is where it
+    /// showed: the world shrinks and roaming stops together, and the pet ran in
+    /// place for the whole time the user typed.
+    fn abandon_walk(&mut self, stop: bool, now: f64) {
+        self.movement.cancel_route(stop);
+        self.behavior.handle(BehaviorInput::Arrived, now);
     }
 
     /// The panel resized the pet. Its footprint changed, so where it may stand
