@@ -641,4 +641,7 @@ falls through to jumping and the pet throws a full celebration every time it is 
 
 - **메뉴 → 펫**에 로드된 패키지의 커버리지(authored / 대체 / 대체 불가)가 뜬다.
 - **메뉴 → 진단 기록 복사**로 `pet` 카테고리 전이를 보면 상태는 도는데 그림이 안 바뀌는
-  상황이 그대로 드러난다. 위 표의 "같은 그림" 항목들이 여기서 확인된다.
+  상황이 그대로 드러난다. 위 표의 "같은 그림" 항목들이 여기서 확인된다. 복사되는 것은 **최근 30분**이다
+  (R28). 그 전부터 이어진 상태는 범주마다 마지막 한 줄씩 맨 위에 남고, 시간은 30분 창의 시작이 0초라 그
+  줄들은 음수다. 기록이 30분보다 짧으면 첫 줄이 0초다. 버퍼 자체는 범주별 전이 2,000줄 그대로다
+  (`roamling-win/src/diagnostics.rs` · `Sources/RoamlingCore/DiagnosticsLog.swift`).

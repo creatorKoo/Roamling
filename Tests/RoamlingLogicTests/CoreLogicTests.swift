@@ -84,6 +84,41 @@ func coreLogicTests() -> [LogicTest] {
             try expect(DiagnosticsLog().text() == "(no entries)")
             try expect(log.text().contains("0.0"))
         },
+        LogicTest(name: "diagnostics hand out the last half hour") {
+            // R28. Two days of naps is what the whole buffer copied on a quiet
+            // day. Each category's last line from before the half hour stays on
+            // top, so hours asleep still read as asleep.
+            var log = DiagnosticsLog()
+            log.record("place", "sleep in place", at: 100)
+            log.record("pet", "wander", at: 100)
+            log.record("pet", "sleep", at: 300)
+            log.record("pet", "wake", at: 5_000)
+            log.record("pet", "idle", at: 5_001)
+            try expect(log.text(now: 5_100).components(separatedBy: "\n") == [
+                " -3200.0  place sleep in place",
+                " -3000.0  pet sleep",
+                "  1700.0  pet wake",
+                "  1701.0  pet idle",
+                "  1800.0  now -"
+            ])
+
+            var asleep = DiagnosticsLog()
+            asleep.record("pet", "sleep", at: 100)
+            try expect(asleep.text(now: 100_000).components(separatedBy: "\n") == [
+                "-98100.0  pet sleep",
+                "  1800.0  now -"
+            ])
+
+            // A log younger than the half hour reads as it always did.
+            var young = DiagnosticsLog()
+            young.record("pet", "sit", at: 100)
+            young.record("pet", "sleep", at: 103.5)
+            try expect(young.text(now: 110).components(separatedBy: "\n") == [
+                "     0.0  pet sit",
+                "     3.5  pet sleep",
+                "    10.0  now -"
+            ])
+        },
         LogicTest(name: "a watch ends on its own when the agent goes quiet") {
             // Nothing else ends one. `activityEnded` comes from a Stop hook,
             // and a hook cannot run for a session that was interrupted or

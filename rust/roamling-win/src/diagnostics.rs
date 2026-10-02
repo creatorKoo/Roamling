@@ -23,6 +23,11 @@ use std::collections::HashMap;
 
 const CAPACITY: usize = 2_000;
 
+/// How far back the copied text reaches. On a quiet day `CAPACITY` holds two
+/// days of naps, and someone asking why the pet just did something pasted all
+/// of it (`docs/requests.md` R28). The buffer itself keeps what it kept.
+const WINDOW: f64 = 30.0 * 60.0;
+
 struct Entry {
     timestamp: f64,
     category: String,
@@ -61,28 +66,42 @@ impl DiagnosticsLog {
         }
     }
 
-    /// Elapsed seconds are relative to the first entry, because absolute uptime
-    /// is a large number that says nothing on its own -- the question is always
-    /// how long something lasted.
+    /// The last `WINDOW` seconds, under what each category last said before
+    /// them -- without those lines a pet that has slept for hours reads as an
+    /// empty log. Elapsed seconds count from the start of the window, so the
+    /// lines carried in from before it are negative. A log younger than the
+    /// window counts from its first entry, as it always has: absolute uptime is
+    /// a large number that says nothing, and the question is always how long
+    /// something lasted.
     pub fn text(&self, now: f64) -> String {
-        let Some(first) = self.entries.first() else {
+        let cutoff = now - WINDOW;
+        let mut carried: Vec<&Entry> = Vec::new();
+        for entry in self.entries.iter().rev().filter(|entry| entry.timestamp < cutoff) {
+            if !carried.iter().any(|kept| kept.category == entry.category) {
+                carried.push(entry);
+            }
+        }
+        carried.reverse();
+        let recent = self.entries.iter().filter(|entry| entry.timestamp >= cutoff);
+        let shown: Vec<&Entry> = carried.iter().copied().chain(recent).collect();
+        let Some(first) = shown.first() else {
             return "(no entries)".to_string();
         };
-        let mut lines: Vec<String> = self
-            .entries
+        let origin = if carried.is_empty() { first.timestamp } else { cutoff };
+        let mut lines: Vec<String> = shown
             .iter()
             .map(|entry| {
                 format!(
                     "{:8.1}  {:<9} {}",
-                    entry.timestamp - first.timestamp,
+                    entry.timestamp - origin,
                     entry.category,
                     entry.message
                 )
             })
             .collect();
-        if let Some(last) = self.entries.last() {
+        if let Some(last) = shown.last() {
             if now > last.timestamp {
-                lines.push(format!("{:8.1}  {:<9} -", now - first.timestamp, "now"));
+                lines.push(format!("{:8.1}  {:<9} -", now - origin, "now"));
             }
         }
         lines.join("\r\n")
@@ -144,5 +163,39 @@ mod tests {
         }
         assert_eq!(log.entries.len(), CAPACITY);
         assert_eq!(log.entries[0].message, "step 50");
+    }
+
+    /// R28. Only the last half hour is handed out, under each category's last
+    /// line from before it; the transitions in between are left out.
+    #[test]
+    fn the_text_is_the_last_half_hour() {
+        let mut log = DiagnosticsLog::new();
+        log.record("place", "sleep in place", 100.0);
+        log.record("pet", "wander", 100.0);
+        log.record("pet", "sleep", 300.0);
+        log.record("pet", "wake", 5000.0);
+        log.record("pet", "idle", 5001.0);
+        let text = log.text(5100.0);
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(
+            lines,
+            [
+                " -3200.0  place     sleep in place",
+                " -3000.0  pet       sleep",
+                "  1700.0  pet       wake",
+                "  1701.0  pet       idle",
+                "  1800.0  now       -",
+            ]
+        );
+    }
+
+    /// Hours asleep is still a pet asleep, not an empty log.
+    #[test]
+    fn a_long_sleep_still_says_so() {
+        let mut log = DiagnosticsLog::new();
+        log.record("pet", "sleep", 100.0);
+        let text = log.text(100_000.0);
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(lines, ["-98100.0  pet       sleep", "  1800.0  now       -"]);
     }
 }

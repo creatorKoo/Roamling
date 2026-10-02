@@ -31,13 +31,18 @@ public struct DiagnosticsLog: Sendable {
     }
 
     public let capacity: Int
+    /// How far back `text` reaches. On a quiet day `capacity` holds two days of
+    /// naps, and someone asking why the pet just did something pasted all of it
+    /// (`docs/requests.md` R28). The buffer itself keeps what it kept.
+    public let window: TimeInterval
     public private(set) var entries: [Entry] = []
     /// The last message seen per category, which is what makes a per-tick
     /// caller produce a transition log rather than a sampled one.
     private var latest: [String: String] = [:]
 
-    public init(capacity: Int = 2_000) {
+    public init(capacity: Int = 2_000, window: TimeInterval = 30 * 60) {
         self.capacity = max(1, capacity)
+        self.window = window
     }
 
     /// Records only when `message` differs from this category's previous one.
@@ -56,22 +61,36 @@ public struct DiagnosticsLog: Sendable {
         return true
     }
 
-    /// Elapsed seconds are shown relative to the first entry, because absolute
-    /// uptime is a large number that says nothing on its own and the question
-    /// is always how long something lasted.
+    /// The last `window` seconds before `now` (or before the last entry), under
+    /// what each category last said before them -- without those lines a pet
+    /// that has slept for hours reads as an empty log. Elapsed seconds count
+    /// from the start of the window, so the lines carried in from before it are
+    /// negative. A log younger than the window counts from its first entry, as
+    /// it always has: absolute uptime is a large number that says nothing on
+    /// its own and the question is always how long something lasted.
     public func text(now: TimeInterval? = nil) -> String {
-        guard let first = entries.first else { return "(no entries)" }
-        var lines = entries.map { entry in
+        guard let newest = entries.last else { return "(no entries)" }
+        let cutoff = (now ?? newest.timestamp) - window
+        var carried: [Entry] = []
+        for entry in entries.reversed() where entry.timestamp < cutoff {
+            if !carried.contains(where: { $0.category == entry.category }) {
+                carried.append(entry)
+            }
+        }
+        let shown = carried.reversed() + entries.filter { $0.timestamp >= cutoff }
+        guard let first = shown.first, let last = shown.last else { return "(no entries)" }
+        let origin = carried.isEmpty ? first.timestamp : cutoff
+        var lines = shown.map { entry in
             String(
                 format: "%8.1f  %-9@ %@",
-                entry.timestamp - first.timestamp,
+                entry.timestamp - origin,
                 entry.category,
                 entry.message
             )
         }
-        if let now, let last = entries.last, now > last.timestamp {
+        if let now, now > last.timestamp {
             lines.append(
-                String(format: "%8.1f  %-9@ %@", now - first.timestamp, "now", "-")
+                String(format: "%8.1f  %-9@ %@", now - origin, "now", "-")
             )
         }
         return lines.joined(separator: "\n")

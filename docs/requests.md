@@ -31,6 +31,23 @@
 
 ## 진행
 
+### R28. 진단 기록은 최근 30분만 (2026-10-02)
+
+- **누가·언제** 사용자, 2026-10-02, Windows. B10의 진단 기록(2,000줄, 약 51시간)을 붙인 직후.
+- **원문** "진단로그 무한히 길어지는데 이것도 최근 30분만 나오도록 해도 되는거 아닌가? 이것도 수정해줄래?"
+- **지금** 기록은 범주마다 바뀔 때만 한 줄씩 2,000줄까지 들고(`roamling-win/src/diagnostics.rs` `CAPACITY`,
+  Swift `DiagnosticsLog.capacity`), "진단 기록 복사"는 그 전부를 내준다. 무한은 아니지만 한가한 날에는
+  이틀치가 된다.
+- **할 것** 복사하는 글을 최근 30분으로 자른다. 30분 전부터 이어진 상태 — 범주마다 창이 열리기 전의 마지막
+  한 줄 — 는 맨 위에 남긴다. 안 그러면 몇 시간째 자는 펫의 기록이 빈 칸이 된다. 시간은 30분 창의 시작이
+  0초이고 그 앞의 줄은 음수로 찍힌다. 기록이 30분보다 짧으면 지금과 똑같다. 저장 상한 2,000줄은 그대로다.
+- **한 것 (2026-10-02)** 양 플랫폼의 `text`만 바꿨다 — `roamling-win/src/diagnostics.rs` `WINDOW`,
+  Swift `DiagnosticsLog.window`. 테스트는 `diagnostics.rs`의 `the_text_is_the_last_half_hour` ·
+  `a_long_sleep_still_says_so`와 하네스의 "diagnostics hand out the last half hour". Swift는 이 기계의 Swift
+  툴체인으로 그 파일만 따로 컴파일해 같은 기대를 돌렸다 — 하네스 전체는 macOS CI가 본다. `RuntimeTrace.txt`의
+  진단 구간은 76초짜리라 그대로다. 맥의 진단 파일(`roamling.diagnosticsLog`)은 건드리지 않았다.
+- **상태** 진행 — 구현, 사용자 확인 전.
+
 ### R27. 업데이트는 팝업 없이, 스스로 껐다 켜지게 (2026-09-23)
 
 - **누가·언제** 사용자, 2026-09-23, B9 진단 직후.
