@@ -428,3 +428,81 @@ fn a_direct_catch_can_interrupt_a_committed_crossing() {
     assert!(pet.crossing_clear.is_none());
     assert!(!pet.movement.has_route());
 }
+
+/// A pet that has just finished a stroll, so the roaming pause -- 28 to 58 s
+/// at the default 40 -- has barely started. Returns it and the time it stopped.
+fn stopped_after_a_stroll() -> (PetRuntime, f64) {
+    let mut pet = PetRuntime::new(WorldPoint::new(500.0, 400.0), RuntimeTuning::default(), 7);
+    pet.set_displays(vec![display("main", 0.0, 0.0)]);
+    let away = WorldPoint::new(-1000.0, -1000.0);
+    let mut now = 1000.0;
+    let mut walked = false;
+    loop {
+        now += 1.0 / 30.0;
+        pet.begin_tick(now);
+        let state = pet.finish_tick(&input(now, away)).state;
+        walked |= state == BehaviorState::Wander;
+        if walked && state == BehaviorState::Idle {
+            return (pet, now);
+        }
+        assert!(now < 1100.0, "no stroll finished");
+    }
+}
+
+/// Parks the cursor in the glance band, 140 pt beside the pet, and returns
+/// how long the pet looked before it walked off, if it did, and the cursor.
+fn glance_at_a_parked_cursor(
+    pet: &mut PetRuntime,
+    from: f64,
+    seconds: f64,
+    affection: bool,
+) -> (Option<f64>, WorldPoint) {
+    let here = pet.position();
+    let cursor = WorldPoint::new(if here.x > 500.0 { here.x - 140.0 } else { here.x + 140.0 }, here.y);
+    let mut now = from;
+    while now < from + seconds {
+        now += 1.0 / 30.0;
+        let mut sample = input(now, cursor);
+        sample.affection_held = affection;
+        pet.begin_tick(now);
+        if pet.finish_tick(&sample).state == BehaviorState::Wander {
+            return (Some(now - from), cursor);
+        }
+    }
+    (None, cursor)
+}
+
+/// B11. A cursor left beside the pet was looked at for as long as it stayed:
+/// every glancing tick pushed the stroll clock 0.8 s on, so the stroll that a
+/// bored glance turns into a walk away never came. The glance alone is now
+/// enough, after the same seven seconds.
+#[test]
+fn b11_a_long_glance_at_a_parked_cursor_walks_the_pet_away() {
+    let (mut pet, stopped) = stopped_after_a_stroll();
+    assert!(pet.next_wander_at - stopped > 20.0, "the roaming pause is not the reason it leaves");
+    let (left, cursor) = glance_at_a_parked_cursor(&mut pet, stopped, 30.0, false);
+    let left = left.expect("the pet never left the parked cursor");
+    // Not before seven seconds, and long before the roaming pause runs out.
+    // The slack is the draws: this pet stands against the left edge with the
+    // cursor on its right, and without a capture only six random points a
+    // tick are on offer -- it takes a moment for one to lead away.
+    assert!((7.0..10.0).contains(&left), "left after {left:.2} s");
+    let destination = pet.movement.destination().expect("a walk under way");
+    assert!(
+        destination.distance(cursor) >= 340.0,
+        "the walk ends {:.0} pt from the cursor",
+        destination.distance(cursor)
+    );
+}
+
+/// Roaming off means the pet does not walk off on its own, bored or not. And a
+/// hand on the affection key is petting, which does not get boring.
+#[test]
+fn b11_roaming_off_or_a_petting_hand_keeps_the_pet_where_it_is() {
+    let (mut pet, stopped) = stopped_after_a_stroll();
+    pet.set_flags(false, true, true);
+    assert_eq!(glance_at_a_parked_cursor(&mut pet, stopped, 20.0, false).0, None, "roaming off");
+    let (mut pet, stopped) = stopped_after_a_stroll();
+    assert_eq!(glance_at_a_parked_cursor(&mut pet, stopped, 20.0, true).0, None, "affection key");
+}
+

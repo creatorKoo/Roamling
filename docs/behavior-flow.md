@@ -90,8 +90,8 @@ Petdex 9행만 있는 패키지에서 `sit`은 `waiting`이 아니라 **`idle`�
 ```text
 idle (row 0, 앉아서 깜박)
  │
- ├─ 8.4~17.4초 뒤 ──────────────▶ wander (row 1/2, 걷기)
- │   (wanderPause 12 × 0.7~1.45)      │
+ ├─ 28~58초 뒤 ─────────────────▶ wander (row 1/2, 걷기)
+ │   (wanderPause 40 × 0.7~1.45)      │
  │                                    └─ 목적지 도착 ──▶ idle
  │
  └─ 사용자 입력이 75초 없음 ────▶ sit (확장 sitting, 꾸벅)
@@ -177,7 +177,8 @@ Windows는 새 캡처 때만 필드를 넘기지만 macOS는 매 tick 넘긴다.
 ```text
                           커서 거리
 멈춰 앉은 상태 ────────── 170px 이내 ──▶ lookAtPointer (gaze — 꼬리 흔들기)
-                                            └ 커서가 170px 밖으로 ─▶ idle
+                                            ├ 커서가 170px 밖으로 ─▶ idle
+                                            └ 7초 넘게 그대로 ─▶ wander (커서 반대쪽, 340px 밖까지)
               ─────────── 100px 이내 ──▶ evadePointer (row 1/2, 걷기 1.4배속)
               ─────────── 50px 이내 ──▶ evadePointer (더 빠르게)
 몸체 위 클릭 ───────────── 접근 속도·걷기·작업 상태와 무관
@@ -195,6 +196,12 @@ Windows는 새 캡처 때만 필드를 넘기지만 macOS는 매 tick 넘긴다.
 
 자고 있을 때 커서가 가까이 오면 rest가 즉시 취소되고 `wake`로 간다(흐름 A의 오른쪽 경로).
 쳐다보거나 피하는 것은 기지개가 끝난 뒤다 — 그동안에도 잡을 수는 있다.
+
+**세워 둔 커서는 7초쯤 쳐다보고 떠난다** (B11, 2026-10-02). 응시가 7초를 넘기면 배회 쉼을 기다리지 않고
+커서에서 멀어지는 길로, 커서에서 340px 밖까지 걸어간다(`PlacementDirector::stroll_verdict`의 `bored`). 배회를
+꺼 두면 떠나지 않고, 애정 키를 누른 손은 쓰다듬기라 지루해지지 않는다. 그 전에는 커서가 그대로 있는 한 계속
+쳐다봤고, 쳐다보는 펫은 휴식에 들어가지 않으므로 자리를 비운 사이 잠들지도 못했다. 근거는
+`docs/placement.md` 3.2.5 · 3.8.
 
 **직접 클릭 (2026-09-18).** `finish_tick`은 셸이 몸체 위라고 판정하면 클릭 전달을 허용한다.
 `pointer_down`은 `touch_down`과 같은 몸체 범위·숨김·상호작용 설정·중복 누름 검사를 거쳐
@@ -492,7 +499,7 @@ differential 픽스처 10개가 위치로 이름을 부른다.
 
 | 상태 | 얼마나 머무는가 | 무엇이 끝내는가 | 정의 위치 |
 |---|---|---|---|
-| `idle` | 8.4~17.4초 | 배회 스케줄러 | `RuntimeTuning.wanderDelay` |
+| `idle` | 28~58초 (`wanderPause` 기본 40초, 2026-09-04부터) | 배회 스케줄러 | `RuntimeTuning.wanderDelay` |
 | `wander` | 목적지까지 (160pt/s) | 도착 | `MovementController` |
 | `sit` | 2.4초 | 고정 타이머 | `RestConfiguration.sittingDuration` |
 | `findSleepSpot` | 목적지까지 (120pt/s) — director가 `SleepInPlace`를 주면 아예 건너뜀 (3.1) | 도착 | `rest.rs` `follow_rest_answer` |
@@ -506,7 +513,7 @@ differential 픽스처 10개가 위치로 이름을 부른다.
 | `sad` | **1.22초** | 고정 — Petdex `failed` 표준 | `BehaviorTiming.sad` |
 | `waitingForUser` | **무제한** | 다음 훅 이벤트 (승인·거부). 지정 앱은 source가 5초 뒤 자리를 비운다 | 타이머 없음 — Petdex steady |
 | `work` | **무제한** | 다음 이벤트·커서·배회·휴식 | 타이머 없음 — Petdex steady |
-| `lookAtPointer` | 커서가 170px 안에 있는 동안 | 커서 이탈 | `handlePointer` |
+| `lookAtPointer` | 커서가 170px 안에 있는 동안 — 배회가 켜져 있으면 7초 남짓까지 | 커서 이탈, 또는 7초 넘긴 응시 뒤 떠남 | `handlePointer` · `PlacementDirector::stroll_verdict` |
 | `caught` / `dragged` | 마우스를 놓을 때까지 | mouseUp | `petOverlayMouseUp` |
 | 휴식 진입 조건 | 사용자 입력 **75초** 무발생 | — | `RestConfiguration.idleBeforeRest` |
 | 지정 앱 타이핑 유지 | 마지막 키 입력 후 **10초** | 키가 멈춤 → 갸웃 | `focus_activity.rs` `TYPING_WINDOW` |

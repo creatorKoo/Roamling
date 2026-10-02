@@ -948,7 +948,13 @@ impl PlacementDirector {
             self.parked_since = Some(situation.timestamp);
         }
 
-        if situation.is_stroll_due {
+        // A glance that has lasted is reason enough to go, without waiting for
+        // the roaming pause: the runtime pushes the stroll clock on through
+        // every glancing tick, so the due stroll `decide` turns into a walk
+        // away never came, and a cursor left beside the pet was stared at for
+        // as long as it stayed (`docs/requests.md` B11, `docs/placement.md` 3.8).
+        let bored = self.keeps_clear() && self.is_bored(situation);
+        if situation.is_stroll_due || bored {
             let intent = match self.comfortable(situation) {
                 // No capture: the caller's first draw, unjudged, as it always
                 // was -- unless the cursor is in the way of every one of them.

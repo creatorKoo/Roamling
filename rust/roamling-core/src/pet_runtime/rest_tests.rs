@@ -273,3 +273,17 @@ fn b10_without_capture_or_avoidance_the_bed_is_reachable_too() {
         "(avoidance, wakes, state): {outcomes:?}"
     );
 }
+
+/// B10 and B11 together: the user steps away with the cursor parked beside
+/// an awake pet. It looks, tires of looking, walks off, and goes to sleep once,
+/// out of the cursor's reach. Before B11 it looked for as long as the user was
+/// gone, and a pet looking at a cursor never starts to rest.
+#[test]
+fn b11_an_absent_users_parked_cursor_ends_in_one_nap_away_from_it() {
+    let cursor = WorldPoint::new(740.0, 400.0);
+    let (wakes, pet) =
+        rest_beside_a_parked_cursor(WorldPoint::new(600.0, 400.0), cursor, None, true);
+    assert_eq!(wakes, 0);
+    assert_eq!(pet.state(), BehaviorState::Sleep);
+    assert!(pet.position().distance(cursor) > 170.0, "asleep at {:?}", pet.position());
+}
