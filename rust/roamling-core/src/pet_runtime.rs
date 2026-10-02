@@ -1049,6 +1049,9 @@ impl PetRuntime {
             } else {
                 0.0
             },
+            // The distance the rest lifecycle wakes at, which is the pointer
+            // model's and does not care whether avoidance is on.
+            pointer_wake_distance: self.pointer_model.configuration().awareness_distance,
             walking_speed: self.tuning.walking_speed,
             // Being petted owns the pet outright, and is not a glance: a
             // glance is something the pet tires of, and this is not.

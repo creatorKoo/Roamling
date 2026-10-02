@@ -99,6 +99,7 @@ fn situation(world: DesktopWorldSnapshot, position: WorldPoint) -> PetSituation 
         object_size: SIZE,
         pointer_position: None,
         pointer_clearance: 0.0,
+        pointer_wake_distance: 0.0,
         walking_speed: 120.0,
         is_pointer_owned: false,
         is_pointer_watching: false,
@@ -188,9 +189,27 @@ fn no_capture_keeps_permission_free_destinations() {
         BasicInterestPositionPlanner::destination(&hint, &world, current, None, 0.0, SIZE)
     );
     assert_eq!(
-        BasicSafeZonePlanner::clear_destination(&world, current, None, SIZE),
+        BasicSafeZonePlanner::clear_destination(&world, current, None, SIZE, &|_| true),
         BasicSafeZonePlanner::destination(&world, current, None, SIZE)
     );
+}
+
+/// A bed the pet cannot walk to is no bed, with a capture or without one, and
+/// the corner fallback is held to the same rule (B10). Nothing on offer leaves
+/// the director to answer `NoRestSpot`, not to send the pet anyway.
+#[test]
+fn rest_beds_the_caller_rules_out_are_not_offered() {
+    let current = WorldPoint::new(640.0, 400.0);
+    for field in [None, Some(field(|_, _| false))] {
+        let world = world(field);
+        assert!(BasicSafeZonePlanner::clear_destination(&world, current, None, SIZE, &|_| true).is_some());
+        assert_eq!(BasicSafeZonePlanner::clear_destination(&world, current, None, SIZE, &|_| false), None);
+        let left = BasicSafeZonePlanner::clear_destination(
+            &world, current, None, SIZE, &|point: WorldPoint| point.x < current.x,
+        )
+        .expect("the left half is open");
+        assert!(left.point.x < current.x, "{:?}", left.point);
+    }
 }
 
 #[test]

@@ -798,6 +798,72 @@ pet 로딩·카탈로그, 애니메이션, 오버레이, 메뉴, 튜닝 창, 훅
 저장소 밖 worktree의 `96b73c6`에 테스트만 옮겨서(잠자리 넷 · 기지개 다섯 · 트랙 길이 하나), 뒤의 둘은
 첫 구현 위에서.
 
+### 3.7 잠자리로 가는 길도 커서를 지나지 않는다 (2026-10-02)
+
+`docs/requests.md` B10 · B11. **코드에 들어갔다** (사용자 결정 2026-10-02: 세 안 중 "커서를 피해 잠자리
+고르기" — 나머지는 "멈춘 커서로는 안 깨기"와 둘 다). 3.7.1의 기상 규칙은 지금도 그대로이고, 3.7.2가 고치기
+전의 결함, 3.7.3이 지금 구조다.
+
+#### 3.7.1 흐름 — 무엇이 쉬는 펫을 깨우나
+
+| 단계 | 규칙 | 코드 |
+|---|---|---|
+| 앉기 | 사용자 idle ≥ 75초, 커서가 인식 거리(기본 170px) **바깥**(`Far`), director의 이동 중 아님 | `rest.rs` `update_rest_lifecycle`의 진입 조건 |
+| 잠자리 | sit 2.4초가 끝난 tick에 director가 `RestAt(점)` — 모서리 + 7×5 격자 중 여유가 큰 곳 | `placement.rs` `choose_rest_spot` → `safe_zone.rs` `BasicSafeZonePlanner::clear_destination` |
+| 입력으로 기상 | 쉬는 중에 마지막 입력이 0.8초 안 | `pet_runtime.rs` `finish_tick` 첫머리 |
+| 커서로 기상 | 쉬는 중에 커서가 인식 거리 **안**(`Far`가 아님) | `update_rest_lifecycle` 첫 줄. 응시 억제(`allows_pointer_glance`)도 회피 설정도 거치지 않은 거리(`decision.proximity`)를 받는다 |
+
+사용자가 자리를 비우면 커서는 안 움직이고, 사용자가 있으면 커서보다 입력 규칙이 먼저 깨운다. 그래서 **"커서로
+기상"이 실제로 깨우는 것은 잠자리로 걸어가다(`findSleepSpot`) 멈춰 있는 커서에 다가간 펫뿐이다.**
+
+#### 3.7.2 고치기 전 — 잠자리만 커서 규칙 밖에 있었다
+
+| director가 내는 걸음 | 커서 규칙 | 어디 |
+|---|---|---|
+| 작업 좌석 | 커서 clearance 안의 좌석은 후보가 아니다 | 3.2 |
+| 산책 · 탈출 | 커서를 가로지르는 길은 후보가 아니다 | 3.2.4, `path_avoids_pointer` |
+| **잠자리** | 모서리에만 감점(최대 23.6점), 격자에는 감점도 없고 **길은 안 봤다** | `safe_zone.rs` `candidates`의 `pointer_penalty` — 감점은 그대로 남아 있다 |
+
+커서 너머의 잠자리를 고르면 이렇게 돈다(B10, 재현 5.2초 주기): 걷다가 170px 안 → 깸 → 기지개 → 선
+자리가 글자 위면 `escape`, 아니면 응시 → 한 tick 걸어 170px 바깥 → 앉음 → 같은 잠자리 → 처음으로. 진입과
+기상의 경계가 같은 170px이라 펫은 그 경계에 못 박힌다. 캡처가 없으면 깬 펫이 응시에서 못 벗어난다(B11).
+
+#### 3.7.3 지금 구조 — 3.2.4를 잠자리에도
+
+- **펫에서 후보까지의 직선이 커서의 기상 거리 안으로 들어가면 잠자리 후보가 아니다.**
+  `PlacementDirector::choose_rest_spot`이 그 판정(`reachable`)을 만들어
+  `BasicSafeZonePlanner::clear_destination`에 넘긴다. 선분 거리는 산책과 같은 `walk_keeps_clear`
+  (`placement.rs`) — 3.2.4의 `path_avoids_pointer`에서 연산 순서 그대로 떼어 냈으므로 산책 판정은 바뀌지
+  않았다. 펫이 이미 그 거리 안이면 더 가까워지는 길만 막힌다.
+- 거름은 여유 등급을 고르기(`ClearanceMap::best`) **전에** 한다. 뒤에 하면 가장 여유로운 등급이 통째로
+  막혔을 때 다음 등급으로 못 내려가고 잘 곳이 없다고 답한다.
+- 반경은 `pointer_clearance`가 아니라 **포인터 모델의 인식 거리 그대로**다(`PetSituation::pointer_wake_distance`,
+  `make_situation`이 채운다). 회피를 꺼도 쉬는 펫은 같은 거리에서 깨므로(3.7.1), 회피가 꺼져 0인 값을 쓰면 같은
+  바퀴가 남는다. FFI 변환(`ffi/director.rs`)과 differential 하네스는 0을 준다 — 그 director는 늘
+  `PortedContract`라 잠자리를 고르지 않는다. **FFI 레코드는 그대로이고 Android 바인딩도 그대로다.**
+- 다 막히면: 캡처가 있으면 선 자리가 비었을 때 거기서 잔다(기존 제자리 판정), 아니면 `NoRestSpot` — 30초
+  깨어 있다가 다시. 캡처가 없으면 남은 모서리 중 최선이고, 남은 모서리가 없을 때의 화면 구석
+  (`BasicSafeZonePlanner::fallback`)도 같은 거름을 지나야 한다. 그것도 막히면 `NoRestSpot`.
+- 바꾸지 않은 것: 기상 규칙, 휴식 진입 조건, 모서리의 커서 감점, 포팅 계약의 `BasicSafeZonePlanner::destination` ·
+  `candidates`(differential fixture), `RuntimeTrace.txt` — 녹화의 휴식 구간에서 커서는 잠자리 길에서 약 570px
+  떨어져 있다. 거기서 걸러지는 후보는 커서 옆의 왼쪽 위 모서리 하나이고 원래도 지는 후보였다.
+- 회귀 테스트: `rest_tests.rs` `b10_the_walk_to_bed_does_not_pass_a_parked_cursor`(글자 띠 위에 세운 커서 —
+  고치기 전 1분에 11번 깼다)와 `b10_without_capture_or_avoidance_the_bed_is_reachable_too`(캡처 없이 회피를
+  켜고/끄고 — 고치기 전 각각 한 번 깨고 다시 못 잤다). 이 둘은 고치기 전 코드에서 실패하는 것을 먼저 봤다.
+  `clearance_tests.rs` `rest_beds_the_caller_rules_out_are_not_offered`는 새 인자 `reachable`의 계약이라
+  고치기 전 코드에는 돌릴 수 없다.
+
+#### 3.7.4 같이 본 것
+
+- **경계가 하나다.** 3.7.3이면 경계에 앉은 펫이 커서 반대쪽으로 가므로 바퀴가 생기지 않는다. 히스테리시스는
+  따로 두지 않는다.
+- **휴식 진입이 `escape`를 한 tick 만에 끊는다.** 탈출은 director의 `travel`이 아니라서 `travelling`으로
+  막히지 않는다. 끊긴 펫은 글자 위에 앉지만 잠자리가 글자 위를 고르지 않으므로 결과가 같다. 그대로 둔다.
+- **B11 — 응시가 끝나지 않는다.** 3.2.5의 지루함은 산책 시각이 된 `Stroll`에만 걸리는데, 런타임이 응시하는
+  tick마다 산책 시각을 0.8초 뒤로 민다(`finish_tick`의 `Watching | Catchable` 분기). 별건이고 설계부터 따로
+  한다(사용자 결정 2026-10-02). 3.7.3 뒤로 잠자리 걸음은 커서 쪽으로 가지 않으므로 B10의 캡처 없는 판처럼 깬
+  펫이 응시에 갇히는 길은 없어졌지만, 깨어 있는 펫 옆에 커서를 두고 가면 지금도 그 펫은 못 잔다.
+
 ## 4. 진단 방법
 
 배치가 이상할 때 상수부터 만지지 않는다. 실제 데스크톱 좌표와 실제 스크린샷으로 배포된

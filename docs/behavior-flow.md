@@ -140,10 +140,16 @@ idle (row 0, 앉아서 깜박)
 | 지금 자리 | director의 답 | 펫 |
 |---|---|---|
 | 관측된 빈 자리이고, 경계 밖이며, 여유가 24pt 이상 개선되는 후보 없음 | `SleepInPlace` | 제자리 |
-| 내용과 겹치거나 여유가 더 큰 후보 있음 | `RestAt(점)` — 모서리와 7×5 격자 중 주변 여유가 가장 큰 빈 곳 (`BasicSafeZonePlanner::clear_destination`) | `findSleepSpot`으로 걸어간다. 걷는 동안 다시 고르지 않는다 |
-| 관측한 후보가 전부 내용과 겹침 | `NoRestSpot` | 깨어 있고 30초 뒤 휴식 재시도 (`defer_rest`) |
-| 필드 없음 | 기존 모서리 배치 (`BasicSafeZonePlanner::destination`)로 `RestAt` | 걸어가서 잔다 |
+| 내용과 겹치거나 여유가 더 큰 후보 있음 | `RestAt(점)` — 모서리와 7×5 격자 중 가는 길이 커서를 지나지 않는 것에서 주변 여유가 가장 큰 빈 곳 (`BasicSafeZonePlanner::clear_destination`) | `findSleepSpot`으로 걸어간다. 걷는 동안 다시 고르지 않는다 |
+| 관측한 후보가 전부 내용과 겹치거나 커서 너머 | `NoRestSpot` | 깨어 있고 30초 뒤 휴식 재시도 (`defer_rest`) |
+| 필드 없음 | 기존 모서리 배치로 `RestAt` — 커서를 지나는 모서리는 빼고, 남은 것이 없으면 `NoRestSpot` | 걸어가서 잔다 |
 | 배회가 꺼져 있음 | 선 자리가 비었으면 `SleepInPlace`, 아니면 `NoRestSpot` | 자동 이동하지 않는다 |
+
+**잠자리로 가는 길은 커서를 지나지 않는다** (B10, 2026-10-02). 쉬는 펫은 커서가 인식 거리(기본 170px) 안이면
+깬다 — 회피를 꺼도. 그 거리 안을 지나는 잠자리를 고르면 펫은 가다가 깨고, 커서 바로 바깥에 다시 앉아 같은
+잠자리로 또 걸어갔다. 그래서 펫에서 후보까지의 직선이 그 거리 안으로 들어가는 후보는 여유를 재기 전에
+뺀다(`PlacementDirector::choose_rest_spot`의 `reachable`). 산책·작업 좌석이 지키던 규칙이고, 근거는
+`docs/placement.md` 3.7.
 
 도착하면 그 tick에 director가 선 자리를 다시 잰다(`PlacementDirector::rest_arrival`) — 출발 뒤에 화면이
 바뀌었으면 잠들지 않는다. `sleep`에는 종료 타이머가 없으므로 자는 동안에도 매 tick 같은 질문을 하고,

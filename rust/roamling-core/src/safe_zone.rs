@@ -72,6 +72,12 @@ impl BasicSafeZonePlanner {
         if let Some(best) = Self::best(&candidates, current_position) {
             return Some(best);
         }
+        Self::fallback(world, current_position, object_size)
+    }
+
+    fn fallback(
+        world: &DesktopWorldSnapshot, current_position: WorldPoint, object_size: WorldSize,
+    ) -> Option<RestDestination> {
         let display = world.display_containing(current_position)
             .or_else(|| world.nearest_display(current_position))?;
         let safe = display.visible_frame
@@ -82,12 +88,21 @@ impl BasicSafeZonePlanner {
         })
     }
 
+    /// `reachable` is the caller's say on which spots the pet can walk to. It
+    /// runs before anything is ranked, so a whole clearance tier the pet
+    /// cannot reach hands over to the next one instead of to nothing.
     pub(crate) fn clear_destination(
         world: &DesktopWorldSnapshot, current_position: WorldPoint,
         pointer_position: Option<WorldPoint>, object_size: WorldSize,
+        reachable: &dyn Fn(WorldPoint) -> bool,
     ) -> Option<RestDestination> {
         let Some(field) = world.luminance.as_ref() else {
-            return Self::destination(world, current_position, pointer_position, object_size);
+            let mut candidates = Self::candidates(world, current_position, pointer_position, object_size);
+            candidates.retain(|candidate| reachable(candidate.point));
+            return Self::best(&candidates, current_position).or_else(|| {
+                Self::fallback(world, current_position, object_size)
+                    .filter(|fallback| reachable(fallback.point))
+            });
         };
         let mut candidates = Self::candidates(world, current_position, pointer_position, object_size);
         // Corners alone cannot find the one clear patch in the middle of a page.
@@ -107,6 +122,7 @@ impl BasicSafeZonePlanner {
                 }
             }
         }
+        candidates.retain(|candidate| reachable(candidate.point));
         let map = crate::clearance::ClearanceMap::new(field);
         let points: Vec<_> = candidates.iter().map(|candidate| candidate.point).collect();
         let candidates: Vec<_> = map.best(&points, object_size).into_iter()

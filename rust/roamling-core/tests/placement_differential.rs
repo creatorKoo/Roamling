@@ -145,6 +145,8 @@ fn situation(input: &[f64], scene: &Scene) -> PetSituation {
         object_size: WorldSize::new(input[3], input[4]),
         pointer_position: (input[5] == 1.0).then(|| WorldPoint::new(input[6], input[7])),
         pointer_clearance: input[8],
+        // Not in the recorded situations: the ported contract never picks a bed.
+        pointer_wake_distance: 0.0,
         walking_speed: input[9],
         is_pointer_owned: input[10] == 1.0,
         is_pointer_watching: input[11] == 1.0,

@@ -191,3 +191,85 @@ fn waking_catch_can_interrupt_even_the_extended_stretch() {
         assert_eq!(pet.state(), BehaviorState::Caught, "grabbed at {grab_at}");
     }
 }
+
+/// The user has stepped away and left the cursor parked. Returns how many
+/// times the pet woke in the next minute, and the pet.
+fn rest_beside_a_parked_cursor(
+    start: WorldPoint,
+    cursor: WorldPoint,
+    field: Option<LuminanceField>,
+    avoidance: bool,
+) -> (usize, PetRuntime) {
+    let mut pet = PetRuntime::new(start, RuntimeTuning::default(), 7);
+    let frame = WorldRect::new(0.0, 0.0, 1280.0, 800.0);
+    pet.set_displays(vec![DisplaySnapshot {
+        id: "main".into(), name: "main".into(), frame, visible_frame: frame, scale: 1.0,
+    }]);
+    pet.set_flags(true, avoidance, true);
+    let capture = field.is_some();
+    pet.set_luminance(field);
+    let mut wakes = 0;
+    for i in 0..1800 {
+        let now = 100.0 + f64::from(i) / 30.0;
+        let mut input = sample(now);
+        input.pointer = cursor;
+        input.capture_authorized = capture;
+        pet.begin_tick(now);
+        let before = pet.state();
+        if pet.finish_tick(&input).state == BehaviorState::Wake && before != BehaviorState::Wake {
+            wakes += 1;
+        }
+    }
+    (wakes, pet)
+}
+
+/// A column of text down the middle of the 1280×800 desk, x 560...880, in the
+/// 64×40 grid the shells capture.
+fn text_down_the_middle() -> LuminanceField {
+    let samples = (0..40usize)
+        .flat_map(|row| {
+            (0..64usize).map(move |col| match (28..44).contains(&col) {
+                true if (col + row) % 2 == 0 => 0.1,
+                true => 0.9,
+                false => 1.0,
+            })
+        })
+        .collect();
+    LuminanceField::new(WorldRect::new(0.0, 0.0, 1280.0, 800.0), 64, 40, samples).unwrap()
+}
+
+/// B10. The clearest bed on the desk lay past a cursor the user had left on
+/// their text. The walk there woke the pet 170 pt short of the cursor, the
+/// walk off the text was cut short a tick later by the next sit, and the next
+/// sit chose the same bed -- every 5.2 s until the user came back.
+#[test]
+fn b10_the_walk_to_bed_does_not_pass_a_parked_cursor() {
+    let cursor = WorldPoint::new(720.0, 400.0);
+    let (wakes, pet) = rest_beside_a_parked_cursor(
+        WorldPoint::new(1100.0, 400.0), cursor, Some(text_down_the_middle()), true,
+    );
+    assert_eq!(wakes, 0);
+    assert_eq!(pet.state(), BehaviorState::Sleep);
+    assert!(pet.position().distance(cursor) > 170.0, "asleep at {:?}", pet.position());
+}
+
+/// Without a capture the beds are the four corners, and the cursor marks
+/// down only a corner within 260 pt of it -- not one whose walk crosses it.
+/// With pointer avoidance off nothing else keeps a walk clear of the cursor,
+/// and a resting pet wakes for the cursor all the same.
+#[test]
+fn b10_without_capture_or_avoidance_the_bed_is_reachable_too() {
+    let cursor = WorldPoint::new(364.0, 502.0);
+    let outcomes: Vec<_> = [true, false]
+        .into_iter()
+        .map(|avoidance| {
+            let (wakes, pet) =
+                rest_beside_a_parked_cursor(WorldPoint::new(600.0, 300.0), cursor, None, avoidance);
+            (avoidance, wakes, pet.state())
+        })
+        .collect();
+    assert!(
+        outcomes.iter().all(|&(_, wakes, state)| wakes == 0 && state == BehaviorState::Sleep),
+        "(avoidance, wakes, state): {outcomes:?}"
+    );
+}

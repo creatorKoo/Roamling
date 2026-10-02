@@ -146,6 +146,10 @@ pub struct PetSituation {
     /// band stops the pet where it stands. The notice distance while pointer
     /// avoidance is on, zero when it is off -- and at zero nothing is blocked.
     pub pointer_clearance: f64,
+    /// A resting pet wakes when the cursor is this close, avoidance or not
+    /// (`rest.rs`), so the walk to bed has to stay outside it. Zero blocks
+    /// nothing, which is what the ported contract gets: it never picks a bed.
+    pub pointer_wake_distance: f64,
     pub walking_speed: f64,
     /// The pointer owns the pet outright: caught, dragged, evading, or close
     /// enough to be reaching for it. Nothing placement decides survives this.
@@ -824,11 +828,23 @@ impl PlacementDirector {
         let away_from_seam = Self::away_from_seam(situation, position);
         let mut rest_world = situation.world.clone();
         rest_world.safe_zones = BasicSafeZonePlanner::safe_zones(&rest_world);
+        // A bed whose walk passes the cursor is never reached: the pet wakes on
+        // the way, sits down again just outside the cursor's reach, and this
+        // picked the same bed again (`docs/requests.md` B10). Strolls and seats
+        // have kept clear of the cursor all along; the bed was the one walk
+        // that did not.
+        let reachable = |point: WorldPoint| match situation.pointer_position {
+            Some(pointer) if situation.pointer_wake_distance > 0.0 => {
+                walk_keeps_clear(position, point, pointer, situation.pointer_wake_distance)
+            }
+            _ => true,
+        };
         let destination = BasicSafeZonePlanner::clear_destination(
             &rest_world,
             position,
             situation.pointer_position,
             situation.object_size,
+            &reachable,
         );
 
         if away_from_seam {
@@ -1088,21 +1104,7 @@ impl PlacementDirector {
         {
             return false;
         }
-        let from = situation.position;
-        let dx = point.x - from.x;
-        let dy = point.y - from.y;
-        let length_squared = dx * dx + dy * dy;
-        let t = if length_squared > 0.0 {
-            clamped(((pointer.x - from.x) * dx + (pointer.y - from.y) * dy) / length_squared, 0.0, 1.0)
-        } else {
-            0.0
-        };
-        let closest_x = from.x + dx * t;
-        let closest_y = from.y + dy * t;
-        let closest = ((pointer.x - closest_x) * (pointer.x - closest_x)
-            + (pointer.y - closest_y) * (pointer.y - closest_y))
-            .sqrt();
-        !(closest < swift_min(situation.pointer_clearance, pointer.distance(from)))
+        walk_keeps_clear(situation.position, point, pointer, situation.pointer_clearance)
     }
 
     /// Bottom row first, matching the bias of the random draws.
@@ -1134,6 +1136,27 @@ impl PlacementDirector {
         }
         points
     }
+}
+
+/// Whether the straight walk from `from` to `to` stays `clearance` away from
+/// the cursor. A pet already inside that radius is only refused walks that
+/// bring it closer, so it can always leave. Straight, although a route across
+/// displays bends: on one display the two are the same walk (3.2.4).
+fn walk_keeps_clear(from: WorldPoint, to: WorldPoint, pointer: WorldPoint, clearance: f64) -> bool {
+    let dx = to.x - from.x;
+    let dy = to.y - from.y;
+    let length_squared = dx * dx + dy * dy;
+    let t = if length_squared > 0.0 {
+        clamped(((pointer.x - from.x) * dx + (pointer.y - from.y) * dy) / length_squared, 0.0, 1.0)
+    } else {
+        0.0
+    };
+    let closest_x = from.x + dx * t;
+    let closest_y = from.y + dy * t;
+    let closest = ((pointer.x - closest_x) * (pointer.x - closest_x)
+        + (pointer.y - closest_y) * (pointer.y - closest_y))
+        .sqrt();
+    !(closest < swift_min(clearance, pointer.distance(from)))
 }
 
 fn frame(point: WorldPoint, size: WorldSize) -> WorldRect {

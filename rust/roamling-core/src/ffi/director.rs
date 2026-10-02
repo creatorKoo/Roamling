@@ -174,6 +174,9 @@ impl Placement {
                 (values.len() == 2).then(|| WorldPoint::new(values[0], values[1]))
             }),
             pointer_clearance: situation.pointer_clearance,
+            // Only the shipping policy picks a bed, and this director is the
+            // ported contract's.
+            pointer_wake_distance: 0.0,
             walking_speed: situation.walking_speed,
             is_pointer_owned: situation.is_pointer_owned,
             is_pointer_watching: situation.is_pointer_watching,
