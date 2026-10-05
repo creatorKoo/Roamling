@@ -90,3 +90,15 @@ SHA-1 MAC도 거부된다). 그 legacy가 곧 키체인이 쓰는 형식이다. 
 추가하고 워크플로의 appcast 줄에 `macos-x86_64`를 더한다.
 
 Apple Developer Program 연 $99는 **여전히 안 냈다.** 내면 첫 다운로드 마찰이 사라진다.
+
+## 0.7.1 배포 결과 (2026-10-05)
+
+- 릴리스 커밋 `a0796d3`, 태그 `v0.7.1`. Windows·macOS·공유 코어 버전 0.7.1로 통일.
+- https://github.com/creatorKoo/Roamling/releases/tag/v0.7.1 에 정식 공개 완료.
+- Release 워크플로 `37259297845` 및 메인 Windows/macOS 검사 모두 성공.
+- 공개 파일 6개를 인증 없이 다운로드해 GitHub 자산 SHA-256과 대조했다.
+- `releases/latest/download/appcast.json`은 0.7.1이며 태그 피드와 동일하다.
+- `roamling-appcast verify`로 피드·Windows 실행 파일·macOS ZIP의 Ed25519 서명 검증 통과.
+- Windows PE와 macOS Info.plist의 제품/빌드 버전 0.7.1 확인. macOS 서명·패키지 실제 실행은 CI에서 확인.
+- Android도 0.7.1/7001, 같은 코어 커밋으로 서명 번들·로컬 검사·원격 CI를 완료했다.
+  Android 자료는 비공개 저장소에 유지한다. Play Console 브라우저 연결이 없어 내부 테스트 업로드는 미완료다.
