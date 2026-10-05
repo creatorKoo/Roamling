@@ -244,11 +244,11 @@ func petLogicTests() -> [LogicTest] {
             for capability in PetCapability.allCases {
                 try expect(builtIn.resolver.resolve(capability) == imported.resolver.resolve(capability))
             }
-            let suite = try makeTestDefaults()
-            defer { suite.discard() }
-            suite.defaults.set("fat-mochi", forKey: "roamling.builtInPet")
-            suite.defaults.set(package.path, forKey: "roamling.petPackagePath")
             try MainActor.assumeIsolated {
+                let suite = try makeTestDefaults()
+                defer { suite.discard() }
+                suite.defaults.set("fat-mochi", forKey: "roamling.builtInPet")
+                suite.defaults.set(package.path, forKey: "roamling.petPackagePath")
                 let platform = FakePlatform(display: DisplaySnapshot(id: "1", name: "test",
                     frame: WorldRect(x: 0, y: 0, width: 1440, height: 900),
                     visibleFrame: WorldRect(x: 0, y: 25, width: 1440, height: 850), scale: 2), worldTop: 900)
