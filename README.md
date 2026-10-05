@@ -144,10 +144,10 @@ installer, so the warning appears once, on first install.
 
 ### Updates
 
-Roamling checks for a new version at startup and once a day, downloads it in the
-background, and puts it in place. **Downloading needs no dialog or restart prompt**:
-the new version is simply the one that runs the next time Roamling starts. The
-tray menu says so quietly when one is waiting.
+Roamling checks for a new version shortly after it starts and once a day. It
+downloads the update in the background, verifies it, and **restarts into the new
+version when the pet is idle**. There is no dialog; while one is waiting, the
+menu says so quietly.
 
 A short guide appears on first launch and after meaningful usage changes, once per
 guide revision. Bug-fix releases do not repeat it. See [guide maintenance](docs/usage-guide.md).

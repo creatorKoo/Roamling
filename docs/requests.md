@@ -31,7 +31,90 @@
 
 ## 진행
 
-없음.
+### R29. 데스크톱 소스를 닫되 자동 업데이트는 그대로 (2026-10-04)
+
+- **누가·언제** 사용자, 2026-10-04, Windows. Android 게시 작업 중 남은 일 목록을 보다가.
+- **앞선 결정 (2026-09-22)** 비공개 Android 저장소에만 적혀 있었다(그 저장소의 요청 기록 A-R6과 전략 문서 3b절) —
+  이 저장소에는 오늘까지 기록이 없었다. 사용자: "어짜피 많이 알려지지 않아서 클로즈드 소스로 바꿔도
+  괜찮아. 스팀에 릴리즈하고 업데이트 그걸로 바꾸고 닫으면 돼." 같은 날 Steam은 뒤로 미루고 "PC는 다음 판부터 닫고, 직접 배포
+  유지"로 정리됐다. R23의 "Android만 닫는다"(2026-09-20)는 이것으로 바뀌었다. 같은 날 0.6.9가 GPL로 나갔고(R26) 닫는 일은
+  실행되지 않았다.
+- **원문 (2026-10-04)** "업데이트는 유지하면서 소스를 닫으려면 그냥 일단 소스를 private으로 옮기고 여기코드는 두고 주소만
+  여기꺼 쓰면 되지 않니? 뭔가 보리쌀로 private repo 만들고 업데이트만 추후 바꾸면 될 것 같기도 한데.. 아니면 업데이트만
+  저기 쓰던지.. 흠.. 너는 뭐를 추천하니?"
+- **확인한 사실 (2026-10-04)**
+  - 이 저장소는 PUBLIC · GPL-3.0이다(`gh repo view`). v0.6.9 뒤의 변경은 `e37240e`까지 이미 공개 main에 있다.
+  - 피드 주소는 두 셸에 이 저장소의 릴리스로 컴파일돼 있다(`rust/roamling-win/src/update.rs` `FEED`,
+    `Sources/RoamlingMac/MacUpdater.swift`). 비공개 저장소의 릴리스 파일은 로그인 없이 받을 수 없다 — 이 저장소를 비공개로
+    돌리거나 피드를 비공개 저장소에 두면 설치된 사본 전부의 업데이트가 끊긴다.
+  - `release.yml`은 자기가 도는 저장소에 발행한다: 내려받기 주소를 `${GITHUB_REPOSITORY}`로 만들고("Sign the release"),
+    `github.token`으로 `gh release create --generate-notes`를 부른다("Publish").
+  - secret 셋(`ROAMLING_UPDATE_SECRET_KEY` · `MACOS_CERT_P12` · `MACOS_CERT_PASSWORD`)은 GitHub에서 다시 읽을 수 없다.
+    업데이트 키가 달라지면 설치된 사본이 새 판을 받지 않고, 맥 인증서가 달라지면 접근성·화면 기록 권한이 날아간다
+    (`release.yml` 머리 주석, `docs/release.md` "자체 서명 인증서"). `check-macos.yml`도 인증서 secret을 쓴다.
+  - 정보 창이 "GNU GPL v3.0 only"라고 말한다(`Localizable.strings` `alert.about.body`, en · ko). 소스 링크가 있다
+    (`ShellPrompt.sourceURL`, `roamling-win/src/shell.rs` `SOURCE_URL`). Windows 설치기가 `LICENSE`를 보여 준다
+    (`installer/roamling.iss` `LicenseFile`). `rust/Cargo.toml`의 `license`와 파일마다의 SPDX 머리도 GPL이다. 서드파티 고지
+    파일은 추적되는 것이 없다 — 지금까지는 공개된 소스가 그 자리였다.
+  - Android 저장소는 이 저장소의 주소를 `core/` 서브모듈로 받고(`.gitmodules`), `check-android.yml`은 토큰 없이 받는다.
+  - CI 비용. 공개 저장소의 표준 러너는 무료다. 비공개는 Free 월 2,000분 · Pro 3,000분, 분당 Linux $0.006 · Windows $0.010 ·
+    macOS $0.062이고 결제 수단이 없으면 한도에서 멈춘다(GitHub 문서 `billing/concepts/product-billing/github-actions`,
+    `billing/reference/actions-runner-pricing`, 2026-10-04에 읽음). 맥 1분이 한도에서 몇 분으로 깎이는지는 그 두 쪽에서
+    확인하지 못했다 — 2026-09-22의 답은 10배로 적었고 요금 비율도 약 10배다. 지금 잡 시간: Check macOS 9~10분,
+    Check Windows 13.5분, Release는 macOS 8.5 + Windows 13.2 + 발행 0.5분. 9월의 실행 횟수(Check macOS 39 · Check Windows 28 ·
+    Release 20)를 비공개에서 그대로 돌렸다면 요금표로 약 $40, 무료 한도의 서너 배다(잡 시간은 최근 몇 번의 값으로 어림).
+- **추천 (2026-10-04)** 사용자의 첫 안 그대로 — 새 비공개 저장소에 이력을 통째로 옮겨 거기서 개발하고, 이 저장소는 공개로 둔 채
+  코드는 그대로 두고 **릴리스만 계속 여기에 올린다.** 피드 주소는 나중에도 바꾸지 않는다: 바꿔도 옛 주소로 묻는 사본이 남아
+  있는 한 옛 주소에 계속 올려야 하므로 얻는 것이 없다. "업데이트를 저기(비공개)에"는 위 사실 때문에 되지 않는다.
+  - 순서: 지금 main(이미 공개된 코드)을 **이 저장소에서 마지막 GPL 판으로 먼저 낸다** → 옮긴다 → 그다음 판이 첫 비공개 판.
+    R27의 새 업데이터와 새 발행 경로를 같은 판에서 처음 쓰지 않으려는 것이다. 첫 비공개 판은 prerelease로 올려 파일과 서명을
+    확인한 뒤 latest로 올린다(`releases/latest`는 prerelease를 건너뛴다).
+- **정할 것** ① 위 순서(마지막 GPL 판을 먼저 낼지) ② 비공개 저장소 이름 — GitHub 저장소 이름은 영문·숫자·`-`·`_`·`.`만 된다
+  ("보리쌀"은 `borissal` 같은 표기로) ③ 닫힌 판의 라이선스 문구(정보 창 · 설치기 · `LICENSE`) ④ CI 한도 — Pro · 결제 수단과
+  상한 · 맥 self-hosted 러너 중 무엇으로 ⑤ 업데이트 서명 비밀키의 사본이 GitHub 밖에 있는지(사용자만 안다).
+- **결정 (2026-10-04)** "일단 현재까지 수정사항 버저닝하자 그다음 다음거 더 가자" → ①은 정해졌다: 지금 main을 이 저장소에서
+  0.6.10으로 먼저 낸다(R30). 옮기는 것은 그다음이다. ②~⑤는 아직 정하지 않았다.
+- **질문 (2026-10-05)** "업데이트 서버를 어떻게 할지를 정하고 프라이빗으로 옮기면 될 것 같은데.. 이거 좋은 방법 추천해줄래?
+  github에 업데이트 용 로믈링 repo를 유지하나? 아니면 보리쌀-public 이런거 만드나? 무슨 방법이 좋겠니"
+- **답 (요지, 2026-10-04의 추천을 고침)** 공개 쪽 이름은 `Roamling`이어야 한다 — 설치된 사본이 아는 이름이 그것뿐이다. 다만
+  지금 저장소를 공개로 남기는 대신 **맞바꾼다**: 지금 저장소의 이름을 바꿔 비공개로 돌리고(secret 셋 · 이력 · Actions 기록이
+  그대로 따라간다), 릴리스만 든 새 공개 저장소가 `Roamling`이라는 이름을 넘겨받는다. 확인한 것:
+  - 이름이 바뀐 공개 저장소의 옛 주소로 `releases/latest/download/…`를 물으면 301로 새 이름에 넘어간다(`atom/electron` →
+    `electron/electron`으로 실측). 그래서 새 저장소를 다른 이름으로 다 차려 놓고 이름 둘을 연달아 바꾸면 피드가 끊기지 않는다.
+  - 0.6.10의 여섯 파일을 그대로 다시 올리면 서명된 매니페스트 안의 주소(`…/Roamling/releases/download/v0.6.10/…`)도 그대로 맞는다.
+  - 이 저장소는 별 0 · 포크 0 · 이슈 0 · PR 0 · Pages 없음 · 변수·배포 키·웹훅·환경 0이다(`gh api`, 2026-10-05). 비공개로
+    돌려 잃는 것이 없다. GitHub 문서 "Setting repository visibility"의 결과 목록에 secret은 없다.
+  - `보리쌀-public` 같은 새 이름은 리다이렉트에 영구히 기대게 되고, 같은 이름의 저장소를 다시 만드는 순간 끊긴다(GitHub 문서
+    "Renaming a repository").
+- **결정 (2026-10-05)** 맞바꾸기 · 비공개 이름 `borissal` · 옛 소스는 새 공개 저장소에 태그로 남긴다는 세 추천에 "그래 그렇게
+  가자 진행해주고 알려줘". 서명 키의 사본이 GitHub 밖에 있는지는 답이 없었다 — 그래서 공개 → 비공개 전환이 secret을 지우지
+  않는다는 것을 임시 저장소에서 먼저 재 보고 넘어간다.
+- **한 것 (2026-10-05)** 지금의 모습과 규칙은 `docs/repositories.md`.
+  1. 새 공개 저장소를 임시 이름으로 차렸다. `main`에는 `README.md` · `README.ko.md` · `ARTWORK.md` · `TRADEMARKS.md`만 있고
+     (`1e1f08d`, 작업 폴더는 옆의 `Roamling-public`), 0.6.10까지의 소스는 태그 `v0.6.10` 하나로 남겼다. README는 이 저장소의
+     README에서 받는 법 · 업데이트 · 연동 · 개인정보를 옮기고 빌드 · 저장소 안내 · 기여를 뺐다. 업데이트 절은 R27 뒤의 동작으로
+     썼다 — 이 저장소의 README 둘은 R27 뒤에도 "다음에 켤 때 실행된다"는 옛 문장이어서 같이 고쳤다. `ARTWORK.md`는 끊어질 링크 둘(`LICENSE`,
+     `docs/pets.md`)만 태그 주소로 바꿨고 글은 그대로다. `TRADEMARKS.md`는 바이트로 같다.
+  2. 거기에 0.6.10의 여섯 파일을 그대로 다시 올렸다 — R30에서 받아 검증해 둔 `output/release-0.6.10/`의 것. 다시 내려받아 여섯
+     모두 SHA-256이 같았다. 릴리스 노트는 새로 썼다(옛 본문은 이 저장소의 태그 비교 링크 한 줄이었다).
+  3. 이름 둘을 연달아 바꿨다 — 이 저장소 → `borissal`, 임시 저장소 → `Roamling`. 두 작업 폴더의 `origin`도 같이 바꿨다.
+  4. `borissal`을 비공개로 돌렸다.
+- **secret을 먼저 쟀다** 임시 저장소에 시험용 secret을 넣고 일회용 워크플로로 그 값의 SHA-256을 찍은 뒤, 비공개로 바꾸고 다시
+  찍었다. 목록의 생성·갱신 시각이 그대로였고 값의 해시도 같았다. 시험용 브랜치 · secret · 실행 기록은 지웠다. 그 뒤에 4를
+  했고, `borissal`의 secret 셋은 생성·갱신 모두 2026-09-04 그대로다(`gh api …/actions/secrets`).
+- **확인 (이름을 바꾼 직후)** 앱이 묻는 주소 `…/creatorKoo/Roamling/releases/latest/download/appcast.json`과 `.sig`가 원본과
+  바이트로 같다. 서명된 매니페스트 안의 주소로 받은 `roamling.exe` · `Roamling-0.6.10.zip`도 SHA-256이 같고,
+  `roamling-appcast verify`가 앱에 든 공개키로 셋 다 통과시켰다. 저장소 · 최신 릴리스 · 이슈 · `v0.6.10` 태그의 트리 ·
+  그 안의 `LICENSE` 쪽이 전부 200이다. 비공개로 돌린 뒤 `…/creatorKoo/borissal`은 밖에서 404이고 피드는 그대로다.
+  Android 앱이 고정한 코어 커밋 `e37240e`는 공개 주소에서 `git fetch --depth=1`로 받아진다 — 태그의 조상이라서다.
+- **같이 고친 것** `.github/workflows/release.yml` — 내려받기 주소와 올리는 곳을 공개 저장소로 고정(`PUBLIC_REPOSITORY`),
+  올리는 토큰은 새 secret `ROAMLING_PUBLIC_RELEASE_TOKEN`, 릴리스 노트는 `docs/release-notes/<버전>.md`, 리허설용 `prerelease`
+  입력, 그리고 빌드 전에 secret 둘과 토큰을 보는 `preflight` 잡. YAML은 파싱해 구조를 확인했다. **한 번도 돌려 보지 않았다** —
+  토큰이 없어서다. 거짓이 된 문장도 같이 고쳤다 — `CLAUDE.md`(새 절 "저장소는 둘이다"와 세 문단), `docs/android.md`,
+  `docs/windows.md` "자동 업데이트"의 세 곳, `docs/README.md`의 지도.
+- **남은 것** `docs/repositories.md` "남은 일" — 사용자: 발행 토큰, 닫힌 판의 라이선스 문구, CI 한도, 맥 작업 사본의 `origin`.
+  Claude: 문구 바꾸기와 서드파티 고지, Android의 `core/` 주소(0.6.10 뒤의 코어가 필요해질 때), 첫 닫힌 판의 리허설.
+- **상태** 진행 — 소스는 옮겨졌고 업데이트는 끊기지 않았다. 닫힌 판은 아직 내지 않았다.
 
 ---
 

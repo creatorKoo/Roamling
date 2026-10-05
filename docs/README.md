@@ -22,6 +22,7 @@
 | 도구 없이 손으로 프레임을 만들 때의 프롬프트 | [`art/mochi-animation-prompts-ko.md`](art/mochi-animation-prompts-ko.md) |
 | Windows에서 지금 유효한 것, 남은 게이트(W8) | [`windows.md`](windows.md) |
 | Android 앱은 어디 있고, 이 저장소의 무엇이 그 앱에 닿나 | [`android.md`](android.md) |
+| 소스와 배포가 왜 다른 저장소에 있고, 발행이 어떻게 건너가나 | [`repositories.md`](repositories.md) |
 | 서명·dmg·배포를 어떻게 하나 | [`release.md`](release.md) |
 | 고양이 색을 어떻게 바꾸나 | [`palette.md`](palette.md) |
 | 숨기기와 메뉴가 왜 그 모양인가 | [`hiding.md`](hiding.md) |

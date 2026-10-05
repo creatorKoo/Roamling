@@ -3,7 +3,12 @@
 #
 # Cuts a release when a `v*` tag is pushed.
 #
-# Three secrets:
+# The source lives in this repository, which is private. The release does not:
+# it is published to the public one, `creatorKoo/Roamling`, because that is the
+# address every installed copy asks for its updates and a private repository's
+# release files cannot be fetched without signing in. See docs/repositories.md.
+#
+# Four secrets:
 #
 #   ROAMLING_UPDATE_SECRET_KEY  the Ed25519 key whose public half is compiled
 #                               into both apps. Without it a release can still
@@ -11,6 +16,10 @@
 #                               accept it -- see docs/windows.md, W7.
 #   MACOS_CERT_P12              the signing certificate, base64 of a .p12.
 #   MACOS_CERT_PASSWORD         its password.
+#   ROAMLING_PUBLIC_RELEASE_TOKEN
+#                               a token that may write releases in the public
+#                               repository. This workflow's own token cannot:
+#                               it reaches no further than this repository.
 #
 # The macOS certificate is self-signed rather than a Developer ID, which is a
 # decision with a cost attached: a first download is blocked until the user
@@ -33,12 +42,48 @@ on:
       version:
         description: "Version to build, without the v"
         required: true
+      prerelease:
+        description: "Publish as a prerelease: installed copies do not see it until it is promoted"
+        type: boolean
+        default: false
 
+# Nothing is written here any more -- the release goes to the other repository
+# with its own token.
 permissions:
-  contents: write
+  contents: read
+
+env:
+  # Where the release and the update feed live. Compiled into both apps
+  # (`rust/roamling-win/src/update.rs`, `Sources/RoamlingMac/MacUpdater.swift`),
+  # so this is not a setting to change: an installed copy asks nowhere else.
+  PUBLIC_REPOSITORY: creatorKoo/Roamling
 
 jobs:
+  # Both of these are needed by the last job, twenty minutes of building from
+  # now, and this repository pays for those minutes. Finding out here that one
+  # is missing or has expired costs one.
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - name: The secrets the last job needs
+        env:
+          ROAMLING_UPDATE_SECRET_KEY: ${{ secrets.ROAMLING_UPDATE_SECRET_KEY }}
+          GH_TOKEN: ${{ secrets.ROAMLING_PUBLIC_RELEASE_TOKEN }}
+        run: |
+          if [ -z "$ROAMLING_UPDATE_SECRET_KEY" ]; then
+            echo "::error::ROAMLING_UPDATE_SECRET_KEY is not set; nothing already installed could accept this release"
+            exit 1
+          fi
+          if [ -z "$GH_TOKEN" ]; then
+            echo "::error::ROAMLING_PUBLIC_RELEASE_TOKEN is not set; the release cannot reach ${PUBLIC_REPOSITORY}"
+            exit 1
+          fi
+          # An expired token fails here. One that can read but not write still
+          # fails at the end -- there is no way to ask without writing.
+          gh api "repos/${PUBLIC_REPOSITORY}" --jq .full_name
+
   windows:
+    needs: preflight
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
@@ -106,6 +151,7 @@ jobs:
           if-no-files-found: error
 
   macos:
+    needs: preflight
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v7
@@ -215,7 +261,10 @@ jobs:
             exit 1
           fi
           version="${{ steps.version.outputs.version }}"
-          base="https://github.com/${GITHUB_REPOSITORY}/releases/download/v${version}"
+          # The public repository's address, not this one's: these URLs are
+          # signed into the manifest, and a copy that cannot fetch them verifies
+          # the signature and then has nothing to download.
+          base="https://github.com/${PUBLIC_REPOSITORY}/releases/download/v${version}"
           # The URL is the tagged one, not `latest`: the feed says which build it
           # is describing, and `latest` would drift out from under the signature.
           #
@@ -231,19 +280,42 @@ jobs:
           # answer for a platform we do not ship to.
           cargo run --manifest-path rust/Cargo.toml -q -p roamling-update \
             --bin roamling-appcast -- sign "$version" \
-            "https://github.com/${GITHUB_REPOSITORY}/releases/tag/v${version}" \
+            "https://github.com/${PUBLIC_REPOSITORY}/releases/tag/v${version}" \
             "windows-x86_64=${base}/roamling.exe=artifacts/roamling.exe" \
             "macos-arm64=${base}/Roamling-${version}.zip=artifacts/Roamling-${version}.zip"
           cat appcast.json
 
       - name: Publish
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.ROAMLING_PUBLIC_RELEASE_TOKEN }}
+          PRERELEASE: ${{ inputs.prerelease }}
         run: |
           version="${{ steps.version.outputs.version }}"
+
+          # Written by hand. The public repository has no commits of ours to
+          # generate notes from, and these few lines are the only account of
+          # the change that anyone outside can read.
+          notes="docs/release-notes/${version}.md"
+          if [ ! -f "$notes" ]; then
+            notes="$RUNNER_TEMP/notes.md"
+            echo "Roamling ${version}" > "$notes"
+          fi
+
+          flags=()
+          if [ "$PRERELEASE" = "true" ]; then
+            # `releases/latest` skips a prerelease, so nothing installed is
+            # offered this build until it is promoted.
+            flags+=(--prerelease)
+          fi
+
+          # The tag is made over there, on that repository's own branch. It
+          # marks the release, not the source it was built from.
           gh release create "v${version}" \
+            --repo "$PUBLIC_REPOSITORY" \
+            --target main \
             --title "Roamling ${version}" \
-            --generate-notes \
+            --notes-file "$notes" \
+            "${flags[@]}" \
             artifacts/roamling.exe \
             artifacts/Roamling-Setup.exe \
             "artifacts/Roamling-${version}.dmg" \

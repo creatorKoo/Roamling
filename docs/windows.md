@@ -149,8 +149,9 @@ macOS도 같은 이유로 `CGEventSource.secondsSinceLastEventType(_:eventType:)
 `update::clean_up`으로 `.old`를 지운다. Windows에서 캡처가 교체로 끊기는지는 확인하지 않았다 —
 다시 켜는 이유는 새 버전을 바로 쓰기 위해서다.
 
-**피드는 GitHub 릴리스에 얹혀 있다.** `/releases/latest/download/appcast.json`이 항상 최신
-릴리스의 자산으로 리다이렉트된다. 매니페스트 안의 아티팩트 URL은 **태그가 박힌 주소**다 —
+**피드는 GitHub 릴리스에 얹혀 있다 — 공개 저장소 `creatorKoo/Roamling`의 릴리스다.** 소스가 있는 이 저장소는
+비공개라 그 릴리스 파일은 밖에서 받을 수 없다(`docs/repositories.md`). `/releases/latest/download/appcast.json`이
+항상 최신 릴리스의 자산으로 리다이렉트된다. 매니페스트 안의 아티팩트 URL은 **태그가 박힌 주소**다 —
 `latest`는 서명 아래에서 움직인다.
 
 ### 릴리스할 때 사람이 지켜야 하는 것
@@ -158,7 +159,8 @@ macOS도 같은 이유로 `CGEventSource.secondsSinceLastEventType(_:eventType:)
 주요 조작·기능 변화가 있으면 [사용 안내 절차](usage-guide.md)에 따라 공통 `UsageGuide.txt`의
 안내 revision과 한영 문구를 같은 빌드에 넣는다. 앱 버전과 독립적이며 오류 수정만이면 유지한다.
 
-버전을 올리고 같은 번호로 태그를 민다. **세 곳이 태그와 같아야 하고, 워크플로가 대조해서
+버전을 올리고 같은 번호로 태그를 **이 저장소에** 민다. 릴리스는 워크플로가 공개 저장소에 올린다 —
+토큰 · 릴리스 노트 · 리허설은 `docs/repositories.md` "발행". **세 곳이 태그와 같아야 하고, 워크플로가 대조해서
 다르면 실패시킨다.**
 
 | 어디 | 왜 |
@@ -167,7 +169,7 @@ macOS도 같은 이유로 `CGEventSource.secondsSinceLastEventType(_:eventType:)
 | `CFBundleShortVersionString` | 정보 창에 보이는 값 |
 | `CFBundleVersion` | macOS가 빌드로 취급하는 값. 두 릴리스 동안 `1`에 머물렀고 LaunchServices가 그 값으로 캐시한다 |
 
-비밀키는 GitHub secret `ROAMLING_UPDATE_SECRET_KEY`에 있다. **키를 다시 만들 일이 생기면
+비밀키는 이 저장소의 GitHub secret `ROAMLING_UPDATE_SECRET_KEY`에 있다. **키를 다시 만들 일이 생기면
 사용자가 직접 돌린다** — 에이전트가 `keygen`을 돌리면 비밀키가 대화 기록에 남는다.
 
 ## W8 — 지정 앱 활동 source (Windows 셸 배선) ✅ 2026-09-12

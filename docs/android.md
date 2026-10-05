@@ -1,8 +1,13 @@
 # Android — 비공개 저장소로 옮겼다 (2026-09-20)
 
 **Android 앱은 이 저장소에 없다.** 2026-09-20에 비공개 저장소로 옮겼고, 그 앱은 공개하지 않는다
-(사용자 결정, `docs/requests.md` R23). 이 파일은 그 사실과, **이 공개 저장소에서 무엇이 Android에 닿는지**를
+(사용자 결정, `docs/requests.md` R23). 이 파일은 그 사실과, **이 저장소에서 무엇이 Android에 닿는지**를
 적는 자리로 남긴다 — 다른 문서의 옛 링크도 여기로 온다.
+
+**2026-10-05부터 이 저장소도 비공개다** (`docs/repositories.md`). Android 앱의 `core/` 서브모듈은 아직 공개 저장소
+`creatorKoo/Roamling`의 주소를 가리키고, 거기에는 0.6.10까지의 소스가 태그 `v0.6.10`으로 남아 있다. 그 앱이 고정한
+`e37240e`는 그 태그의 조상이라 지금 그대로 받아진다. **0.6.10 뒤의 코어로 올리려면** `.gitmodules`의 주소를
+`creatorKoo/borissal`로 바꾸고, 그 저장소의 `check-android.yml`이 이 저장소를 읽을 열쇠를 가져야 한다.
 
 ## 옮겨 간 것과 남은 것
 
@@ -11,7 +16,7 @@
   있던 설계·게이트·실측 기록 전부.
 - 옮기기 전의 모습은 이 저장소의 이력에 그대로 있다 — 마지막은 `a61fccd`(v0.6.8)이다. 이력은 다시 쓰지
   않았고, 거기까지 공개된 것은 공개된 조건 그대로 남는다.
-- **남았다:** 코어 그 자체. Android 앱은 이 저장소를 서브모듈로 고정해 `rust/roamling-core`와
+- **남았다:** 코어 그 자체. Android 앱은 코어를 서브모듈로 고정해 `rust/roamling-core`와
   `rust/roamling-pet`을 그대로 빌드한다. 그래서 아래 둘은 Android 전용처럼 보여도 코어의 일부라 여기 있다.
   - `rust/roamling-core/uniffi.toml` — Kotlin 바인딩 설정(`android = true`, `Pointer` 이름 바꿈).
   - `rust/.cargo/config.toml`의 `*-linux-android` 링커 플래그(16 KB 페이지).
