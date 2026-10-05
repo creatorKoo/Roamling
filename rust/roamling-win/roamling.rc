@@ -1,3 +1,4 @@
+#pragma code_page(65001)
 // SPDX-FileCopyrightText: 2026 GooBeom Jeoung
 // SPDX-License-Identifier: GPL-3.0-only
 //
@@ -25,12 +26,12 @@ FILETYPE        0x1L        // VFT_APP
         BLOCK "040904B0"
         {
             VALUE "CompanyName",      "GooBeom Jeoung"
-            VALUE "FileDescription",  "Roamling"
+            VALUE "FileDescription",  "보리쌀"
             VALUE "FileVersion",      ROAMLING_VERSION_TEXT
             VALUE "InternalName",     "roamling"
             VALUE "LegalCopyright",   "Copyright (C) 2026 GooBeom Jeoung. GPL-3.0-only."
             VALUE "OriginalFilename", "roamling.exe"
-            VALUE "ProductName",      "Roamling"
+            VALUE "ProductName",      "보리쌀"
             VALUE "ProductVersion",   ROAMLING_VERSION_TEXT
         }
     }

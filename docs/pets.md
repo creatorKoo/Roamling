@@ -1,9 +1,14 @@
 # Pets: what Roamling needs, what Petdex gives, and what it borrows
 
-**표시 이름 (2026-09-17): 보리 / Bori.** 기존 `Mochi`의 표시 이름만 바꿨다.
+**내장 펫 (2026-10-05): 보리 / Bori, 쌀 / Ssal.** macOS의 `BuiltInPetKind`는 `.mochi`와 `.ssal`이다.
+쌀은 Windows와 같은 승인 원본·매니페스트·Rust 팔레트로 구성한다. FatMochi 제품 리소스와 팩토리는
+제거했고, 저장된 `fat-mochi` 내장 선택만 쌀로 이전한다. 외부 패키지와 기존 보리 색은 보존한다.
+9색·설정·검증 흐름은 [쌀 실시간 팔레트](ssal-palette.md). 아래 FatMochi 커버리지는 제거 전 역사다.
+
+**표시 이름 이력 (2026-09-17): 보리 / Bori.** 기존 `Mochi`의 표시 이름만 바꿨다.
 `BuiltInPetKind.displayName`·Rust `PetAsset.display_name`은 `Bori`를 반환하고, 한국어 메뉴는
 `pet.name.bori`를 통해 `보리`로 표시한다. 기존 `FatMochi`의 표시 이름은 `FatBori`다.
-`mochi`, `fat-mochi`, `mochi-v3`, manifest ID·설정 키·리소스 경로·FFI 이름은 호환성을 위해 유지한다.
+당시 `mochi`, `fat-mochi`, `mochi-v3`, manifest ID·설정 키·리소스 경로·FFI 이름은 호환성을 위해 유지했다.
 외부 설치 패키지는 `displayName`을 그대로 사용하며, 기존 사용자 파일을 수정하지 않는다.
 이 문서와 과거 제작 기록에서 쓰는 Mochi는 같은 자산의 이전 이름이다.
 

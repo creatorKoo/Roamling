@@ -1,6 +1,6 @@
 /* Base localization. Korean lives in ko.lproj; every other language falls back here. */
 
-"menu.title" = "Roamling — %@";
+"menu.title" = "BoriSsal — %@";
 "menu.hide" = "Hide for Now";
 "menu.pet" = "Pet";
 "menu.pet.builtin" = "%@ (Built-in)";
@@ -22,9 +22,9 @@
 "menu.copyDiagnostics" = "Copy Diagnostics";
 "menu.reloadPets" = "Reload Pets";
 "menu.advanced" = "Advanced";
-"menu.about" = "About Roamling";
+"menu.about" = "About BoriSsal";
 "menu.viewSource" = "View Source";
-"menu.quit" = "Quit Roamling";
+"menu.quit" = "Quit BoriSsal";
 "status.hooks.installed" = "Hooks: Installed";
 "status.hooks.needsRepair" = "Hooks: Needs Repair";
 "status.hooks.notInstalled" = "Hooks: Not Installed";
@@ -43,18 +43,18 @@
 "button.done" = "Done";
 "button.resetDefaults" = "Reset Defaults";
 "alert.claude.install.title" = "Install Claude Code integration?";
-"alert.claude.install.body" = "Roamling will add local lifecycle command hooks to ~/.claude/settings.json.\nExisting settings and hooks are preserved, and a one-time backup is created.\n\nPrompt text, tool input/output, transcripts, and source code are not stored or logged.";
+"alert.claude.install.body" = "BoriSsal will add local lifecycle command hooks to ~/.claude/settings.json.\nExisting settings and hooks are preserved, and a one-time backup is created.\n\nPrompt text, tool input/output, transcripts, and source code are not stored or logged.";
 "alert.claude.remove.title" = "Remove Claude Code integration?";
-"alert.claude.remove.body" = "Only Roamling's hook handlers will be removed. Other Claude Code settings and hooks stay unchanged.";
+"alert.claude.remove.body" = "Only BoriSsal's hook handlers will be removed. Other Claude Code settings and hooks stay unchanged.";
 "alert.codex.install.title" = "Install Codex integration?";
-"alert.codex.install.body" = "Roamling will add local lifecycle command hooks to ~/.codex/hooks.json.\nExisting hooks and config.toml (including notify) are preserved, and a one-time backup is created.\n\nPrompt text, tool input/output, transcripts, and source code are not stored or logged.\nRestart Codex after installation and approve the new hook trust prompt.";
+"alert.codex.install.body" = "BoriSsal will add local lifecycle command hooks to ~/.codex/hooks.json.\nExisting hooks and config.toml (including notify) are preserved, and a one-time backup is created.\n\nPrompt text, tool input/output, transcripts, and source code are not stored or logged.\nRestart Codex after installation and approve the new hook trust prompt.";
 "alert.codex.remove.title" = "Remove Codex integration?";
-"alert.codex.remove.body" = "Only Roamling's hook handlers will be removed. Other Codex hooks, config, and notify stay unchanged.";
+"alert.codex.remove.body" = "Only BoriSsal's hook handlers will be removed. Other Codex hooks, config, and notify stay unchanged.";
 "result.claude.installed" = "Claude Code integration installed.";
 "result.claude.removed" = "Claude Code integration removed.";
 "result.codex.installed" = "Codex integration installed.";
 "result.codex.removed" = "Codex integration removed.";
-"result.detail.claude" = "New or resumed Claude Code sessions will now notify Roamling.";
+"result.detail.claude" = "New or resumed Claude Code sessions will now notify BoriSsal.";
 "result.detail.codex.installed" = "Restart Codex and approve its new hook trust prompt.";
 "result.detail.codex.removed" = "Restart Codex sessions to stop using the removed hooks.";
 "error.pet.load" = "Couldn’t load this pet";
@@ -64,9 +64,9 @@
 "accessibility.status.off" = "Accessibility: Not granted";
 "accessibility.enable" = "Grant Accessibility…";
 "accessibility.alert.title" = "Enable caret awareness?";
-"accessibility.alert.body" = "macOS will ask you to allow Roamling under Accessibility. Roamling then reads the focused control's position and the text cursor's position so the pet can sit near your work without covering it.\n\nIt never reads what you type, the text you select, window titles, or document contents.";
+"accessibility.alert.body" = "macOS will ask you to allow BoriSsal under Accessibility. BoriSsal then reads the focused control's position and the text cursor's position so the pet can sit near your work without covering it.\n\nIt never reads what you type, the text you select, window titles, or document contents.";
 "accessibility.revoke.hint" = "Turn off in System Settings › Privacy & Security › Accessibility";
-"tuning.window.title" = "Roamling Movement Settings";
+"tuning.window.title" = "BoriSsal Movement Settings";
 "tuning.header" = "How your pet moves";
 "tuning.footer" = "Every change applies straight away and is remembered. Nothing here is required — the defaults are the authored behaviour, and Reset Defaults brings them back at any time.";
 "tuning.offDefault" = "%1$@ (default %2$@)";
@@ -99,14 +99,14 @@
 "visual.status.off" = "Empty-space Placement: Off";
 "visual.enable" = "Enable Empty-space Placement…";
 "visual.alert.title" = "Enable empty-space placement?";
-"visual.alert.body" = "macOS will ask you to allow Roamling under Screen Recording. Roamling then takes one heavily downscaled snapshot when it needs a seat, and reads only how busy each area looks so the pet can settle on empty space instead of your text.\n\nIt does not recognise text, keep the image, write it to disk, or send it anywhere. macOS may require you to quit and reopen Roamling after granting this.";
+"visual.alert.body" = "macOS will ask you to allow BoriSsal under Screen Recording. BoriSsal then takes one heavily downscaled snapshot when it needs a seat, and reads only how busy each area looks so the pet can settle on empty space instead of your text.\n\nIt does not recognise text, keep the image, write it to disk, or send it anywhere. macOS may require you to quit and reopen BoriSsal after granting this.";
 "visual.revoke.hint" = "Turn off in System Settings › Privacy & Security";
 "menu.update.check" = "Check for Updates";
 "menu.launchAtLogin" = "Start at Login";
 "menu.update.auto" = "Automatic Updates";
 "status.update.ready" = "Update %@ ready — restarts when the pet is idle";
 "status.update.checking" = "Checking for updates…";
-"result.update.upToDate" = "Roamling is up to date.";
+"result.update.upToDate" = "BoriSsal is up to date.";
 "result.update.upToDate.detail" = "You are running version %@.";
 "error.update.failed" = "Couldn’t check for updates";
 "alert.launchAtLogin.failed" = "Could not change the login item";
@@ -123,7 +123,22 @@
 "palette.purple" = "Purple Bori";
 "palette.rainbow" = "Motley Bori";
 
-"palette.window.title" = "Roamling Colour";
+"palette.window.title" = "BoriSsal Colour";
+"pet.name.ssal" = "Ssal";
+"palette.ssal.white" = "White Ssal";
+"palette.ssal.black" = "Black Ssal";
+"palette.ssal.cream" = "Sticky Rice Ssal";
+"palette.ssal.brown" = "Brown Rice Ssal";
+"palette.ssal.silver" = "Black Sesame Ssal";
+"palette.ssal.gold" = "Toasted Rice Ssal";
+"palette.ssal.blue" = "Sesame Ssal";
+"palette.ssal.purple" = "Chestnut Ssal";
+"palette.ssal.hotpink" = "Red Bean Ssal";
+"palette.ssal.fur" = "Fur";
+"palette.ssal.eyeHint" = "Change the iris colour separately. Dark pupils, outlines and white glints stay intact.";
+"palette.ssal.header" = "Make a colour for Ssal";
+"palette.ssal.hint" = "Change the coat colour and shading. Ears, blush, tongue and eye reflections stay intact.";
+"palette.ssal.footer" = "Ssal changes colour as you move the sliders and remembers your choice. Choose Reset or Pet › Ssal › White Ssal to restore the original.";
 "palette.header" = "Make Bori your own";
 "palette.footer" = "Move a slider and the Bori on screen changes with it, and stays that way. A group you do not touch keeps the drawing exactly as it was — changing the body will not flatten the markings. To undo, press Start over, or pick Pet › Bori › Bori Bori from the menu.";
 "palette.section.marking" = "Markings";
@@ -166,3 +181,5 @@
 "guide.changed.petting.title" = "Pet Bori with hearts";
 "guide.changed.petting.body" = "Hold %@ with the pointer over Bori's body. Keep still for gentle head tilts, or move faster for livelier tilts and more hearts. Bori also tilts its head slowly while waiting for your input.";
 "guide.changed.catch.body" = "A body click now works while Bori is moving or working. Hold %@ when approaching to stop it dodging. Ordinary tail wags happen only when seated.";
+
+"app.name" = "BoriSsal";

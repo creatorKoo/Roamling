@@ -255,6 +255,13 @@ Windows는 새 캡처 때만 필드를 넘기지만 macOS는 매 tick 넘긴다.
 Windows `main.rs`와 macOS
 `RoamlingRuntime.swift`는 반환된 `locomotion_rate`를 애니메이션 경과 시간에 곱한다.
 
+**쌀 외부 패키지 응시 (2026-10-02).** 쌀 실사용 v10은 `gaze`만 정면 휴식 → 한쪽 바라보기 →
+정면 복귀의 4초 반복으로 정의한다. 거리별 1~2배속에서 실제 주기는 2~4초다. 이전의
+좌우 두리번거리기 1.03초(가장 가까울 때 0.515초)를 반복하지 않는다. 승인·쓰다듬기
+`waiting`, 에이전트 관찰 `review`, 보리와 공통 속도 규칙은 유지한다.
+근거: `output/ssal-polish-v10/build.py`와 패키지 `roamling.json::animations.gaze`;
+공통 적용 경로는 `PetRuntime::locomotion_rate` → 셸의 player 경과 시간이다.
+
 **쓰다듬기 하트 (2026-09-22, R25).** 애정 키와 몸체 접촉이 함께 있고 실제 상태가
 `LookAtPointer`이면 0.35초 뒤 하트가 시작된다. 가만히 있으면 0.7초, 빠르게 쓰다듬으면
 0.2초 간격이며 각 하트는 펫 너비의 0.60배/초 속도로 1.2초 동안 떠올라 사라진다(최대 6개). 손을 떼면 새 하트만 멈추고,

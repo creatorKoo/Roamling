@@ -203,7 +203,7 @@ pub fn about(hwnd: HWND) {
     const OK: i32 = 1;
     const SOURCE: i32 = 100;
 
-    let title = wide("Roamling");
+    let title = wide(localized("app.name"));
     let body = about_body();
     let content = wide(&body);
     let ok = wide(localized("button.ok"));
@@ -263,7 +263,7 @@ fn about_body() -> String {
 
 fn plain_about(hwnd: HWND, body: &str) {
     let text = wide(body);
-    let title = wide("Roamling");
+    let title = wide(localized("app.name"));
     unsafe {
         MessageBoxW(
             hwnd,

@@ -115,6 +115,78 @@ func tuningPersistenceLogicTests() -> [LogicTest] {
                     + "\(RuntimeTuningKey.allCases.map(\.rawValue).sorted())"
             )
         },
+        LogicTest(name: "all Ssal colours survive restart independently of Bori") {
+            try MainActor.assumeIsolated {
+                let suite = try makeTestDefaults()
+                defer { suite.discard() }
+                let (picking, overlay) = makePaletteRuntime(on: suite)
+                picking.start(drivingTicks: false)
+                picking.selectPalettePreset(at: 1)
+                let bori = picking.asset.atlas.pixels
+                let boriSetting = suite.defaults.string(forKey: "roamling.palette")
+                try expect(picking.paletteOptions(for: .ssal).count == 9)
+                for index in 0..<9 {
+                    picking.selectPalettePreset(at: index, for: .ssal)
+                    let chosen = picking.asset
+                    let frame = try require(overlay.lastFrame?.pixels)
+                    try expect(picking.selectedBuiltInPet == .ssal)
+                    try expect(picking.currentPetPackagePath == nil)
+                    try expect(suite.defaults.string(forKey: "roamling.builtInPet") == "ssal")
+                    try expect((suite.defaults.string(forKey: "roamling.ssalPalette") == nil) == (index == 0))
+                    let (back, backOverlay) = makePaletteRuntime(on: suite)
+                    back.start(drivingTicks: false)
+                    try expect(back.selectedBuiltInPet == .ssal)
+                    try expect(back.paletteOptions(for: .ssal).firstIndex(where: \.isSelected) == index)
+                    try expect(back.paletteOptions(for: .mochi).allSatisfy { !$0.isSelected })
+                    try expect(back.asset.atlas.pixels == chosen.atlas.pixels)
+                    try expect(back.asset.extensionAtlas?.pixels == chosen.extensionAtlas?.pixels)
+                    try expect(back.asset.tracks == chosen.tracks)
+                    try expect(backOverlay.lastFrame?.pixels == frame)
+                    back.useBuiltInPet(.mochi)
+                    try expect(back.asset.atlas.pixels == bori)
+                    back.useBuiltInPet(.ssal)
+                    try expect(back.asset.atlas.pixels == chosen.atlas.pixels)
+                    try expect(suite.defaults.string(forKey: "roamling.palette") == boriSetting)
+                    back.stop()
+                }
+                picking.stop()
+            }
+        },
+        LogicTest(name: "recolouring Ssal preserves the current animation frame") {
+            try MainActor.assumeIsolated {
+                let suite = try makeTestDefaults()
+                defer { suite.discard() }
+                let clock = TestClock(startingAt: 0)
+                let (runtime, overlay) = makePaletteRuntime(on: suite, clock: clock.read)
+                runtime.isRoamingEnabled = false
+                runtime.isPointerAvoidanceEnabled = false
+                runtime.selectPalettePreset(at: 0, for: .ssal)
+                runtime.start(drivingTicks: false)
+                defer { runtime.stop() }
+                for _ in 0..<120 {
+                    clock.advance(0.03)
+                    runtime.tick()
+                    if overlay.lastFrame?.x != 0 { break }
+                }
+                let frame = try require(overlay.lastFrame)
+                try expect(frame.x != 0, "did not reach a non-initial Ssal frame")
+                runtime.selectPalettePreset(at: 1, for: .ssal)
+                try expect(overlay.lastFrame?.x == frame.x && overlay.lastFrame?.y == frame.y,
+                    "a colour pick restarted Ssal's animation")
+            }
+        },
+        LogicTest(name: "the retired FatMochi selection migrates to Ssal") {
+            try MainActor.assumeIsolated {
+                let suite = try makeTestDefaults()
+                defer { suite.discard() }
+                suite.defaults.set("fat-mochi", forKey: "roamling.builtInPet")
+                let (runtime, _) = makePaletteRuntime(on: suite)
+                try expect(runtime.selectedBuiltInPet == .ssal)
+                try expect(runtime.asset.manifest.id == "ssal-white")
+                try expect(suite.defaults.string(forKey: "roamling.builtInPet") == "ssal")
+                try expect(BuiltInPetKind.allCases == [.mochi, .ssal])
+            }
+        },
         LogicTest(name: "a colour picked before quitting is the colour the pet comes back in") {
             // The Mac remembered the colour and did not wear it: the menu
             // ticked the right row over a pet in the bundle's own colours. A
@@ -156,7 +228,8 @@ func tuningPersistenceLogicTests() -> [LogicTest] {
 }
 
 @MainActor
-private func makePaletteRuntime(on suite: TestDefaults) -> (RoamlingRuntime, FakeOverlay) {
+private func makePaletteRuntime(on suite: TestDefaults,
+    clock: @escaping @Sendable () -> TimeInterval = { 0 }) -> (RoamlingRuntime, FakeOverlay) {
     let platform = FakePlatform(
         display: DisplaySnapshot(
             id: "1", name: "test",
@@ -170,7 +243,7 @@ private func makePaletteRuntime(on suite: TestDefaults) -> (RoamlingRuntime, Fak
         services: platform.services,
         defaults: suite.defaults,
         catalog: PetCatalog(roots: []),
-        clock: { 0 }
+        clock: clock
     )
     return (runtime, platform.overlay)
 }

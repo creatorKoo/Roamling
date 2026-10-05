@@ -20,9 +20,9 @@
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>Roamling</string>
+    <string>보리쌀</string>
     <key>CFBundleDisplayName</key>
-    <string>Roamling</string>
+    <string>보리쌀</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleIconFile</key>
@@ -42,6 +42,6 @@
     <key>NSSupportsAutomaticGraphicsSwitching</key>
     <true/>
     <key>NSScreenCaptureUsageDescription</key>
-    <string>Roamling can optionally inspect a local, temporary snapshot to find an unobtrusive resting place. This feature is off by default.</string>
+    <string>BoriSsal can optionally inspect a local, temporary snapshot to find an unobtrusive resting place. This feature is off by default.</string>
 </dict>
 </plist>

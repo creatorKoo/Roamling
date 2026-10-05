@@ -1,10 +1,10 @@
 **English** | [한국어](README.ko.md)
 
-# 🐾 Roamling
+# BoriSsal · 보리쌀
 
 **A tiny companion that actually lives on your desktop.**
 
-Roamling is a native companion runtime for macOS and Windows. Petdex-compatible
+BoriSsal (formerly Roamling) is a native companion runtime for macOS and Windows. Petdex-compatible
 creatures roam across your monitors, avoid your pointer, let you catch and drag
 them, and react to coding agents and configured work apps. Game and media
 reactions remain future work.

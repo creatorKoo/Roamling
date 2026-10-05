@@ -22,7 +22,6 @@ mod diagnostics;
 mod duplication;
 mod effects;
 mod focus;
-mod palette_debug;
 mod persistence;
 mod platform;
 mod settings;
@@ -51,7 +50,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Instant;
 use strings::localized;
-use windows::core::{w, Result};
+use windows::core::{w, Result, PCWSTR};
 use windows::Win32::Foundation::{
     CloseHandle, GetLastError, ERROR_ALREADY_EXISTS, HWND, LPARAM, LRESULT, POINT, WPARAM,
 };
@@ -78,6 +77,7 @@ struct App {
     /// The colour being worn. Remembered in settings, so this is the loaded
     /// value at startup rather than the sheet's own.
     palette: roamling_core::Palette,
+    ssal_source: Option<package::SsalPalette>,
     /// Packages found on disk, and which one is showing. `None` is the
     /// built-in mascot, which is always available and never fails to load.
     catalog: Vec<package::PetDescriptor>,
@@ -242,7 +242,7 @@ fn main() -> Result<()> {
     // than leaving the user with no pet.
     let catalog = package::discover(&package::default_roots());
     let wanted = stored.text(settings::PET_PACKAGE_PATH).map(PathBuf::from);
-    let (asset, current_package) = match wanted {
+    let (mut asset, current_package) = match wanted {
         Some(path) if catalog.iter().any(|found| found.package == path) => {
             match package::load(&path) {
                 Ok(loaded) => {
@@ -261,6 +261,25 @@ fn main() -> Result<()> {
         _ => (built_in, None),
     };
     println!("{} pet package(s) found", catalog.len());
+    let ssal_source = if current_package.is_none()
+        && stored.text(settings::BUILT_IN_PET).as_deref() == Some("ssal")
+    {
+        match package::built_in_ssal() {
+            Ok(loaded) => {
+                asset = loaded.asset;
+                package::SsalPalette::built_in()
+            }
+            Err(error) => { eprintln!("built-in Ssal: {error}"); None }
+        }
+    } else {
+        current_package.as_deref().and_then(package::SsalPalette::load)
+    };
+    if let Some(source) = &ssal_source {
+        if source.apply(&mut asset, stored.ssal_palette()) {
+            asset.display_name = ssal_name(stored.ssal_palette()).into();
+            println!("palette: ssal restored from original sheets");
+        }
+    }
 
     let roaming = stored.bool(settings::ROAMING, true);
     let avoiding = stored.bool(settings::AVOID_POINTER, true);
@@ -360,6 +379,7 @@ fn main() -> Result<()> {
             cursor_aware,
             catalog,
             current_package,
+            ssal_source,
             capturer: capture::Capturer::default(),
             receivers,
             agent_events,
@@ -423,7 +443,7 @@ fn main() -> Result<()> {
     {
         APP.with(|slot| {
             if let Some(app) = slot.borrow_mut().as_mut() {
-                if app.current_package.is_none() {
+                if app.current_package.is_none() && app.ssal_source.is_none() {
                     if let Some(asset) = roamling_pet::built_in_mochi_recolored(palette) {
                         app.asset = asset;
                         app.drawn = None;
@@ -434,6 +454,110 @@ fn main() -> Result<()> {
     }
     println!("\ntray icon registered: {tray_ok}   (Windows 11 files new ones behind the chevron)");
     println!("roaming. right-click the tray icon for the menu.");
+
+    #[cfg(debug_assertions)]
+    if let Ok(index) = std::env::var("ROAMLING_EXPECT_SSAL_PRESET") {
+        let index: usize = index.parse().expect("Ssal preset index");
+        APP.with(|slot| {
+            let slot = slot.borrow();
+            let app = slot.as_ref().expect("initialized app");
+            let palette = roamling_core::pet_image::ssal::PRESETS[index].1;
+            let mut expected = package::built_in_ssal().expect("built-in Ssal").asset;
+            assert!(package::SsalPalette::built_in().unwrap().apply(&mut expected, palette));
+            assert!(app.current_package.is_none() && app.ssal_source.is_some());
+            assert_eq!(app.settings.ssal_palette(), palette);
+            assert!(app.asset.atlas.pixels == expected.atlas.pixels, "restarted Ssal standard pixels");
+            assert!(app.asset.extension_atlas.as_ref().unwrap().pixels ==
+                expected.extension_atlas.as_ref().unwrap().pixels, "restarted Ssal extension pixels");
+            assert_eq!(format!("{:?}", app.asset.tracks), format!("{:?}", expected.tracks));
+            assert_eq!(app.asset.display_name, ssal_name(palette));
+            let menu = menu_state(app);
+            assert!(menu.ssal_selected && !menu.built_in);
+            assert_eq!(menu.ssal_palette, Some(index));
+            println!("smoke.ssal_restart=PASS preset={index} pixels, tracks, name and menu");
+        });
+    }
+
+    #[cfg(debug_assertions)]
+    if let Ok(index) = std::env::var("ROAMLING_SELECT_SSAL_PRESET") {
+        let index: usize = index.parse().expect("Ssal preset index");
+        assert!(index < roamling_core::pet_image::ssal::PRESETS.len());
+        let mut app = APP.with(|slot| slot.borrow_mut().take()).expect("initialized app");
+        unsafe { perform(hwnd, tray::CMD_SSAL_PALETTE_BASE + index, &mut app, 0.0); }
+        APP.with(|slot| *slot.borrow_mut() = Some(app));
+    }
+
+    #[cfg(debug_assertions)]
+    if std::env::var("ROAMLING_SSAL_PALETTE_SMOKE").as_deref() == Ok("1") {
+        let mut smoke_app = APP
+            .with(|slot| slot.borrow_mut().take())
+            .expect("app initialized");
+        {
+            let app = &mut smoke_app;
+            adopt_ssal(app);
+            apply_palette(app, roamling_core::pet_image::ssal::DEFAULT);
+            let selected = app.current_package.clone();
+            assert!(app.ssal_source.is_some());
+            let bori = app.settings.palette();
+            let original = app.asset.atlas.pixels.clone();
+            let tracks = format!("{:?}", app.asset.tracks);
+            unsafe {
+                perform(hwnd, tray::CMD_SSAL_PALETTE_BASE + 1, app, 0.0);
+            }
+            let black = app.asset.atlas.pixels.clone();
+            assert_ne!(original, black);
+            assert_eq!(app.current_package, selected);
+            assert_eq!(
+                app.settings.ssal_palette(),
+                roamling_core::pet_image::ssal::BLACK
+            );
+            assert_eq!(format!("{:?}", app.asset.tracks), tracks);
+            unsafe {
+                perform(hwnd, tray::CMD_SSAL_PALETTE_BASE, app, 0.0);
+            }
+            assert_eq!(app.asset.atlas.pixels, original);
+            unsafe {
+                perform(hwnd, tray::CMD_SSAL_PALETTE_BASE + 1, app, 0.0);
+            }
+            assert_eq!(app.asset.atlas.pixels, black);
+            let custom_eye = roamling_core::Palette {
+                eye: roamling_core::PaletteTargets::new(205.0, 15.0, 45.0, 80.0),
+                ..roamling_core::pet_image::ssal::BLACK
+            };
+            let frame_before = app.player.current_frame_index();
+            apply_palette(app, custom_eye);
+            assert_ne!(app.asset.atlas.pixels, black);
+            assert_eq!(app.player.current_frame_index(), frame_before);
+            assert_eq!(app.current_package, selected);
+            assert_eq!(app.settings.ssal_palette(), custom_eye);
+            apply_palette(app, roamling_core::pet_image::ssal::BLACK);
+            assert_eq!(app.asset.atlas.pixels, black);
+            unsafe {
+                perform(hwnd, tray::CMD_PET_BUILT_IN, app, 0.0);
+            }
+            assert!(app.current_package.is_none() && app.ssal_source.is_none());
+            unsafe {
+                perform(hwnd, tray::CMD_SSAL_PALETTE_BASE + 1, app, 0.0);
+            }
+            assert_eq!(app.asset.atlas.pixels, black);
+            assert_eq!(app.settings.palette(), bori);
+            for (index, (_, palette)) in roamling_core::pet_image::ssal::PRESETS.iter().enumerate() {
+                let frame = app.player.current_frame_index();
+                unsafe { perform(hwnd, tray::CMD_SSAL_PALETTE_BASE + index, app, 0.0); }
+                assert_eq!(app.settings.ssal_palette(), *palette);
+                assert_eq!(app.player.current_frame_index(), frame);
+                assert_eq!(format!("{:?}", app.asset.tracks), tracks);
+                assert!(app.current_package.is_none());
+            }
+            unsafe { perform(hwnd, tray::CMD_PALETTE_BASE + 1, app, 0.0); }
+            assert!(app.ssal_source.is_none());
+            unsafe { perform(hwnd, tray::CMD_SSAL_PALETTE_BASE, app, 0.0); }
+            assert!(app.ssal_source.is_some());
+            assert_eq!(app.settings.text(settings::BUILT_IN_PET).as_deref(), Some("ssal"));
+            println!("smoke.ssal_palette=PASS nine built-in colours, frame/timing preserved, Bori switch, independent saved colours");
+        }
+        APP.with(|slot| *slot.borrow_mut() = Some(smoke_app));
+    }
 
     if std::env::var("ROAMLING_SMOKE_TEST").as_deref() != Ok("1") {
         let seen = APP.with(|slot| slot.borrow().as_ref().map_or(0, |app| guide_seen(&app.settings)));
@@ -484,7 +608,6 @@ fn is_quiet_for_restart(app: &App, now: f64) -> bool {
         && !tray::is_menu_open()
         && !usage_guide::is_visible()
         && !tuning::is_visible()
-        && !palette_debug::is_visible()
 }
 
 /// Swaps the staged version in and starts it, then closes the window the way
@@ -558,11 +681,12 @@ fn create_window() -> Result<HWND> {
     // stealing focus from whatever the user is typing into.
     let ex =
         WS_EX_LAYERED | WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT;
+    let title: Vec<u16> = localized("app.name").encode_utf16().chain(std::iter::once(0)).collect();
     unsafe {
         CreateWindowExW(
             ex,
             class,
-            w!("Roamling"),
+            PCWSTR(title.as_ptr()),
             WS_POPUP,
             0,
             0,
@@ -694,9 +818,6 @@ fn tick(hwnd: HWND, app: &mut App) {
     if let Some(tuning) = tuning::take_pending() {
         app.pet.apply_tuning(tuning, now);
         remember_tuning(&mut app.settings, tuning);
-    }
-    if let Some(palette) = palette_debug::take_pending() {
-        apply_palette(app, palette);
     }
 
     let wants_focus = app.pet.begin_tick(now) && app.cursor_aware;
@@ -841,7 +962,12 @@ fn refresh_luminance(app: &mut App, requests: &[roamling_core::LuminanceRequest]
 /// tracks, the player holds a position inside one of them, and the surface is
 /// sized for the old cell. Keeping any of them would draw the new sheet through
 /// the old sheet's idea of where its frames are.
-fn adopt(app: &mut App, asset: PetAsset, package: Option<PathBuf>) {
+fn adopt(app: &mut App, mut asset: PetAsset, package: Option<PathBuf>) {
+    app.ssal_source = package.as_deref().and_then(package::SsalPalette::load);
+    if let Some(source) = &app.ssal_source {
+        source.apply(&mut asset, app.settings.ssal_palette());
+        asset.display_name = ssal_name(app.settings.ssal_palette()).into();
+    }
     println!("pet: {}", asset.display_name);
     app.pet.clear_click_reaction(true);
     app.effects.hide();
@@ -851,6 +977,9 @@ fn adopt(app: &mut App, asset: PetAsset, package: Option<PathBuf>) {
     app.surface = None;
     app.drawn = None;
     app.current_package = package.clone();
+    if package.is_none() {
+        app.settings.set(settings::BUILT_IN_PET, "mochi");
+    }
     match package {
         Some(path) => app
             .settings
@@ -859,6 +988,17 @@ fn adopt(app: &mut App, asset: PetAsset, package: Option<PathBuf>) {
         // restart instead of falling back to whatever was selected before.
         None => app.settings.set(settings::PET_PACKAGE_PATH, ""),
     }
+}
+
+fn adopt_ssal(app: &mut App) {
+    let (Ok(mut loaded), Some(source)) =
+        (package::built_in_ssal(), package::SsalPalette::built_in())
+    else { return };
+    if !source.apply(&mut loaded.asset, app.settings.ssal_palette()) { return; }
+    loaded.asset.display_name = ssal_name(app.settings.ssal_palette()).into();
+    adopt(app, loaded.asset, None);
+    app.ssal_source = Some(source);
+    app.settings.set(settings::BUILT_IN_PET, "ssal");
 }
 
 /// "Test Reaction": a turn starting, then finishing three seconds later.
@@ -1022,18 +1162,33 @@ fn work_app_items(app: &App) -> Vec<(String, String, bool)> {
     )
 }
 
-/// Wear a colour and remember it.
-///
-/// Clearing rather than storing the original is the same rule the tuning panel
-/// follows: a stored default freezes, and then a later change to the code
-/// never reaches the machine that stored it.
+fn ssal_name(palette: roamling_core::Palette) -> &'static str {
+    localized(
+        roamling_core::pet_image::ssal::PRESETS
+            .iter()
+            .find(|(_, value)| *value == palette)
+            .map_or("pet.name.ssal", |(key, _)| key),
+    )
+}
+
+/// Wear a colour and remember it independently for the selected pet.
+/// Clearing the original lets future authored defaults reach this machine.
 fn apply_palette(app: &mut App, palette: roamling_core::Palette) {
+    if let Some(source) = &app.ssal_source {
+        if source.apply(&mut app.asset, palette) {
+            app.asset.display_name = ssal_name(palette).into();
+            app.settings.set_ssal_palette(palette);
+            app.drawn = None;
+            println!("palette: ssal changed live");
+        }
+        return;
+    }
     app.palette = palette;
     app.settings.set_palette(palette);
     // Picking a colour under Mochi also selects Mochi. Adopt the built-in
     // before the next restart can bring back the previously selected package.
     if let Some(asset) = roamling_pet::built_in_mochi_recolored(palette) {
-        if app.current_package.is_some() {
+        if app.current_package.is_some() || app.ssal_source.is_some() {
             adopt(app, asset, None);
         } else {
             app.pet.clear_click_reaction(false);
@@ -1065,7 +1220,14 @@ fn menu_state(app: &App) -> tray::MenuState {
         palette: roamling_pet::built_in_mochi_presets()
             .iter()
             .position(|(_, preset)| *preset == app.palette),
-        palette_custom: platform::shift_is_down(),
+        ssal_package: app
+            .catalog
+            .iter()
+            .position(|found| found.id == "ssal-white"),
+        ssal_palette: roamling_core::pet_image::ssal::PRESETS
+            .iter()
+            .position(|(_, value)| *value == app.settings.ssal_palette()),
+        ssal_selected: app.ssal_source.is_some(),
         pets: app
             .catalog
             .iter()
@@ -1076,7 +1238,7 @@ fn menu_state(app: &App) -> tray::MenuState {
                 )
             })
             .collect(),
-        built_in: app.current_package.is_none(),
+        built_in: app.current_package.is_none() && app.ssal_source.is_none(),
         auto_update: app.auto_update,
         launch_at_login: autostart::is_enabled(),
         staged: app.staged.map(|version| version.to_string()),
@@ -1150,6 +1312,22 @@ unsafe fn perform(hwnd: HWND, chosen: usize, app: &mut App, now: f64) {
             app.settings
                 .set(settings::CURSOR_AWARENESS, app.cursor_aware);
         }
+        picked
+            if (tray::CMD_SSAL_PALETTE_BASE
+                ..tray::CMD_SSAL_PALETTE_BASE + roamling_core::pet_image::ssal::PRESETS.len())
+                .contains(&picked) =>
+        {
+            if app.ssal_source.is_none() || app.current_package.is_some() {
+                adopt_ssal(app);
+            }
+            if app.ssal_source.is_none() {
+                return;
+            }
+            apply_palette(
+                app,
+                roamling_core::pet_image::ssal::PRESETS[picked - tray::CMD_SSAL_PALETTE_BASE].1,
+            );
+        }
         // The colour presets, in the order the menu shows them.
         picked
             if (tray::CMD_PALETTE_BASE
@@ -1159,25 +1337,16 @@ unsafe fn perform(hwnd: HWND, chosen: usize, app: &mut App, now: f64) {
             let index = picked - tray::CMD_PALETTE_BASE;
             if let Some((_, chosen)) = roamling_pet::built_in_mochi_presets().get(index) {
                 if roamling_pet::prepare_built_in_mochi_recolor() {
+                    if app.current_package.is_some() || app.ssal_source.is_some() {
+                        if let Some(asset) = roamling_pet::built_in_mochi() {
+                            adopt(app, asset, None);
+                        }
+                    }
                     apply_palette(app, *chosen);
                 }
             }
         }
         tray::CMD_TUNING => tuning::show(app.pet.tuning()),
-        tray::CMD_PALETTE_CUSTOM => {
-            // Opening this Mochi-only experiment while another package is
-            // selected makes the scope explicit by putting Mochi on screen.
-            if !roamling_pet::prepare_built_in_mochi_recolor() {
-                eprintln!("could not prepare the built-in palette");
-                return;
-            }
-            if app.current_package.is_some() {
-                if let Some(asset) = roamling_pet::built_in_mochi_recolored(app.palette) {
-                    adopt(app, asset, None);
-                }
-            }
-            palette_debug::show(hwnd, app.palette, roamling_pet::built_in_mochi_palette());
-        }
         tray::CMD_UPDATE_CHECK => {
             if !app.checking {
                 app.checking = true;
@@ -1399,15 +1568,6 @@ unsafe fn dispatch(hwnd: HWND, msg: u32, wp: WPARAM, app: &mut App) -> bool {
                     PostQuitMessage(0);
                     return true;
                 }
-                tick(hwnd, app);
-                true
-            }
-            // Not debug-only. The mixer was a laboratory once and this gate
-            // stayed behind when it shipped, which left the release build
-            // applying a colour on the next ordinary timer tick instead -- half
-            // a second of it when the pet is asleep, so the sliders looked
-            // dead while the pet dozed.
-            palette_debug::WM_PALETTE_CHANGED => {
                 tick(hwnd, app);
                 true
             }
