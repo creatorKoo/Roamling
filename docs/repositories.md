@@ -45,8 +45,10 @@
 - **리허설.** `gh workflow run release.yml -f version=<버전> -f prerelease=true`로 올리면 설치된 사본에게는 보이지 않는다 —
   피드가 `releases/latest`이고 GitHub의 latest는 prerelease를 건너뛴다. 파일과 서명을 받아 확인한 뒤
   `gh release edit v<버전> --repo creatorKoo/Roamling --prerelease=false --latest`로 올린다.
-- **고친 워크플로는 아직 한 번도 돌지 않았다.** 토큰이 생긴 뒤 첫 닫힌 판의 리허설이 첫 실행이다. prerelease가 정말
-  피드에서 빠지는지도 그때 `releases/latest/download/appcast.json`을 직접 받아 확인한다.
+- **고친 워크플로는 `preflight`까지만 돌아 봤다.** 2026-10-05에 리허설로 띄우자 GitHub가 파일을 받아들였고, 토큰이 없어
+  `preflight`에서 멈췄으며 빌드 잡 셋은 건너뛰었다 — 의도한 대로다. 빌드부터 발행까지는 토큰이 생긴 뒤 첫 닫힌 판의
+  리허설이 첫 실행이다. prerelease가 정말 피드에서 빠지는지도 그때 `releases/latest/download/appcast.json`을 직접 받아
+  확인한다.
 
 버전 세 곳이 태그와 같아야 한다는 것은 그대로다(`docs/windows.md` "릴리스할 때 사람이 지켜야 하는 것").
 

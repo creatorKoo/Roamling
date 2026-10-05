@@ -109,8 +109,9 @@
   Android 앱이 고정한 코어 커밋 `e37240e`는 공개 주소에서 `git fetch --depth=1`로 받아진다 — 태그의 조상이라서다.
 - **같이 고친 것** `.github/workflows/release.yml` — 내려받기 주소와 올리는 곳을 공개 저장소로 고정(`PUBLIC_REPOSITORY`),
   올리는 토큰은 새 secret `ROAMLING_PUBLIC_RELEASE_TOKEN`, 릴리스 노트는 `docs/release-notes/<버전>.md`, 리허설용 `prerelease`
-  입력, 그리고 빌드 전에 secret 둘과 토큰을 보는 `preflight` 잡. YAML은 파싱해 구조를 확인했다. **한 번도 돌려 보지 않았다** —
-  토큰이 없어서다. 거짓이 된 문장도 같이 고쳤다 — `CLAUDE.md`(새 절 "저장소는 둘이다"와 세 문단), `docs/android.md`,
+  입력, 그리고 빌드 전에 secret 둘과 토큰을 보는 `preflight` 잡. YAML은 파싱해 구조를 확인했고, 리허설로 한 번 띄워
+  `preflight`가 토큰이 없다며 빌드 전에 멈추는 것을 봤다 — 같은 잡이 업데이트 서명 키 secret은 비어 있지 않다고 통과시켰다.
+  **빌드부터 발행까지는 돌려 보지 않았다** — 토큰이 없어서다. 거짓이 된 문장도 같이 고쳤다 — `CLAUDE.md`(새 절 "저장소는 둘이다"와 세 문단), `docs/android.md`,
   `docs/windows.md` "자동 업데이트"의 세 곳, `docs/README.md`의 지도.
 - **남은 것** `docs/repositories.md` "남은 일" — 사용자: 발행 토큰, 닫힌 판의 라이선스 문구, CI 한도, 맥 작업 사본의 `origin`.
   Claude: 문구 바꾸기와 서드파티 고지, Android의 `core/` 주소(0.6.10 뒤의 코어가 필요해질 때), 첫 닫힌 판의 리허설.
