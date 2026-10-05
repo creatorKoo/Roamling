@@ -8,7 +8,7 @@ import RoamlingPet
 public func localizedBuiltInPetName(_ kind: BuiltInPetKind) -> String {
     switch kind {
     case .mochi: localized("pet.name.bori")
-    case .fatMochi: kind.displayName
+    case .ssal: localized("pet.name.ssal")
     }
 }
 

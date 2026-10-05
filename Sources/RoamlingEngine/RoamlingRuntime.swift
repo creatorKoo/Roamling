@@ -29,6 +29,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         /// Windows, written by the core so a settings file means one thing on
         /// either platform. Absent means the sheet as drawn.
         static let palette = "roamling.palette"
+        static let ssalPalette = "roamling.ssalPalette"
     }
 
     private static let defaultWorkApps = [
@@ -79,6 +80,9 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     private var paletteSource: PaletteSheets?
     /// The last recolour, so redrawing the same colours costs nothing.
     private var recoloredSheets: MochiSheets?
+    private var ssalPalette: FfiPalette = RustCore.builtInSsalPalette()
+    private var ssalPaletteSource: SsalPaletteSheets?
+    private var ssalRecoloredSheets: MochiSheets?
 
     public private(set) var asset: PetAsset
     public private(set) var installedPets: [PetDescriptor]
@@ -216,6 +220,10 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
 
         let descriptors = catalog.discover()
         let selectedPath = defaults.string(forKey: DefaultsKey.petPackagePath)
+        // Retire the old mascot without touching an independently selected external package.
+        if defaults.string(forKey: DefaultsKey.builtInPet) == "fat-mochi" {
+            defaults.set(BuiltInPetKind.ssal.rawValue, forKey: DefaultsKey.builtInPet)
+        }
         let selectedBuiltInPet = defaults.string(forKey: DefaultsKey.builtInPet)
             .flatMap(BuiltInPetKind.init(rawValue:)) ?? .mochi
         let initialAsset = Self.loadInitialAsset(
@@ -260,6 +268,10 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
            let stored = RustCore.paletteFromText(line) {
             palette = stored
         }
+        if let line = defaults.string(forKey: DefaultsKey.ssalPalette),
+           let stored = RustCore.paletteFromText(line) {
+            ssalPalette = stored
+        }
         isRoamingEnabled = defaults.bool(forKey: DefaultsKey.roaming)
         isPointerAvoidanceEnabled = defaults.bool(forKey: DefaultsKey.avoidPointer)
         areInteractionsEnabled = defaults.bool(forKey: DefaultsKey.interactions)
@@ -280,7 +292,9 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
         // bundle's own colours. Without this the menu ticked the remembered
         // colour over a pet that was not wearing it -- and picking it again
         // did nothing, because `apply(palette:)` saw no change.
-        if !isPaletteDefault { reinstallBuiltInPetForPalette() }
+        if self.selectedBuiltInPet == .ssal {
+            refreshSsalColours()
+        } else if !isPaletteDefault { reinstallBuiltInPetForPalette() }
     }
 
     /// Brings the pet up. `drivingTicks` is false for a caller that owns the
@@ -385,7 +399,7 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     }
 
     public func useBuiltInPet(_ kind: BuiltInPetKind) {
-        install(asset: MascotPetFactory.make(kind, images: services.images, sheets: mochiSheets()))
+        install(asset: MascotPetFactory.make(kind, images: services.images, sheets: kind == .ssal ? ssalSheets() : mochiSheets()))
         selectedBuiltInPet = kind
         defaults.set(kind.rawValue, forKey: DefaultsKey.builtInPet)
         defaults.removeObject(forKey: DefaultsKey.petPackagePath)
@@ -465,7 +479,30 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     /// Whether the current colours are the ones the sheet was drawn in.
     public var isPaletteDefault: Bool { palette == RustCore.builtInPalette() }
 
-    public func selectPalettePreset(at index: Int) {
+    public func paletteOptions(for kind: BuiltInPetKind) -> [PaletteOption] {
+        let presets = kind == .ssal ? RustCore.ssalPalettePresets() : RustCore.palettePresets()
+        let selected = kind == .ssal ? ssalPalette : palette
+        return presets.map {
+            PaletteOption(key: $0.key, swatch: PaletteRGB(RustCore.paletteMiddle($0.palette.marking)),
+                isSelected: selectedBuiltInPet == kind && currentPetPackagePath == nil && $0.palette == selected)
+        }
+    }
+
+    public func selectPalettePreset(at index: Int, for kind: BuiltInPetKind = .mochi) {
+        if kind == .ssal {
+            let presets = RustCore.ssalPalettePresets()
+            guard presets.indices.contains(index) else { return }
+            ssalPalette = presets[index].palette
+            ssalRecoloredSheets = nil
+            if ssalPalette == RustCore.builtInSsalPalette() {
+                defaults.removeObject(forKey: DefaultsKey.ssalPalette)
+            } else {
+                defaults.set(RustCore.paletteToText(ssalPalette), forKey: DefaultsKey.ssalPalette)
+            }
+            if selectedBuiltInPet != .ssal || currentPetPackagePath != nil { useBuiltInPet(.ssal) }
+            else { refreshSsalColours() }
+            return
+        }
         let presets = RustCore.palettePresets()
         guard presets.indices.contains(index) else { return }
         apply(palette: presets[index].palette)
@@ -587,9 +624,8 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
     }
 
     private func reinstallBuiltInPetForPalette() {
-        // Only the built-in Mochi has a region map. A loaded package or the
-        // authored seven-row built-in is left alone rather than half-painted.
-        guard defaults.string(forKey: DefaultsKey.petPackagePath) == nil,
+        // Each pet restores only its own palette; external packages stay untouched.
+        guard currentPetPackagePath == nil,
               selectedBuiltInPet == .mochi else { return }
         install(asset: MascotPetFactory.make(.mochi, images: services.images, sheets: mochiSheets()))
     }
@@ -619,6 +655,26 @@ public final class RoamlingRuntime: PetOverlayInputHandling {
             extensionSheet: data.extensionSheet
         )
         return paletteSource
+    }
+
+    private func ssalSheets() -> MochiSheets? {
+        if let ssalRecoloredSheets { return ssalRecoloredSheets }
+        if ssalPaletteSource == nil, let data = MascotPetFactory.builtInSsalSheetData() {
+            ssalPaletteSource = RustCore.decodeSsalPaletteSheets(standard: data.standard, extensionSheet: data.extensionSheet)
+        }
+        guard let source = ssalPaletteSource else { return nil }
+        let recoloured = source.recolored(palette: ssalPalette)
+        let sheets = MochiSheets(standard: RustCore.petImage(recoloured.standard),
+            extensionSheet: RustCore.petImage(recoloured.extension))
+        ssalRecoloredSheets = sheets
+        return sheets
+    }
+
+    private func refreshSsalColours() {
+        guard selectedBuiltInPet == .ssal, currentPetPackagePath == nil else { return }
+        // Tracks and frame geometry are identical. Keep the player's phase and core reactions.
+        asset = MascotPetFactory.make(.ssal, images: services.images, sheets: ssalSheets())
+        renderCurrentFrame()
     }
 
     public func setScale(_ newScale: Double) {

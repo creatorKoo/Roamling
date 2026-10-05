@@ -11,6 +11,7 @@
 |---|---|
 | 쓰다듬기 하트와 공통 이펙트 구조 | [`pet-effects-design.md`](pet-effects-design.md) |
 | 사용자 요청과 처리 상태 | [`requests.md`](requests.md) |
+| 보리쌀 표시 이름과 얼굴 아이콘 | [`borissal-brand.md`](borissal-brand.md) |
 | 모듈이 어떻게 갈리고 의존이 어디로 흐르나 | [`architecture.md`](architecture.md) |
 | 어떤 상황에 펫이 어떤 그림을 입나, 얼마나 오래 | [`behavior-flow.md`](behavior-flow.md) |
 | 펫이 **어디에 설지**를 어떻게 정하나 | [`placement.md`](placement.md) |
@@ -24,6 +25,7 @@
 | Android 앱은 어디 있고, 이 저장소의 무엇이 그 앱에 닿나 | [`android.md`](android.md) |
 | 서명·dmg·배포를 어떻게 하나 | [`release.md`](release.md) |
 | 고양이 색을 어떻게 바꾸나 | [`palette.md`](palette.md) |
+| 쌀 원본 하나로 실시간 색을 어떻게 바꾸나 | [`ssal-palette.md`](ssal-palette.md) |
 | 숨기기와 메뉴가 왜 그 모양인가 | [`hiding.md`](hiding.md) |
 | 첫 사용·업데이트 안내를 언제 보여주고 릴리스 때 어떻게 쓰나 | [`usage-guide.md`](usage-guide.md) |
 | 0.6.5 녹화 기준을 왜 바꿨고 이전 기준은 어디 있나 | [`runtime-trace-review-0.6.5.md`](runtime-trace-review-0.6.5.md) |

@@ -13,14 +13,8 @@ use crate::strings::{localized, localized_format};
 use roamling_agent::{installer, Agent};
 
 use windows::core::PCWSTR;
-use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, POINT, RECT, WPARAM};
-use windows::Win32::Graphics::Gdi::{
-    CreateBitmap, CreateCompatibleDC, CreateDIBSection, CreateFontW, DeleteDC, DeleteObject,
-    DrawTextW, GetDC, ReleaseDC, SelectObject, SetBkMode, SetTextColor, BITMAPINFO,
-    BITMAPINFOHEADER, CLEARTYPE_QUALITY, CLIP_DEFAULT_PRECIS, DEFAULT_CHARSET, DEFAULT_PITCH,
-    DIB_RGB_COLORS, DT_CENTER, DT_NOCLIP, DT_SINGLELINE, DT_VCENTER, FF_DONTCARE, FW_NORMAL,
-    HBITMAP, HDC, OUT_DEFAULT_PRECIS, TRANSPARENT,
-};
+use windows::Win32::Foundation::{HWND, LPARAM, POINT, WPARAM};
+
 use windows::Win32::UI::Shell::{
     Shell_NotifyIconW, NIF_ICON, NIF_MESSAGE, NIF_TIP, NIM_ADD, NIM_DELETE, NOTIFYICONDATAW,
 };
@@ -45,10 +39,9 @@ pub const CMD_UPDATE_AUTO: usize = 14;
 pub const CMD_LAUNCH_AT_LOGIN: usize = 15;
 pub const CMD_HIDE: usize = 16;
 pub const CMD_USAGE_GUIDE: usize = 18;
-/// The colour mixer. Offered only when the menu was opened with Alt held.
-pub const CMD_PALETTE_CUSTOM: usize = 17;
 /// One id per entry in `built_in_mochi_presets`, in menu order.
 pub const CMD_PALETTE_BASE: usize = 300;
+pub const CMD_SSAL_PALETTE_BASE: usize = 400;
 /// The built-in mascot, then one id per discovered package.
 pub const CMD_PET_BUILT_IN: usize = 1_000;
 pub const CMD_PET_BASE: usize = 1_001;
@@ -68,184 +61,16 @@ fn wide(text: &str) -> Vec<u16> {
     text.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
-/// The same mark the macOS menu bar shows.
-///
-/// `RoamlingAppDelegate` sets its status item's title to "🐾" and nothing else,
-/// so the tray gets the same glyph rather than a second, different idea of what
-/// Roamling looks like. It is drawn rather than shipped as an `.ico` so it lands
-/// on whatever size the shell asks for -- a tray icon is 16px at 100% and 24 at
-/// 150%, and a bitmap picked for one is wrong on the other.
-///
-/// GDI has no colour-emoji path, so the glyph is drawn white on black and the
-/// coverage becomes the alpha. The shape is the alpha; the colour is chosen here.
-///
-/// It is drawn oversized, then the *ink* is measured and fitted to the box.
-/// Picking a font size instead means guessing at the glyph's side bearings, and
-/// guessing left the paws small with empty margin all round.
-fn paw_icon() -> Option<HICON> {
-    let side = unsafe { GetSystemMetrics(SM_CXSMICON) }.max(16);
-    // Four times over, so the fitted result is downscaled rather than up.
-    let work = side * 4;
-
+/// Use the same size-specific resource as Explorer and the application icon.
+fn app_icon() -> Option<HICON> {
     unsafe {
-        let screen = GetDC(None);
-        let dc = CreateCompatibleDC(screen);
-        ReleaseDC(None, screen);
-
-        let Some((scratch, scratch_bits)) = dib(dc, work, work) else {
-            let _ = DeleteDC(dc);
-            return None;
-        };
-        SelectObject(dc, scratch);
-        let drawn = std::slice::from_raw_parts_mut(scratch_bits, (work * work * 4) as usize);
-        drawn.fill(0);
-
-        let face = wide("Segoe UI Emoji");
-        let font = CreateFontW(
-            -work,
-            0,
-            0,
-            0,
-            FW_NORMAL.0 as i32,
-            0,
-            0,
-            0,
-            DEFAULT_CHARSET.0 as u32,
-            OUT_DEFAULT_PRECIS.0 as u32,
-            CLIP_DEFAULT_PRECIS.0 as u32,
-            CLEARTYPE_QUALITY.0 as u32,
-            (DEFAULT_PITCH.0 | FF_DONTCARE.0) as u32,
-            PCWSTR(face.as_ptr()),
-        );
-        let previous = SelectObject(dc, font);
-        SetBkMode(dc, TRANSPARENT);
-        SetTextColor(dc, COLORREF(0x00FF_FFFF));
-        // `wide` appends the terminator Win32 strings want; `DrawTextW` takes a
-        // length instead, so the glyph goes in without one.
-        let mut glyph: Vec<u16> = "\u{1F43E}".encode_utf16().collect();
-        let mut box_ = RECT {
-            left: 0,
-            top: 0,
-            right: work,
-            bottom: work,
-        };
-        DrawTextW(
-            dc,
-            &mut glyph,
-            &mut box_,
-            DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOCLIP,
-        );
-        SelectObject(dc, previous);
-        let _ = DeleteObject(font);
-
-        let coverage = |x: i32, y: i32| -> u8 {
-            let at = ((y * work + x) * 4) as usize;
-            drawn[at].max(drawn[at + 1]).max(drawn[at + 2])
-        };
-
-        // The ink's own bounds, which is what gets fitted -- not the em box.
-        let (mut left, mut top, mut right, mut bottom) = (work, work, -1, -1);
-        for y in 0..work {
-            for x in 0..work {
-                if coverage(x, y) > 8 {
-                    left = left.min(x);
-                    top = top.min(y);
-                    right = right.max(x);
-                    bottom = bottom.max(y);
-                }
-            }
-        }
-        let mut icon = None;
-        if right >= left && bottom >= top {
-            let ink_w = right - left + 1;
-            let ink_h = bottom - top + 1;
-            // Square the source so the paws keep their proportions, and leave a
-            // single pixel of air so the shape does not touch the tray's edge.
-            let span = ink_w.max(ink_h);
-            let origin_x = left - (span - ink_w) / 2;
-            let origin_y = top - (span - ink_h) / 2;
-            let margin = 1;
-            let target = (side - margin * 2).max(1);
-
-            if let Some((bitmap, bits)) = dib(dc, side, side) {
-                let out = std::slice::from_raw_parts_mut(bits, (side * side * 4) as usize);
-                out.fill(0);
-                // The emoji's own warm brown: Windows taskbars are light as
-                // often as dark, and a flat black vanishes on one of them.
-                let (r, g, b) = (0x6Du32, 0x4Cu32, 0x41u32);
-                for y in 0..target {
-                    for x in 0..target {
-                        // Box-average the source cell, so shrinking by four
-                        // keeps the antialiasing rather than dropping it.
-                        let x0 = origin_x + x * span / target;
-                        let x1 = (origin_x + (x + 1) * span / target).max(x0 + 1);
-                        let y0 = origin_y + y * span / target;
-                        let y1 = (origin_y + (y + 1) * span / target).max(y0 + 1);
-                        let mut total = 0u32;
-                        let mut count = 0u32;
-                        for sy in y0..y1 {
-                            for sx in x0..x1 {
-                                if (0..work).contains(&sx) && (0..work).contains(&sy) {
-                                    total += coverage(sx, sy) as u32;
-                                }
-                                count += 1;
-                            }
-                        }
-                        let alpha = if count == 0 { 0 } else { total / count };
-                        let at = (((y + margin) * side + (x + margin)) * 4) as usize;
-                        out[at] = (b * alpha / 255) as u8;
-                        out[at + 1] = (g * alpha / 255) as u8;
-                        out[at + 2] = (r * alpha / 255) as u8;
-                        out[at + 3] = alpha as u8;
-                    }
-                }
-
-                // A development affordance: Windows 11 files new tray icons
-                // behind the chevron, so there is no way to look at this one.
-                if let Some(path) = std::env::var_os("ROAMLING_DUMP_ICON") {
-                    let mut raw = (side as u32).to_le_bytes().to_vec();
-                    raw.extend_from_slice(out);
-                    let _ = std::fs::write(path, raw);
-                }
-
-                // A 32bpp icon carries its own alpha; the mask exists because
-                // the structure demands one, and zero lets the colour through.
-                let mask: HBITMAP = CreateBitmap(side, side, 1, 1, None);
-                let mut icon_info = ICONINFO {
-                    fIcon: true.into(),
-                    xHotspot: 0,
-                    yHotspot: 0,
-                    hbmMask: mask,
-                    hbmColor: bitmap,
-                };
-                icon = CreateIconIndirect(&mut icon_info).ok();
-                let _ = DeleteObject(mask);
-                let _ = DeleteObject(bitmap);
-            }
-        }
-        let _ = DeleteObject(scratch);
-        let _ = DeleteDC(dc);
-        icon
+        let module = windows::Win32::System::LibraryLoader::GetModuleHandleW(None).ok()?;
+        let instance: windows::Win32::Foundation::HINSTANCE = module.into();
+        let side = GetSystemMetrics(SM_CXSMICON).max(16);
+        let icon = LoadImageW(Some(&instance), PCWSTR(1usize as *const u16), IMAGE_ICON,
+            side, side, LR_SHARED).ok()?;
+        Some(HICON(icon.0))
     }
-}
-
-/// A 32bpp top-down DIB and a pointer to its pixels.
-fn dib(dc: HDC, width: i32, height: i32) -> Option<(HBITMAP, *mut u8)> {
-    let info = BITMAPINFO {
-        bmiHeader: BITMAPINFOHEADER {
-            biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
-            biWidth: width,
-            biHeight: -height,
-            biPlanes: 1,
-            biBitCount: 32,
-            biCompression: 0,
-            ..Default::default()
-        },
-        ..Default::default()
-    };
-    let mut bits: *mut std::ffi::c_void = std::ptr::null_mut();
-    let bitmap = unsafe { CreateDIBSection(dc, &info, DIB_RGB_COLORS, &mut bits, None, 0) }.ok()?;
-    Some((bitmap, bits as *mut u8))
 }
 
 fn data(hwnd: HWND) -> NOTIFYICONDATAW {
@@ -264,10 +89,10 @@ pub fn add(hwnd: HWND) -> bool {
     let mut entry = data(hwnd);
     entry.uFlags = NIF_MESSAGE | NIF_TIP | NIF_ICON;
     entry.uCallbackMessage = WM_TRAY;
-    if let Some(icon) = paw_icon() {
+    if let Some(icon) = app_icon() {
         entry.hIcon = icon;
     }
-    let tip = wide("Roamling");
+    let tip = wide(localized("app.name"));
     entry.szTip[..tip.len()].copy_from_slice(&tip);
     unsafe { Shell_NotifyIconW(NIM_ADD, &entry).as_bool() }
 }
@@ -300,13 +125,11 @@ pub struct MenuState {
     /// Whether the built-in mascot is the one showing.
     pub built_in: bool,
     /// Which colour preset is ticked, by index into `built_in_mochi_presets`.
-    /// `None` once the mixer has been used, because a mixed colour matches no
-    /// preset and ticking the nearest one would be a lie.
+    /// `None` for a legacy saved custom colour that matches no current preset.
     pub palette: Option<usize>,
-    /// Whether Shift was held as the menu opened. The mixer is thirteen
-    /// sliders for something most people will never want, so it waits for
-    /// someone who holds a key; the presets are always there.
-    pub palette_custom: bool,
+    pub ssal_package: Option<usize>,
+    pub ssal_palette: Option<usize>,
+    pub ssal_selected: bool,
     pub auto_update: bool,
     /// Whether the OS starts the app at sign-in, read from the registry.
     pub launch_at_login: bool,
@@ -445,10 +268,6 @@ unsafe fn build(state: &MenuState) -> Option<HMENU> {
                         PCWSTR(label.as_ptr()),
                     );
                 }
-                if state.palette_custom {
-                    let _ = separator(colours);
-                    command(colours, CMD_PALETTE_CUSTOM, localized("menu.palette.custom"));
-                }
                 let name = wide(&label);
                 let _ = AppendMenuW(
                     pets,
@@ -457,10 +276,21 @@ unsafe fn build(state: &MenuState) -> Option<HMENU> {
                     PCWSTR(name.as_ptr()),
                 );
             }
-            if !state.pets.is_empty() {
-                let _ = separator(pets);
+            if let Ok(colours) = CreatePopupMenu() {
+                for (preset, (key, _)) in roamling_core::pet_image::ssal::PRESETS.iter().enumerate() {
+                    let label = wide(localized(key));
+                    let _ = AppendMenuW(colours,
+                        MF_STRING | checked(state.ssal_selected && state.ssal_palette == Some(preset)),
+                        CMD_SSAL_PALETTE_BASE + preset, PCWSTR(label.as_ptr()));
+                }
+                let label = wide(&localized_format("menu.pet.builtin", &[localized("pet.name.ssal")]));
+                let _ = AppendMenuW(pets, MF_POPUP | MF_STRING | checked(state.ssal_selected),
+                    colours.0 as usize, PCWSTR(label.as_ptr()));
             }
+            if !state.pets.is_empty() { let _ = separator(pets); }
             for (index, (name, selected)) in state.pets.iter().enumerate() {
+                // The approved built-in replaces the earlier external Ssal trial entry.
+                if state.ssal_package == Some(index) { continue; }
                 let label = wide(name);
                 let _ = AppendMenuW(
                     pets,
@@ -683,8 +513,9 @@ mod tests {
             ],
             built_in: false,
             palette: Some(0),
-            // On, so the reachability tests walk the mixer as well.
-            palette_custom: true,
+            ssal_package: None,
+            ssal_palette: Some(0),
+            ssal_selected: false,
             auto_update: true,
             launch_at_login: false,
             staged: Some("0.2.0".into()),
@@ -771,12 +602,10 @@ mod tests {
             CMD_WORK_APP_BASE,
             CMD_WORK_APP_BASE + 1,
         ];
-        // Every colour preset, and the mixer, which `state()` asks for by
-        // saying Alt was held.
+        // Every approved colour preset is reachable.
         for index in 0..roamling_pet::built_in_mochi_presets().len() {
             expected.push(CMD_PALETTE_BASE + index);
         }
-        expected.push(CMD_PALETTE_CUSTOM);
         for id in expected {
             assert!(found.contains(&id), "{id} is not in the menu: {found:?}");
         }
@@ -797,14 +626,42 @@ mod tests {
     }
 
     #[test]
+    fn ssal_has_its_own_colour_commands_without_hiding_bori() {
+        let mut state = state();
+        state.pets = vec![("White Ssal".into(), true)];
+        state.built_in = false;
+        state.ssal_package = Some(0);
+        state.ssal_palette = Some(1);
+        let menu = unsafe { build(&state) }.unwrap();
+        let commands = ids(menu);
+        for index in 0..roamling_core::pet_image::ssal::PRESETS.len() {
+            assert!(commands.contains(&(CMD_SSAL_PALETTE_BASE + index)));
+        }
+        for command in [
+            CMD_SSAL_PALETTE_BASE,
+            CMD_SSAL_PALETTE_BASE + 1,
+            CMD_PALETTE_BASE,
+        ] {
+            assert!(commands.contains(&command));
+        }
+        assert!(!commands.contains(&CMD_PET_BASE));
+        let mut unique = commands.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), commands.len());
+        unsafe {
+            let _ = DestroyMenu(menu);
+        }
+    }
+
+    #[test]
     fn colours_are_directly_under_mochi_with_the_selection_checked() {
         for built_in in [false, true] {
-            for custom in [false, true] {
+            {
                 let mut state = state();
                 state.built_in = built_in;
                 state.pet_name = "Guest Mochi".into(); // External package names must remain unchanged.
                 state.palette = Some(1); // Black, as restored from settings.
-                state.palette_custom = custom;
                 let menu = unsafe { build(&state) }.unwrap();
                 unsafe {
                     let mut caption = [0u16; 128];
@@ -825,7 +682,7 @@ mod tests {
                         localized_format("menu.pet.builtin", &[localized("pet.name.bori")]));
                     let presets = roamling_pet::built_in_mochi_presets();
                     assert_eq!(GetMenuItemCount(mochi) as usize,
-                        presets.len() + if custom { 2 } else { 0 });
+                        presets.len());
                     for index in 0..presets.len() {
                         assert_eq!(GetMenuItemID(mochi, index as i32) as usize, CMD_PALETTE_BASE + index);
                         assert!(GetSubMenu(mochi, index as i32).is_invalid());
@@ -833,7 +690,12 @@ mod tests {
                         assert_eq!(checked, built_in && index == 1);
                     }
                     assert_eq!(GetMenuState(pets, 0, MF_BYPOSITION) & MF_CHECKED.0 != 0, built_in);
-                    assert_eq!(ids(mochi).contains(&CMD_PALETTE_CUSTOM), custom);
+                    // Former custom commands must never be exposed, even as hidden entries.
+                    assert!(!ids(menu).contains(&17));
+                    assert!(!ids(menu).contains(&450));
+                    let ssal = GetSubMenu(pets, 1);
+                    assert_eq!(GetMenuItemCount(ssal) as usize,
+                        roamling_core::pet_image::ssal::PRESETS.len());
                     let _ = DestroyMenu(menu);
                 }
             }

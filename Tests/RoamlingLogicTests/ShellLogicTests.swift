@@ -254,9 +254,8 @@ func shellLogicTests() -> [LogicTest] {
                 let pets = try require(submenu(named: localized("menu.pet"), in: ShellMenu.items(for: runtime)))
                 try expect(marked(pets).count == 1, "expected exactly one pet marked, got \(marked(pets))")
 
-                // Every built-in is offered. Mochi is picked by choosing one of
-                // its colours, which the palette test covers; here it is enough
-                // that its row is present and the others can be clicked.
+                // Both built-ins are offered; the preset tests below exercise
+                // the menu actions. Here check direct selection and parent marks.
                 let titles = pets.map(\.title)
                 for kind in BuiltInPetKind.allCases {
                     try expect(
@@ -514,7 +513,29 @@ func shellLogicTests() -> [LogicTest] {
                 try expect(checked > 20, "only \(checked) items -- the menu lost most of itself")
             }
         },
-        LogicTest(name: "colours hang off Mochi, and the sliders only appear with the modifier") {
+        LogicTest(name: "both built-ins expose nine presets and exactly one selected colour") {
+            try MainActor.assumeIsolated {
+                let harness = try RuntimeHarness()
+                defer { harness.tearDown() }
+                for kind in BuiltInPetKind.allCases {
+                    let pets = try require(submenu(named: localized("menu.pet"), in: ShellMenu.items(for: harness.runtime)))
+                    let colours = try require(submenu(named: localizedFormat("menu.pet.builtin", localizedBuiltInPetName(kind)), in: pets))
+                    try expect(colours.count == 9)
+                    for (index, item) in colours.enumerated() {
+                        guard case let .check(action, _) = item.content else {
+                            throw LogicTestFailure(message: "non-preset row in colour menu", file: #filePath, line: #line)
+                        }
+                        try expect(action == .selectPalettePreset(kind: kind, index: index))
+                        _ = ShellController.perform(action, runtime: harness.runtime, version: "test")
+                        try expect(harness.runtime.selectedBuiltInPet == kind)
+                        try expect(harness.runtime.paletteOptions(for: kind).firstIndex(where: \.isSelected) == index)
+                        let other: BuiltInPetKind = kind == .mochi ? .ssal : .mochi
+                        try expect(harness.runtime.paletteOptions(for: other).allSatisfy { !$0.isSelected })
+                    }
+                }
+            }
+        },
+        LogicTest(name: "colours hang off Mochi with only the approved presets") {
             try MainActor.assumeIsolated {
                 let harness = try RuntimeHarness()
                 defer { harness.tearDown() }
@@ -527,11 +548,11 @@ func shellLogicTests() -> [LogicTest] {
                     "the default built-in is \(String(describing: harness.runtime.selectedBuiltInPet))"
                 )
 
-                @MainActor func colours(alternateHeld: Bool) throws -> [MenuItem] {
+                @MainActor func colours() throws -> [MenuItem] {
                     let pet = try require(
                         submenu(
                             named: localized("menu.pet"),
-                            in: ShellMenu.items(for: harness.runtime, alternateHeld: alternateHeld)
+                            in: ShellMenu.items(for: harness.runtime)
                         ),
                         "the Pet submenu is gone"
                     )
@@ -551,27 +572,16 @@ func shellLogicTests() -> [LogicTest] {
                     "a fresh runtime should be wearing exactly one of the offered colours"
                 )
 
-                // Without the modifier the submenu is the colours and nothing
-                // else -- no separator left dangling where a row used to be.
-                let plain = try colours(alternateHeld: false)
+                // Only approved presets, with no custom command or trailing separator.
+                let plain = try colours()
                 try expect(
                     plain.count == presets.count,
                     "\(plain.count) rows for \(presets.count) colours: \(plain.map(\.title))"
                 )
 
-                // With it, one more row, and it opens the window.
-                let held = try colours(alternateHeld: true)
-                let mixer = try require(held.last, "the held-modifier submenu is empty")
-                guard case .command(.openPaletteMixer) = mixer.content else {
-                    throw LogicTestFailure(
-                        message: "the last row with the modifier held is \(mixer.content)",
-                        file: #filePath, line: #line
-                    )
-                }
-
                 // A colour is also how Mochi gets chosen, because a row with a
                 // submenu has no click of its own.
-                harness.runtime.useBuiltInPet(.fatMochi)
+                harness.runtime.useBuiltInPet(.ssal)
                 guard case let .check(action, _) = plain[1].content else {
                     throw LogicTestFailure(
                         message: "the second colour is not a checkable row",

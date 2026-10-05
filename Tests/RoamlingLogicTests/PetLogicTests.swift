@@ -3,6 +3,7 @@
 
 import Foundation
 import RoamlingCore
+import RoamlingEngine
 import RoamlingPet
 
 func petLogicTests() -> [LogicTest] {
@@ -78,7 +79,7 @@ func petLogicTests() -> [LogicTest] {
             )
         },
         LogicTest(name: "every behavior resolves to a built-in track") {
-            for kind in [BuiltInPetKind.fatMochi, .mochi] {
+            for kind in BuiltInPetKind.allCases {
                 let resolver = MascotPetFactory.make(kind, images: testImages).resolver
                 for state in BehaviorState.allCases {
                     let capability = PetCapabilityMapping.capability(
@@ -139,8 +140,7 @@ func petLogicTests() -> [LogicTest] {
             // so the only proof that nothing shifted is the pixels themselves.
             let source = TestPetImageSource()
             var assets: [String: PetAsset] = [
-                "built-in mochi": MascotPetFactory.make(.mochi, images: source),
-                "built-in fat-mochi": MascotPetFactory.make(.fatMochi, images: source)
+                "built-in mochi": MascotPetFactory.make(.mochi, images: source)
             ]
             let package = FileManager.default.homeDirectoryForCurrentUser
                 .appendingPathComponent(".codex/pets/mochi-v3")
@@ -151,6 +151,7 @@ func petLogicTests() -> [LogicTest] {
 
             var checked = 0
             for expected in PreW2FrameHashes.assets {
+                // Retired FatMochi hashes remain untouched as historical evidence.
                 // The placeholder is skipped: its sheet is antialiased vector
                 // art drawn by the platform, which the harness has no way to
                 // produce and no portable blitter could reproduce anyway.
@@ -182,7 +183,7 @@ func petLogicTests() -> [LogicTest] {
                     checked += 1
                 }
             }
-            try expect(checked >= 152, "expected the two built-ins at least, checked \(checked)")
+            try expect(checked >= 96, "expected the retained Bori sheets at least, checked \(checked)")
         },
         LogicTest(name: "placeholder implements v2 look directions") {
             let pet = PlaceholderPetFactory.make(images: testImages)
@@ -201,14 +202,12 @@ func petLogicTests() -> [LogicTest] {
             try expect(pet.resolver.resolve(.sit)?.name == "idle")
         },
         LogicTest(name: "built-in mascots load with semantic tracks") {
-            try expect(MascotPetFactory.make(images: testImages).manifest.displayName == "FatBori")
+            try expect(MascotPetFactory.make(images: testImages).manifest.displayName == "Bori")
             for kind in BuiltInPetKind.allCases {
                 let pet = MascotPetFactory.make(kind, images: testImages)
-                // FatMochi keeps the seven-row internal layout; Mochi ships the
-                // standard 8x9 Codex/Petdex rows.
-                let expectedRows = kind == .mochi ? 9 : 7
+                let expectedRows = 9
                 try expect(pet.manifest.displayName == kind.displayName)
-                try expect(pet.manifest.id == "roamling-\(kind.rawValue)")
+                try expect(pet.manifest.id == (kind == .ssal ? "ssal-white" : "roamling-mochi"))
                 try expect(pet.columns == 8)
                 try expect(pet.rows == expectedRows)
                 try expect(pet.frameCount == expectedRows * 8)
@@ -223,124 +222,41 @@ func petLogicTests() -> [LogicTest] {
                 }
             }
         },
-        LogicTest(name: "FatMochi uses authored limb animation cycles") {
-            let pet = MascotPetFactory.make(.fatMochi, images: testImages)
-            let idle = try require(pet.tracks["idle"])
-            let right = try require(pet.tracks["running-right"])
-            let left = try require(pet.tracks["running-left"])
-            let sleep = try require(pet.tracks["sleeping"])
-            let caught = try require(pet.tracks["caught"])
-            let dragged = try require(pet.tracks["dragged"])
-            let stretch = try require(pet.tracks["stretching"])
-            let landing = try require(pet.tracks["landing"])
-
-            try expect(idle.frames.map(\.index) == [0, 1, 2, 3, 4, 5])
-            try expect(idle.frames.first?.duration == 1.25)
-            try expect(right.frames.map(\.index) == Array(8...15))
-            try expect(left.frames.map(\.index) == Array(16...23))
-            try expect(sleep.frames.map(\.index) == [24, 25, 26, 27])
-            try expect(caught.frames.map(\.index) == [32, 33, 34, 35])
-            try expect(!caught.loops)
-            try expect(dragged.frames.map(\.index) == [36, 37, 38, 39])
-            try expect(stretch.frames.map(\.index) == [40, 41, 42, 43, 44, 45])
-            try expect(!stretch.loops)
-            try expect(landing.frames.map(\.index) == [48, 49, 50, 51, 52])
-            try expect(!landing.loops)
-
-            let idleSignatures = try [0, 1, 2, 3].map {
-                try require(imageSignature(try require(pet.frameImage(at: $0))))
+        LogicTest(name: "built-in Ssal uses the exact approved package tracks and pixels") {
+            let resources = URL(fileURLWithPath: #filePath)
+                .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+                .appendingPathComponent("Sources/RoamlingPet/Resources/BuiltInPets")
+            let package = FileManager.default.temporaryDirectory.appendingPathComponent("ssal-contract-\(UUID())")
+            try FileManager.default.createDirectory(at: package, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: package) }
+            for (source, target) in [("ssal-pet.json", "pet.json"), ("ssal-roamling.json", "roamling.json"),
+                                     ("ssal-standard-atlas.webp", "spritesheet.webp"), ("ssal-extension-atlas.webp", "roamling.webp")] {
+                try FileManager.default.copyItem(at: resources.appendingPathComponent(source), to: package.appendingPathComponent(target))
             }
-            let rightSignatures = try Array(8...15).map {
-                try require(imageSignature(try require(pet.frameImage(at: $0))))
+            let builtIn = MascotPetFactory.make(.ssal, images: testImages)
+            let imported = try PetLoader(images: testImages).load(packageAt: package)
+            try expect(builtIn.packageURL == nil)
+            try expect(builtIn.warnings.isEmpty && imported.warnings.isEmpty)
+            try expect(builtIn.atlas.pixels == imported.atlas.pixels)
+            try expect(builtIn.extensionAtlas?.pixels == imported.extensionAtlas?.pixels)
+            try expect(builtIn.tracks == imported.tracks)
+            try expect(builtIn.behaviorMappings == imported.behaviorMappings)
+            for capability in PetCapability.allCases {
+                try expect(builtIn.resolver.resolve(capability) == imported.resolver.resolve(capability))
             }
-            let sleepSignatures = try Array(24...27).map {
-                try require(imageSignature(try require(pet.frameImage(at: $0))))
+            let suite = try makeTestDefaults()
+            defer { suite.discard() }
+            suite.defaults.set("fat-mochi", forKey: "roamling.builtInPet")
+            suite.defaults.set(package.path, forKey: "roamling.petPackagePath")
+            try MainActor.assumeIsolated {
+                let platform = FakePlatform(display: DisplaySnapshot(id: "1", name: "test",
+                    frame: WorldRect(x: 0, y: 0, width: 1440, height: 900),
+                    visibleFrame: WorldRect(x: 0, y: 25, width: 1440, height: 850), scale: 2), worldTop: 900)
+                let runtime = RoamlingRuntime(services: platform.services, defaults: suite.defaults,
+                    catalog: PetCatalog(roots: [package]), clock: { 0 })
+                try expect(runtime.currentPetPackagePath == package.path)
+                try expect(runtime.selectedBuiltInPet == nil, "migration replaced an external pet")
             }
-            let walkMetrics = try Array(8...15).map {
-                try require(alphaMetrics(try require(pet.frameImage(at: $0))))
-            }
-            let caughtIntroMetrics = try Array(32...35).map {
-                try require(alphaMetrics(try require(pet.frameImage(at: $0))))
-            }
-            let draggedMetrics = try Array(36...39).map {
-                try require(alphaMetrics(try require(pet.frameImage(at: $0))))
-            }
-            let draggedSignatures = try Array(36...39).map {
-                try require(imageSignature(try require(pet.frameImage(at: $0))))
-            }
-            let idleFrame = try require(pet.frameImage(at: 0))
-            let idleMetric = try require(alphaMetrics(idleFrame))
-            let idleSignature = try require(imageSignature(idleFrame))
-            try expect(Set(idleSignatures).count == 4)
-            try expect(Set(rightSignatures).count == 8)
-            try expect(Set(sleepSignatures).count == 4)
-            let walkBoundsCenters = walkMetrics.map { $0.boundsCenterX }
-            let minimumWalkBoundsCenter = try require(walkBoundsCenters.min())
-            let maximumWalkBoundsCenter = try require(walkBoundsCenters.max())
-            try expect(maximumWalkBoundsCenter - minimumWalkBoundsCenter < 2)
-            try expect(walkMetrics.allSatisfy {
-                abs($0.width - idleMetric.width) <= 2 && abs($0.height - idleMetric.height) <= 2
-            })
-
-            let caughtIntroCenters = caughtIntroMetrics.map { $0.boundsCenterX }
-            let minimumCaughtIntroCenter = try require(caughtIntroCenters.min())
-            let maximumCaughtIntroCenter = try require(caughtIntroCenters.max())
-            try expect(maximumCaughtIntroCenter - minimumCaughtIntroCenter < 2)
-            try expect(caughtIntroMetrics.allSatisfy {
-                abs($0.width - idleMetric.width) <= 1 && abs($0.height - idleMetric.height) <= 1
-            })
-            let draggedBoundsCenters = draggedMetrics.map { $0.boundsCenterX }
-            let minimumDraggedBoundsCenter = try require(draggedBoundsCenters.min())
-            let maximumDraggedBoundsCenter = try require(draggedBoundsCenters.max())
-            try expect(maximumDraggedBoundsCenter - minimumDraggedBoundsCenter < 2)
-            try expect(draggedMetrics.allSatisfy {
-                $0.width == 180 && $0.height == 183
-            })
-            try expect(draggedMetrics.allSatisfy { $0.height >= idleMetric.height + 10 })
-            try expect(Set(draggedSignatures).count == 4)
-            let caughtStart = try require(pet.frameImage(at: 32))
-            let caughtStartSignature = try require(imageSignature(caughtStart))
-            try expect(caughtStartSignature == idleSignature)
-
-            let walkStart = try require(pet.frameImage(at: 16))
-            let walkStartSignature = try require(imageSignature(walkStart))
-            try expect(walkStartSignature == idleSignature)
-
-            let idleFace = try require(idleFrame.cropped(x: 24, y: 100, width: 104, height: 30))
-            let idleFaceSignature = try require(imageSignature(idleFace))
-            for index in 16...23 {
-                let walkFrame = try require(pet.frameImage(at: index))
-                let walkFace = try require(walkFrame.cropped(x: 24, y: 100, width: 104, height: 30))
-                let walkFaceSignature = try require(imageSignature(walkFace))
-                try expect(walkFaceSignature == idleFaceSignature)
-                let neckWidth = try require(centeredOpaqueRunWidth(walkFrame, y: 90))
-                let cheekWidth = try require(centeredOpaqueRunWidth(walkFrame, y: 110))
-                try expect(cheekWidth - neckWidth >= 3)
-            }
-
-            for index in 0..<pet.frameCount {
-                let frame = try require(pet.frameImage(at: index))
-                try expect(
-                    opaqueComponentCount(frame) == 1,
-                    "FatMochi frame \(index) contains detached opaque artwork"
-                )
-            }
-        },
-        LogicTest(name: "FatMochi caught intro hands off to a looping drag") {
-            var player = PetAnimationPlayer(asset: MascotPetFactory.make(.fatMochi, images: testImages))
-            player.setCapability(.caught)
-            try expect(player.currentFrameIndex == 32)
-            player.update(deltaTime: 0.05)
-            try expect(player.currentFrameIndex == 33)
-            player.update(deltaTime: 0.30)
-            try expect(player.currentFrameIndex == 35)
-
-            player.setCapability(.dragged)
-            try expect(player.currentFrameIndex == 36)
-            player.update(deltaTime: 0.10)
-            try expect(player.currentFrameIndex == 37)
-            player.update(deltaTime: 0.27)
-            try expect(player.currentFrameIndex == 36)
         },
         LogicTest(name: "Mochi uses the standard nine-row animation set") {
             let pet = MascotPetFactory.make(.mochi, images: testImages)

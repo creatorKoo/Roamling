@@ -5,12 +5,12 @@ import Foundation
 
 public enum BuiltInPetKind: String, CaseIterable, Codable, Sendable {
     case mochi
-    case fatMochi = "fat-mochi"
+    case ssal
 
     public var displayName: String {
         switch self {
         case .mochi: "Bori"
-        case .fatMochi: "FatBori"
+        case .ssal: "Ssal"
         }
     }
 
@@ -19,14 +19,15 @@ public enum BuiltInPetKind: String, CaseIterable, Codable, Sendable {
     fileprivate var resourceName: String {
         switch self {
         case .mochi: "mochi-poses"
-        case .fatMochi: "fat-mochi-poses"
+        case .ssal: "ssal-standard-atlas"
         }
     }
 }
 
 /// Loads an authored built-in runtime atlas, or derives a lightweight evaluation atlas
 /// from a mascot's four approved key poses when no authored atlas is available.
-/// Mochi's two sheets, already decoded, for a caller that has recoloured them.
+/// Two decoded sheets for either built-in pet. The original type name remains
+/// compatible with existing Bori callers.
 ///
 /// The recolour itself is Rust behind uniffi, and `RoamlingPet` does not link
 /// those bindings -- it depends on `RoamlingCore` alone. So the colours arrive
@@ -71,11 +72,9 @@ public enum MascotPetFactory {
         let scale: Double
     }
 
-    /// `sheets` replaces what would be read from the bundle. Only Mochi has a
-    /// recoloured form; the other built-in is an authored seven-row sheet with
-    /// no region map, so a palette does not reach it.
+    /// `sheets` supplies the chosen pet's recoloured pixels from the shared Rust engine.
     public static func make(
-        _ kind: BuiltInPetKind = .fatMochi,
+        _ kind: BuiltInPetKind = .mochi,
         images: any PetImageSourcing,
         sheets: MochiSheets? = nil
     ) -> PetAsset {
@@ -86,20 +85,14 @@ public enum MascotPetFactory {
                atlas.height == cellHeight * standardRows {
                 return makeStandardMochi(atlas: atlas, images: images, sheets: sheets)
             }
-        case .fatMochi:
-            if let atlas = loadSheet(named: "fat-mochi-runtime-atlas", images: images),
-               atlas.width == cellWidth * columns,
-               atlas.height == cellHeight * authoredRows {
-                return makeAuthoredFatMochi(atlas: atlas)
-            }
+        case .ssal:
+            return makeSsal(images: images, sheets: sheets)
         }
 
         return makePoseDerivedPet(kind, images: images)
     }
 
-    /// Mochi ships the standard 8x9 Codex/Petdex row set rather than the
-    /// seven-row layout the other built-in uses, plus the two-row extension
-    /// sheet that carries what Petdex has no word for.
+    /// Mochi ships the standard 8x9 Codex/Petdex rows plus an 8x3 extension.
     ///
     /// The two sheets are the shipped `mochi-v3` package, and the timings below
     /// are its manifests transcribed. They are written out rather than parsed
@@ -287,99 +280,6 @@ public enum MascotPetFactory {
         )
     }
 
-    private static func makeAuthoredFatMochi(atlas: PetImage) -> PetAsset {
-        let manifest = PetManifest(
-            id: BuiltInPetKind.fatMochi.manifestID,
-            displayName: BuiltInPetKind.fatMochi.displayName,
-            description: "Roamling's built-in FatBori mascot.",
-            spritesheetPath: "builtin://fat-mochi",
-            frame: PetFrameManifest(
-                width: cellWidth,
-                height: cellHeight,
-                columns: columns,
-                rows: authoredRows
-            )
-        )
-
-        let idleFrames: [(Int, TimeInterval)] = [
-            (0, 1.25), (1, 0.10), (2, 0.12), (3, 0.16), (4, 0.12), (5, 0.10)
-        ]
-        let walkRightFrames = (8...15).map { ($0, 0.09) }
-        let walkLeftFrames = (16...23).map { ($0, 0.09) }
-
-        let tracks = [
-            "idle": track("idle", frames: idleFrames),
-            "running-right": track("running-right", frames: walkRightFrames),
-            "running-left": track("running-left", frames: walkLeftFrames),
-            "sleeping": track(
-                "sleeping",
-                frames: [(24, 0.55), (25, 0.55), (26, 0.55), (27, 0.55)]
-            ),
-            "caught": track(
-                "caught",
-                frames: [(32, 0.04), (33, 0.08), (34, 0.09), (35, 0.11)],
-                loops: false
-            ),
-            "dragged": track(
-                "dragged",
-                frames: [(36, 0.09), (37, 0.09), (38, 0.09), (39, 0.09)]
-            ),
-            "sitting": track("sitting", frames: [(0, 0.8)]),
-            "landing": track(
-                "landing",
-                frames: [(48, 0.055), (49, 0.055), (50, 0.07), (51, 0.06), (52, 0.11)],
-                loops: false
-            ),
-            "watching": track("watching", frames: idleFrames),
-            "failed": track("failed", frames: [(24, 0.8)]),
-            // One bound: Petdex plays `jumping` when a turn opens and hands back
-            // inside a second.
-            "jumping": track(
-                "jumping",
-                frames: [(48, 0.10), (49, 0.09), (50, 0.10),
-                         (52, 0.18), (51, 0.08), (48, 0.29)],
-                loops: false
-            ),
-            // Roamling's own name for a finished turn. This sheet has no wave,
-            // so the completion is a hop -- but it runs for `waving`'s 0.70s,
-            // not the jump's, because that is how long the state holds.
-            "celebrate": track(
-                "celebrate",
-                frames: [(48, 0.09), (49, 0.08), (50, 0.09),
-                         (52, 0.16), (51, 0.07), (48, 0.21)],
-                loops: false
-            ),
-            "stretching": track(
-                "stretching",
-                frames: [(40, 0.16), (41, 0.13), (42, 0.13),
-                         (43, 0.18), (44, 0.15), (45, 0.20)],
-                loops: false
-            ),
-            "waiting": track(
-                "waiting",
-                frames: [(36, 0.12), (37, 0.12), (38, 0.12), (39, 0.12)]
-            ),
-            "working": track("working", frames: walkRightFrames),
-            "running": track("running", frames: walkRightFrames),
-            "waving": track(
-                "waving",
-                frames: [(36, 0.12), (37, 0.12), (38, 0.12), (39, 0.12)]
-            ),
-            "review": track("review", frames: idleFrames)
-        ]
-
-        return PetAsset(
-            manifest: manifest,
-            packageURL: nil,
-            atlas: atlas,
-            frameWidth: cellWidth,
-            frameHeight: cellHeight,
-            columns: columns,
-            rows: authoredRows,
-            tracks: tracks
-        )
-    }
-
     private static func makePoseDerivedPet(_ kind: BuiltInPetKind, images: any PetImageSourcing) -> PetAsset {
         guard let sheet = loadSheet(named: kind.resourceName, images: images),
               let atlas = makeAtlas(from: sheet, kind: kind) else {
@@ -496,6 +396,31 @@ public enum MascotPetFactory {
         return (standard, extensionSheet)
     }
 
+    public static func builtInSsalSheetData() -> (standard: Data, extensionSheet: Data)? {
+        guard let standard = sheetData(named: "ssal-standard-atlas"),
+              let extensionSheet = sheetData(named: "ssal-extension-atlas") else { return nil }
+        return (standard, extensionSheet)
+    }
+
+    private static func makeSsal(images: any PetImageSourcing, sheets: MochiSheets?) -> PetAsset {
+        func manifestData(_ name: String) -> Data? {
+            guard let url = petResourceBundle.url(forResource: name, withExtension: "json", subdirectory: "BuiltInPets")
+                ?? petResourceBundle.url(forResource: name, withExtension: "json") else { return nil }
+            return try? Data(contentsOf: url)
+        }
+        guard let data = manifestData("ssal-pet"), let extraData = manifestData("ssal-roamling"),
+              let original = try? JSONDecoder().decode(PetManifest.self, from: data),
+              let extra = try? JSONDecoder().decode(RoamlingManifest.self, from: extraData),
+              let atlas = sheets?.standard ?? loadSheet(named: "ssal-standard-atlas", images: images),
+              let extensionAtlas = sheets?.extensionSheet ?? loadSheet(named: "ssal-extension-atlas", images: images)
+        else { return PlaceholderPetFactory.make(images: images) }
+        let manifest = PetManifest(id: original.id, displayName: BuiltInPetKind.ssal.displayName,
+            description: original.description, spriteVersionNumber: original.spriteVersionNumber,
+            spritesheetPath: original.spritesheetPath, frame: original.frame, animations: original.animations)
+        return (try? PetLoader(images: images).loadBuiltIn(manifest: manifest, extra: extra,
+            atlas: atlas, extensionAtlas: extensionAtlas)) ?? PlaceholderPetFactory.make(images: images)
+    }
+
     private static func sheetData(named name: String) -> Data? {
         let resourceURL = ["png", "webp"].lazy.compactMap { ext in
             petResourceBundle.url(forResource: name, withExtension: ext, subdirectory: "BuiltInPets")
@@ -591,13 +516,7 @@ public enum MascotPetFactory {
                 PoseCrop(x: 768, y: 448, width: 356, height: 242),
                 PoseCrop(x: 1192, y: 330, width: 306, height: 360)
             ]
-        case .fatMochi:
-            [
-                PoseCrop(x: 32, y: 334, width: 384, height: 380),
-                PoseCrop(x: 432, y: 348, width: 346, height: 368),
-                PoseCrop(x: 808, y: 438, width: 330, height: 280),
-                PoseCrop(x: 1168, y: 378, width: 338, height: 342)
-            ]
+        case .ssal: [] // Ssal always uses its approved authored sheets.
         }
     }
 

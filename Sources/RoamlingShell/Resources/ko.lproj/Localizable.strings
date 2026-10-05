@@ -1,6 +1,6 @@
 /* 한국어. 키 목록은 en.lproj/Localizable.strings와 같아야 한다. */
 
-"menu.title" = "Roamling — %@";
+"menu.title" = "보리쌀 — %@";
 "menu.hide" = "잠깐 숨기기";
 "menu.pet" = "펫";
 "menu.pet.builtin" = "%@ (기본 제공)";
@@ -22,9 +22,9 @@
 "menu.copyDiagnostics" = "진단 기록 복사";
 "menu.reloadPets" = "펫 다시 읽기";
 "menu.advanced" = "고급";
-"menu.about" = "Roamling 정보";
+"menu.about" = "보리쌀 정보";
 "menu.viewSource" = "소스 보기";
-"menu.quit" = "Roamling 종료";
+"menu.quit" = "보리쌀 종료";
 "status.hooks.installed" = "훅: 설치됨";
 "status.hooks.needsRepair" = "훅: 복구 필요";
 "status.hooks.notInstalled" = "훅: 설치 안 됨";
@@ -43,18 +43,18 @@
 "button.done" = "완료";
 "button.resetDefaults" = "기본값으로";
 "alert.claude.install.title" = "Claude Code 통합을 설치할까요?";
-"alert.claude.install.body" = "Roamling이 ~/.claude/settings.json에 로컬 수명주기 명령 훅을 추가합니다.\n기존 설정과 훅은 그대로 두고 백업을 한 번 만듭니다.\n\n프롬프트, 도구 입출력, 대화 기록, 소스 코드는 저장하거나 기록하지 않습니다.";
+"alert.claude.install.body" = "보리쌀이 ~/.claude/settings.json에 로컬 수명주기 명령 훅을 추가합니다.\n기존 설정과 훅은 그대로 두고 백업을 한 번 만듭니다.\n\n프롬프트, 도구 입출력, 대화 기록, 소스 코드는 저장하거나 기록하지 않습니다.";
 "alert.claude.remove.title" = "Claude Code 통합을 제거할까요?";
-"alert.claude.remove.body" = "Roamling이 넣은 훅만 지웁니다. 나머지 Claude Code 설정과 훅은 그대로 둡니다.";
+"alert.claude.remove.body" = "보리쌀이 넣은 훅만 지웁니다. 나머지 Claude Code 설정과 훅은 그대로 둡니다.";
 "alert.codex.install.title" = "Codex 통합을 설치할까요?";
-"alert.codex.install.body" = "Roamling이 ~/.codex/hooks.json에 로컬 수명주기 명령 훅을 추가합니다.\n기존 훅과 config.toml(notify 포함)은 그대로 두고 백업을 한 번 만듭니다.\n\n프롬프트, 도구 입출력, 대화 기록, 소스 코드는 저장하거나 기록하지 않습니다.\n설치 후 Codex를 재시작하고 새 훅 신뢰 요청을 승인하세요.";
+"alert.codex.install.body" = "보리쌀이 ~/.codex/hooks.json에 로컬 수명주기 명령 훅을 추가합니다.\n기존 훅과 config.toml(notify 포함)은 그대로 두고 백업을 한 번 만듭니다.\n\n프롬프트, 도구 입출력, 대화 기록, 소스 코드는 저장하거나 기록하지 않습니다.\n설치 후 Codex를 재시작하고 새 훅 신뢰 요청을 승인하세요.";
 "alert.codex.remove.title" = "Codex 통합을 제거할까요?";
-"alert.codex.remove.body" = "Roamling이 넣은 훅만 지웁니다. 나머지 Codex 훅과 config, notify는 그대로 둡니다.";
+"alert.codex.remove.body" = "보리쌀이 넣은 훅만 지웁니다. 나머지 Codex 훅과 config, notify는 그대로 둡니다.";
 "result.claude.installed" = "Claude Code 통합을 설치했습니다.";
 "result.claude.removed" = "Claude Code 통합을 제거했습니다.";
 "result.codex.installed" = "Codex 통합을 설치했습니다.";
 "result.codex.removed" = "Codex 통합을 제거했습니다.";
-"result.detail.claude" = "새로 시작하거나 이어지는 Claude Code 세션이 Roamling에 알립니다.";
+"result.detail.claude" = "새로 시작하거나 이어지는 Claude Code 세션이 보리쌀에 알립니다.";
 "result.detail.codex.installed" = "Codex를 재시작하고 새 훅 신뢰 요청을 승인하세요.";
 "result.detail.codex.removed" = "제거한 훅을 더 쓰지 않으려면 Codex 세션을 재시작하세요.";
 "error.pet.load" = "이 펫을 불러오지 못했습니다";
@@ -64,9 +64,9 @@
 "accessibility.status.off" = "손쉬운 사용: 허용 안 됨";
 "accessibility.enable" = "손쉬운 사용 허용…";
 "accessibility.alert.title" = "커서 인식을 켤까요?";
-"accessibility.alert.body" = "macOS가 손쉬운 사용에서 Roamling을 허용할지 묻습니다. 허용하면 Roamling이 입력 중인 컨트롤과 텍스트 커서의 위치를 읽어, 펫이 작업하는 자리를 가리지 않고 그 근처에 앉습니다.\n\n입력하는 내용, 선택한 텍스트, 창 제목, 문서 내용은 읽지 않습니다.";
+"accessibility.alert.body" = "macOS가 손쉬운 사용에서 보리쌀을 허용할지 묻습니다. 허용하면 보리쌀이 입력 중인 컨트롤과 텍스트 커서의 위치를 읽어, 펫이 작업하는 자리를 가리지 않고 그 근처에 앉습니다.\n\n입력하는 내용, 선택한 텍스트, 창 제목, 문서 내용은 읽지 않습니다.";
 "accessibility.revoke.hint" = "시스템 설정 › 개인정보 보호 및 보안 › 손쉬운 사용에서 끕니다";
-"tuning.window.title" = "Roamling 움직임 설정";
+"tuning.window.title" = "보리쌀 움직임 설정";
 "tuning.header" = "펫이 움직이는 방식";
 "tuning.footer" = "바꾸면 바로 적용되고 그대로 기억됩니다. 꼭 건드려야 하는 것은 없습니다 — 기본값이 원래 의도된 움직임이고, 언제든 '기본값으로'로 되돌릴 수 있습니다.";
 "tuning.offDefault" = "%1$@ (기본 %2$@)";
@@ -99,7 +99,7 @@
 "visual.status.off" = "빈 공간 배치: 끔";
 "visual.enable" = "빈 공간 배치 켜기…";
 "visual.alert.title" = "빈 공간 배치를 켤까요?";
-"visual.alert.body" = "macOS가 화면 기록에서 Roamling을 허용할지 묻습니다. 허용하면 Roamling이 자리를 정할 때 크게 축소한 스냅샷을 한 장 찍고, 각 영역이 얼마나 복잡한지만 읽어 글자 위가 아닌 빈 곳에 앉습니다.\n\n글자를 인식하지 않고, 이미지를 보관하거나 디스크에 쓰거나 어디로도 보내지 않습니다. 허용한 뒤 macOS가 Roamling 재실행을 요구할 수 있습니다.";
+"visual.alert.body" = "macOS가 화면 기록에서 보리쌀을 허용할지 묻습니다. 허용하면 보리쌀이 자리를 정할 때 크게 축소한 스냅샷을 한 장 찍고, 각 영역이 얼마나 복잡한지만 읽어 글자 위가 아닌 빈 곳에 앉습니다.\n\n글자를 인식하지 않고, 이미지를 보관하거나 디스크에 쓰거나 어디로도 보내지 않습니다. 허용한 뒤 macOS가 보리쌀 재실행을 요구할 수 있습니다.";
 "visual.revoke.hint" = "시스템 설정 › 개인정보 보호 및 보안에서 끕니다";
 "menu.update.check" = "업데이트 확인";
 "menu.launchAtLogin" = "로그인할 때 시작";
@@ -114,7 +114,7 @@
 "menu.palette" = "색";
 "menu.palette.custom" = "색 직접 고르기…";
 "palette.default" = "보리 보리";
-"palette.black" = "흑보리";
+"palette.black" = "흑 보리";
 "palette.white" = "흰 보리";
 "palette.red" = "붉은 보리";
 "palette.hotpink" = "핫핑크 보리";
@@ -123,7 +123,22 @@
 "palette.purple" = "보라 보리";
 "palette.rainbow" = "알록달록 보리";
 
-"palette.window.title" = "Roamling 색 고르기";
+"palette.window.title" = "보리쌀 색 고르기";
+"pet.name.ssal" = "쌀";
+"palette.ssal.white" = "쌀 쌀";
+"palette.ssal.black" = "흑 쌀";
+"palette.ssal.cream" = "찹 쌀";
+"palette.ssal.brown" = "현미 쌀";
+"palette.ssal.silver" = "흑임자 쌀";
+"palette.ssal.gold" = "누룽 쌀";
+"palette.ssal.blue" = "깨 쌀";
+"palette.ssal.purple" = "밤 쌀";
+"palette.ssal.hotpink" = "팥 쌀";
+"palette.ssal.fur" = "털색";
+"palette.ssal.eyeHint" = "눈 안쪽 색을 따로 바꿉니다. 검은 동공·테두리와 흰 반짝임은 유지합니다.";
+"palette.ssal.header" = "쌀 색 만들기";
+"palette.ssal.hint" = "털의 색과 음영을 바꿉니다. 귀·볼·혀와 눈의 반짝임은 유지합니다.";
+"palette.ssal.footer" = "슬라이더를 움직이면 화면의 쌀 색이 바로 바뀌고 기억됩니다. '처음으로' 또는 펫 › 쌀 › 쌀 쌀을 고르면 기본 털색과 눈색으로 돌아갑니다.";
 "palette.header" = "보리 색 만들기";
 "palette.footer" = "슬라이더를 움직이면 화면의 보리가 바로 따라 바뀌고, 그대로 기억됩니다. 손대지 않은 묶음은 원래 그림 그대로 남습니다 — 몸통을 바꿔도 무늬가 흐려지지 않습니다. 되돌리려면 '처음으로'를 누르거나 메뉴에서 펫 › 보리 › 보리 보리를 고르세요.";
 "palette.section.marking" = "무늬";
@@ -166,3 +181,5 @@
 "guide.changed.petting.title" = "하트가 피어나는 쓰다듬기";
 "guide.changed.petting.body" = "%@을 누르고 보리 몸 위에 포인터를 올려 보세요. 가만히 두면 천천히 갸웃하고, 빠르게 움직이면 더 신나게 갸웃하며 하트도 자주 피어나요. 사용자 입력을 기다릴 때도 천천히 고개를 갸웃합니다.";
 "guide.changed.catch.body" = "이동·작업 중에도 몸체 클릭으로 잡을 수 있어요. %@을 누르고 다가가면 피하지 않습니다. 일반 꼬리 흔들기는 가만히 앉아 있을 때만 해요.";
+
+"app.name" = "보리쌀";

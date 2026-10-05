@@ -1,10 +1,10 @@
 [English](README.md) | **한국어**
 
-# 🐾 Roamling
+# 보리쌀 · BoriSsal
 
 **데스크톱에 진짜로 사는 작은 친구.**
 
-Roamling은 macOS와 Windows용 네이티브 동반자 런타임입니다. Petdex 호환 생물이
+보리쌀(이전 이름 Roamling)은 macOS와 Windows용 네이티브 동반자 런타임입니다. Petdex 호환 생물이
 모니터 사이를 돌아다니고, 포인터를 피하고, 잡아서 끌 수 있으며, 코딩 에이전트와 지정한
 작업 앱에 반응합니다. 게임·미디어 반응은 아직 계획 단계입니다.
 

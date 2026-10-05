@@ -1282,6 +1282,18 @@ extension RustCore {
         RoamlingCoreRs.builtInPalette()
     }
 
+    static func ssalPalettePresets() -> [FfiPalettePreset] {
+        RoamlingCoreRs.ssalPalettePresets()
+    }
+
+    static func builtInSsalPalette() -> FfiPalette {
+        RoamlingCoreRs.builtInSsalPalette()
+    }
+
+    static func decodeSsalPaletteSheets(standard: Data, extensionSheet: Data) -> SsalPaletteSheets? {
+        RoamlingCoreRs.decodeSsalPaletteSheets(standard: standard, extension: extensionSheet)
+    }
+
     static func paletteAimedAt(_ targets: FfiPaletteTargets, _ colour: FfiColour) -> FfiPaletteTargets {
         RoamlingCoreRs.paletteAimedAt(targets: targets, colour: colour)
     }

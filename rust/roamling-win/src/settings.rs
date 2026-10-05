@@ -27,12 +27,14 @@ pub const VISUAL_PLACEMENT: &str = "roamling.visualPlacement";
 pub const CURSOR_AWARENESS: &str = "roamling.cursorAwareness";
 pub const SCALE: &str = "roamling.scale";
 pub const PET_PACKAGE_PATH: &str = "roamling.petPackagePath";
+pub const BUILT_IN_PET: &str = "roamling.builtInPet";
 pub const AUTO_UPDATE: &str = "roamling.autoUpdate";
 /// The chosen colour, as the fifteen numbers of a `Palette`. Absent means the
 /// sheet as drawn, so picking the original clears the key rather than writing
 /// the defaults back -- the same rule the tuning panel follows, and for the
 /// same reason: a stored default freezes and stops following the code.
 pub const PALETTE: &str = "roamling.palette";
+pub const SSAL_PALETTE: &str = "roamling.ssalPalette";
 pub const WORK_APPS: &str = "roamling.workApps";
 pub const DEFAULT_WORK_APPS: [&str; 6] = [
     "Hwp.exe",
@@ -94,6 +96,23 @@ impl Settings {
         self.text(PALETTE)
             .and_then(|text| roamling_core::pet_image::palette_from_text(&text))
             .unwrap_or_else(roamling_pet::built_in_mochi_palette)
+    }
+
+    pub fn ssal_palette(&self) -> roamling_core::Palette {
+        self.text(SSAL_PALETTE)
+            .and_then(|text| roamling_core::pet_image::palette_from_text(&text))
+            .unwrap_or(roamling_core::pet_image::ssal::DEFAULT)
+    }
+
+    pub fn set_ssal_palette(&mut self, palette: roamling_core::Palette) {
+        if palette == roamling_core::pet_image::ssal::DEFAULT {
+            self.clear(SSAL_PALETTE);
+        } else {
+            self.set(
+                SSAL_PALETTE,
+                roamling_core::pet_image::palette_to_text(palette),
+            );
+        }
     }
 
     /// The last colour is remembered immediately. Original follows the
@@ -220,6 +239,41 @@ fn parse(text: &str) -> BTreeMap<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ssal_and_bori_remember_separate_colours_and_white_clears_only_ssal() {
+        let directory = std::env::temp_dir().join(format!("ssal-settings-{}", std::process::id()));
+        let path = directory.join("settings.txt");
+        let mut settings = Settings::load_from(Some(path.clone()));
+        let bori = roamling_pet::built_in_mochi_presets()[1].1;
+        settings.set_palette(bori);
+        settings.set(PET_PACKAGE_PATH, "ssal-white");
+        settings.set_ssal_palette(roamling_core::pet_image::ssal::BLACK);
+        let mut loaded = Settings::load_from(Some(path.clone()));
+        assert_eq!(loaded.ssal_palette(), roamling_core::pet_image::ssal::BLACK);
+        assert_eq!(loaded.palette(), bori);
+        let custom = roamling_core::Palette {
+            eye: roamling_core::PaletteTargets::new(205.0, 15.0, 45.0, 80.0),
+            ..roamling_core::pet_image::ssal::BLACK
+        };
+        loaded.set_ssal_palette(custom);
+        let mut loaded = Settings::load_from(Some(path.clone()));
+        assert_eq!(loaded.ssal_palette(), custom);
+        assert_eq!(loaded.palette(), bori);
+        for (_, palette) in roamling_core::pet_image::ssal::PRESETS {
+            loaded.set_ssal_palette(*palette);
+            let restored = Settings::load_from(Some(path.clone()));
+            assert_eq!(restored.ssal_palette(), *palette);
+            assert_eq!(restored.palette(), bori);
+        }
+        loaded.set_ssal_palette(roamling_core::pet_image::ssal::DEFAULT);
+        let loaded = Settings::load_from(Some(path.clone()));
+        assert_eq!(loaded.text(SSAL_PALETTE), None);
+        assert_eq!(loaded.palette(), bori);
+        assert_eq!(loaded.text(PET_PACKAGE_PATH).as_deref(), Some("ssal-white"));
+        std::fs::remove_file(path).unwrap();
+        std::fs::remove_dir(directory).unwrap();
+    }
 
     #[test]
     fn the_selected_colour_survives_restart_without_a_save_button() {

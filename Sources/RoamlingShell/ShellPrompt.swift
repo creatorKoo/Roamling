@@ -32,8 +32,7 @@ public enum ShellEffect: Sendable {
     case presentThenRebuild(AlertModel)
     case openTuningPanel
     case openUsageGuide
-    /// Open the sliders. One window per platform, not shared: this is widgets.
-    case openPaletteMixer
+    /// Reveal the pet folder in the platform's file manager.
     case reveal(URL)
     case openLink(URL)
     case copyToClipboard(String)
@@ -140,7 +139,7 @@ public enum ShellPrompt {
     /// something this module should know how to open.
     public static func about(version: String) -> AlertModel {
         AlertModel(
-            title: "Roamling",
+            title: localized("app.name"),
             body: localizedFormat("about.version", version)
                 + "\n\n" + localized("alert.about.body"),
             buttons: [localized("button.ok"), localized("menu.viewSource")]
@@ -234,11 +233,9 @@ public enum ShellController {
         case let .setScale(value):
             runtime.setScale(value)
             return .rebuildMenu
-        case let .selectPalettePreset(index):
-            runtime.selectPalettePreset(at: index)
+        case let .selectPalettePreset(kind, index):
+            runtime.selectPalettePreset(at: index, for: kind)
             return .rebuildMenu
-        case .openPaletteMixer:
-            return .openPaletteMixer
         case .toggleHidden:
             runtime.isHidden.toggle()
             return .rebuildMenu

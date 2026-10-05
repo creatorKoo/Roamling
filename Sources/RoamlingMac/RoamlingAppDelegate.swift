@@ -11,7 +11,6 @@ import ServiceManagement
 @MainActor
 public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var runtime: RoamlingRuntime?
-    private var paletteWindowController: PaletteWindowController?
     private var statusItem: NSStatusItem?
     private var tuningWindowController: RuntimeTuningWindowController?
     private var usageGuideWindowController: UsageGuideWindowController?
@@ -77,9 +76,12 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
 
     private func setupMenuBar() {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
-        item.button?.title = "🐾"
-        item.button?.toolTip = "Roamling"
-        let menu = NSMenu(title: "Roamling")
+        let icon = NSImage(named: NSImage.applicationIconName)?.copy() as? NSImage
+        icon?.size = NSSize(width: 20, height: 20)
+        icon?.isTemplate = false
+        item.button?.image = icon
+        item.button?.toolTip = localized("app.name")
+        let menu = NSMenu(title: localized("app.name"))
         menu.delegate = self
         item.menu = menu
         statusItem = item
@@ -95,8 +97,7 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         // Read once, here, because the menu is rebuilt on every open. The
         // alternative -- `NSMenuItem.isAlternate` -- needs a row to stand in
         // front of, and the row it hides is the last one in its submenu.
-        let alternateHeld = NSEvent.modifierFlags.contains(.option)
-        render(ShellMenu.items(for: runtime, alternateHeld: alternateHeld), into: menu)
+        render(ShellMenu.items(for: runtime), into: menu)
     }
 
     /// Turns the shell's tree into AppKit widgets. This is the whole of what
@@ -302,7 +303,6 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         guard runtime?.isQuietForRestart == true else { return false }
         let windows = [
             tuningWindowController?.window,
-            paletteWindowController?.window,
             usageGuideWindowController?.window,
         ]
         return !windows.contains { $0?.isVisible == true }
@@ -336,13 +336,6 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
         }
     }
 
-    private func showPaletteMixer() {
-        guard let runtime else { return }
-        let controller = paletteWindowController ?? PaletteWindowController(runtime: runtime)
-        paletteWindowController = controller
-        controller.present()
-    }
-
     private func showUsageGuide(manual: Bool) {
         let defaults = UserDefaults.standard
         guard let guide = UsageGuide.bundled(),
@@ -372,8 +365,6 @@ public final class RoamlingAppDelegate: NSObject, NSApplicationDelegate, NSMenuD
             showBehaviorTuning()
         case .openUsageGuide:
             showUsageGuide(manual: true)
-        case .openPaletteMixer:
-            showPaletteMixer()
         case let .reveal(folder):
             do {
                 try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

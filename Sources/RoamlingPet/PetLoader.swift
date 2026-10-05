@@ -13,6 +13,32 @@ public struct PetLoader {
         self.images = images
     }
 
+    /// Trusted bundled manifests use the same layout and track rules as an
+    /// imported package, without creating a temporary package on disk.
+    func loadBuiltIn(manifest: PetManifest, extra: RoamlingManifest,
+                     atlas: PetImage, extensionAtlas: PetImage) throws -> PetAsset {
+        let layout = try resolveLayout(manifest: manifest, atlas: atlas)
+        guard extra.schemaVersion == RoamlingManifest.currentSchemaVersion else {
+            throw PetLoadError.unsupportedExtensionSchema(extra.schemaVersion)
+        }
+        let grid = try requireExtensionGrid(extra.frame)
+        guard extensionAtlas.width == grid.columns * layout.frameWidth,
+              extensionAtlas.height == grid.rows * layout.frameHeight else {
+            throw PetLoadError.invalidFrameLayout("built-in extension does not match its grid")
+        }
+        var warnings: [String] = []
+        var tracks = StandardPetAnimations.tracks(columns: layout.columns)
+        let base = layout.columns * layout.rows
+        install(manifest.animations, into: &tracks, addressable: base, warnings: &warnings)
+        install(extra.animations, into: &tracks,
+                addressable: base + grid.columns * grid.rows, warnings: &warnings)
+        return PetAsset(manifest: manifest, packageURL: nil, atlas: atlas,
+                        frameWidth: layout.frameWidth, frameHeight: layout.frameHeight,
+                        columns: layout.columns, rows: layout.rows, tracks: tracks,
+                        behaviorMappings: extra.behaviors, extensionAtlas: extensionAtlas,
+                        extensionColumns: grid.columns, extensionRows: grid.rows, warnings: warnings)
+    }
+
     public func load(packageAt packageURL: URL) throws -> PetAsset {
         let package = packageURL.standardizedFileURL
         let manifestURL = package.appendingPathComponent("pet.json", isDirectory: false)

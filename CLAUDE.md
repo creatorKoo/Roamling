@@ -173,18 +173,15 @@ Localizable.strings`에 있고 `localized(_:)` / `localizedFormat(_:_:)`로 읽�
 나온다. 언어 분기 코드는 쓰지 않는다. 제품명(`Roamling`, `Claude Code`, `Codex`)은 번역하지
 않는다.
 
-## 마크는 하나다 — 🐾
+## 보리쌀 이름과 아이콘 (사용자 결정 2026-10-04)
 
-메뉴바 status item의 title, Windows 트레이 아이콘, macOS 앱 아이콘이 **같은 글리프**를 쓴다.
-셋 다 **그려서** 쓴다 — 비트맵을 넣어 두면 요청된 크기와 어긋난다. 메뉴바는
-`RoamlingAppDelegate`가 title에 `"🐾"`, Windows 트레이는 `tray.rs`의 `paw_icon()`이 GDI로
-그린다. 아이콘 파일만 커밋한다
-(`assets/Roamling.icns` · `assets/Roamling.ico`, 후자는 전자에서 **픽셀을 그대로 복사**한다).
-마크를 바꾸면 `scripts/build-icon.sh`를 다시 돌린다.
+표시 이름은 한국어 보리쌀, 영어 BoriSsal이다. 기존 설정·실행 파일·업데이트 식별자는
+호환성을 위해 Roamling을 유지한다. 범위는 `docs/borissal-brand.md`.
 
-**글리프의 실제 잉크를 재서 맞춘다** — 폰트 크기를 고르면 side bearing을 추측하게 되고,
-추측하면 여백만 넓고 발바닥은 작아진다. **크기마다 따로 그린다**: 1024를 줄이면 16px에서
-발가락이 뭉갠다.
+앱·Windows 트레이·macOS 메뉴바는 `assets/icon/borissal.png`의 보리와 쌀 얼굴을 함께 쓴다.
+`scripts/build-icon.sh`(Windows: `uv run --with pillow python scripts/build-icon.py`)로
+ICO/ICNS를 함께 만든다. ICO는 16~256px 여러 크기를 포함하며 트레이는 리소스에서
+현재 크기를 선택한다. 작은 아이콘의 판독성은 실제 크기로 확인한다.
 
 ## 상태 어휘는 Petdex가 정본이다
 
