@@ -22,7 +22,7 @@
 ; Fixed, and never to be changed: it is what tells Windows an install is an
 ; upgrade of this program rather than a second copy of it.
 AppId={{7A5F6C4E-2D91-4B3A-9E58-1C6D0B4F8A27}
-AppName=Roamling
+AppName=BoriSsal
 AppVersion={#AppVersion}
 AppPublisher=GooBeom Jeoung
 AppPublisherURL=https://github.com/creatorKoo/Roamling
@@ -47,7 +47,7 @@ LicenseFile=..\LICENSE
 ; gets the Korean wizard with no question; everything else gets English with no
 ; question. Being asked your own language is a question with a known answer.
 ShowLanguageDialog=auto
-UninstallDisplayName=Roamling
+UninstallDisplayName=BoriSsal
 UninstallDisplayIcon={app}\roamling.exe
 ; The same mark the app carries, so the download in the browser, the wizard and
 ; the installed program all look like one thing. Generated from the macOS icon
@@ -62,12 +62,12 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"
 
 [CustomMessages]
-english.AutostartTask=Start Roamling when I sign in
+english.AutostartTask=Start BoriSsal when I sign in
 english.StartupGroup=Startup
-english.LaunchProgram=Start Roamling
-korean.AutostartTask=로그인할 때 Roamling 시작
+english.LaunchProgram=Start BoriSsal
+korean.AutostartTask=로그인할 때 보리쌀 시작
 korean.StartupGroup=시작 프로그램
-korean.LaunchProgram=Roamling 시작
+korean.LaunchProgram=보리쌀 시작
 
 [Tasks]
 Name: "autostart"; Description: "{cm:AutostartTask}"; GroupDescription: "{cm:StartupGroup}"

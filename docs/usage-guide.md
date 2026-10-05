@@ -65,3 +65,5 @@ Ctrl/Command로 회피를 멈추고 잡는 방법을 첫 항목으로 설명한�
 [v0.6.5](https://github.com/creatorKoo/Roamling/releases/tag/v0.6.5)는 정식 최신 릴리스다.
 실제 Mac의 팝업·포커스 사용감은 CI 실행과 별개다.
 녹화 보존과 변경 근거는 [녹화 검토](runtime-trace-review-0.6.5.md)에 있다.
+
+0.7.1은 안내 revision 3으로 보리쌀 이름과 쌀 9색 선택을 알린다. `guide.changed.ssal`을 추가하고 이전 revision 항목은 유지한다.

@@ -172,7 +172,7 @@
 "guide.catch.title" = "1. Catch and play";
 "guide.catch.body" = "Hold %@ as you approach Bori to stop it dodging. Rest the pointer on its body to make hearts appear; move the pointer faster for quicker head tilts. Click and drag its body to move it, then release to put it down.";
 "guide.customize.title" = "2. Make it yours";
-"guide.customize.body" = "Open the tray or menu bar menu to change Bori's colour and size. Movement settings control roaming, pointer avoidance and catching.";
+"guide.customize.body" = "Choose Bori or Ssal and adjust their colour and size from the tray or menu bar. The movement menu controls wandering, pointer avoidance, and dragging.";
 "guide.work.title" = "3. Keep you company at work";
 "guide.work.body" = "Connect Codex or Claude Code from the menu for activity reactions. Visual awareness is optional: it helps Bori choose space away from text.";
 "guide.hide.title" = "4. Take a little break";
@@ -183,3 +183,6 @@
 "guide.changed.catch.body" = "A body click now works while Bori is moving or working. Hold %@ when approaching to stop it dodging. Ordinary tail wags happen only when seated.";
 
 "app.name" = "BoriSsal";
+
+"guide.changed.ssal.title" = "Meet BoriSsal";
+"guide.changed.ssal.body" = "Ssal the puppy has joined the family. Choose a friend and one of nine colours from the Bori and Ssal menus. Ssal wears matching coat and eye colours, and your choice stays after restarting.";
