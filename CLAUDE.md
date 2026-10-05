@@ -1,7 +1,6 @@
 # Roamling agent guide
 
-macOS + Windows desktop companion runtime. Swift 6 / AppKit / SwiftPM + Rust. **비공개 저장소다** —
-0.6.10까지는 GPL-3.0-only로 나갔고 그 뒤의 판은 닫는다(아래 "저장소는 둘이다").
+macOS + Windows desktop companion runtime. Swift 6 / AppKit / SwiftPM + Rust, GPL-3.0-only.
 제품 원칙은 하나다 — **Cute first. Useful second. Never annoying.** 반응 빈도나
 움직임을 늘리는 변경은 이 원칙을 먼저 통과해야 한다.
 
@@ -31,20 +30,6 @@ macOS + Windows desktop companion runtime. Swift 6 / AppKit / SwiftPM + Rust. **
   구현이 네 번 멈췄고, 문서에 먼저 쓴 문장이 여러 번 틀렸다. 테스트는 초록이었지만 동작을 한 번에
   설명할 수 없는 상태가 됐다.
 
-## 저장소는 둘이다 (2026-10-05)
-
-소스는 이 저장소 `creatorKoo/borissal`(**비공개**)에 있고, 릴리스와 업데이트 피드는 공개 `creatorKoo/Roamling`에
-있다. 무엇이 어디에 있고 발행이 어떻게 건너가는지는 `docs/repositories.md`.
-
-- **공개 저장소를 이 작업 폴더의 원격으로 달지 않는다.** 브랜치든 태그든 한 번 잘못 밀면 닫은 소스가 통째로
-  공개되고 되돌릴 수 없다. 발행은 워크플로가 API로 올린다. 공개 쪽 README는 옆 폴더 `Roamling-public`에서 고친다.
-- **공개 저장소의 이름 · 업데이트 서명 키 · 맥 서명 인증서는 바꾸지 않는다.** 셋 다 설치된 사본에 박혀 있다 —
-  하나라도 달라지면 업데이트가 조용히 끊기거나 권한이 날아간다.
-- **CI가 분을 쓴다.** 공개일 때는 무료였다. 맥 검사 한 번이 약 10분이고 맥의 분당 요금은 Linux의 약 10배다.
-  필요한 검사만 돌린다.
-- **아직 GPL이라고 말하는 곳이 남아 있다** — 정보 창, 설치기, SPDX 머리. 첫 닫힌 판 전에 바꾸고, 문구는 사용자가
-  정한다. 그때까지 새 파일의 SPDX 머리는 기존 파일과 같이 둔다.
-
 ## Build, test, run
 
 ```sh
@@ -70,8 +55,7 @@ mismatch가 나면 `ROAMLING_SWIFT_SDK=/path/to/MacOSX.sdk`로 우회한다. 새
 
 **릴리스는 `v*` 태그를 밀면 만들어지고, 태그와 세 곳의 버전이 같아야 한다** — 다르면
 워크플로가 실패시킨다. 목록과 이유는 `docs/windows.md`, macOS 쪽 서명·dmg는
-`docs/release.md`. **버전 올리기와 태그는 사용자가 말할 때만 한다.** 태그는 이 저장소에 밀고, 릴리스는
-워크플로가 공개 저장소에 올린다 — `docs/repositories.md` "발행".
+`docs/release.md`. **버전 올리기와 태그는 사용자가 말할 때만 한다.**
 
 **자동 업데이트는 교체와 재실행을 붙여서 한다.** 맥에서 실행 중인 번들만 바꿔 두면 그 프로세스는
 ScreenCaptureKit을 잃고 다시 켜질 때까지 글자를 못 본다 — 2026-09-23의 "글자 위에 앉는다"가
@@ -82,7 +66,12 @@ ScreenCaptureKit을 잃고 다시 켜질 때까지 글자를 못 본다 — 2026
 - **ad-hoc 빌드.** identity 없이 서명하면 designated requirement가 cdhash로 고정돼
   Accessibility·화면기록 권한이 매 빌드 날아가고, 사용자가 시스템 설정에서 손으로 복구해야 한다.
   AX 관련 작업은 반드시 identity로 서명한 빌드에서 확인한다.
-- **공개 저장소로 `git push`.** 위 "저장소는 둘이다". 원격으로 달지도 않는다.
+- **소스를 닫자는 제안을 먼저 하는 것 (사용자 결정 2026-10-05, 고정).** 데스크톱 소스는 공개(GPL)다. 다시 닫는
+  것은 PC에 클라이언트 쪽 유료 잠금을 넣기로 할 때뿐이고, 그 결정은 사용자가 한다. 하루 닫았다 되돌린 기록 —
+  끊김 없이 옮기는 방법과 실측 — 은 `docs/requests.md` R29.
+- **이 저장소의 이름을 바꾸거나 비공개로 돌리는 것.** 업데이트 피드가 이 저장소의 릴리스 주소이고 두 셸에
+  컴파일돼 있다(`rust/roamling-win/src/update.rs` `FEED`, `Sources/RoamlingMac/MacUpdater.swift`). 비공개 저장소의
+  릴리스 파일은 로그인 없이 받을 수 없어서, 그렇게 하면 설치된 사본 전부의 업데이트가 끊긴다.
 - **픽스처·트레이스를 통과시키려고 다시 만드는 것.** 아래 "포팅 규칙" 참조.
 - **`git add -A`로 커밋.** `output/`은 미추적이고 수백 MB의 중간 산출물이다. 대상 경로를 명시한다.
 - **커밋·push를 요청 없이.** 사용자가 말할 때만 한다.
@@ -124,11 +113,13 @@ rust/roamling-win/    Windows 셸. 코어를 rlib으로 직접 링크한다 — 
 `scripts/test.sh`가 grep으로 막고 걸리면 non-zero로 끝난다. 런타임이 플랫폼에 닿는 통로는
 `PlatformServices` 하나이고, macOS 쪽 조립은 `MacPlatform.makeServices()` 한 함수다.
 
-**Android 셸은 이 저장소에 없다 (2026-09-20, 비공개 저장소로 분리).** 그 앱은 코어를 서브모듈로
-고정해 그대로 빌드한다 — 지금은 공개 저장소의 주소로 0.6.10 이전의 커밋을 받고 있고, 그 뒤의 코어로 올리려면
-주소를 이 저장소로 바꿔야 한다(`docs/repositories.md` "함정"). 그래서 **`rust/roamling-core/src/ffi/`의 표면은 Swift만의 것이 아니다** —
+**Android 셸은 이 저장소에 없다 (2026-09-20, 비공개 저장소로 분리).** 그 앱은 이 저장소를 서브모듈로
+고정해 코어를 그대로 빌드한다. 그래서 **`rust/roamling-core/src/ffi/`의 표면은 Swift만의 것이 아니다** —
 이름·인자·레코드를 바꾸면 Android의 Kotlin 바인딩이 같이 바뀌고, 이 저장소의 CI는 그것을 못 잡는다.
 무엇이 남고 무엇이 갔는지는 `docs/android.md`.
+
+**코어에 넣는 것은 전부 공개된다.** 유료 모바일 전용으로 남길 것은 Android 저장소에 둔다. 외부 기여는
+`CLA.md`에 동의한 것만 받는다 — 그 2.3이 있어야 남이 고친 코어를 비공개 Android 앱에 넣을 수 있다.
 
 **`roamling-win`은 workspace `default-members`에 없다** — 맨 `cargo test`가 macOS에서
 `windows` 크레이트를 빌드하려다 깨진다. Windows에서는 `cargo build -p roamling-win`.
