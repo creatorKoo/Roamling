@@ -108,6 +108,49 @@ pub fn built_in_palette() -> FfiPalette {
     crate::pet_image::BUILT_IN_PALETTE.into()
 }
 
+/// Ssal uses the same approved table on every platform.
+#[uniffi::export]
+pub fn ssal_palette_presets() -> Vec<FfiPalettePreset> {
+    crate::pet_image::ssal::PRESETS.iter().map(|(key, palette)| FfiPalettePreset {
+        key: (*key).into(), palette: (*palette).into(),
+    }).collect()
+}
+
+#[uniffi::export]
+pub fn built_in_ssal_palette() -> FfiPalette {
+    crate::pet_image::ssal::DEFAULT.into()
+}
+
+/// The existing Bori FFI stays unchanged for Swift and Android consumers.
+#[derive(uniffi::Object)]
+pub struct SsalPaletteSheets {
+    standard: crate::pet_image::ssal::Source,
+    extension: crate::pet_image::ssal::Source,
+}
+
+#[uniffi::export]
+pub fn decode_ssal_palette_sheets(standard: Vec<u8>, extension: Vec<u8>)
+    -> Option<std::sync::Arc<SsalPaletteSheets>> {
+    Some(std::sync::Arc::new(SsalPaletteSheets {
+        standard: crate::pet_image::ssal::Source::decode(&standard)?,
+        extension: crate::pet_image::ssal::Source::decode(&extension)?,
+    }))
+}
+
+#[uniffi::export]
+impl SsalPaletteSheets {
+    pub fn recolored(&self, palette: FfiPalette) -> FfiRecoloredSheets {
+        let standard = self.standard.image(palette.into());
+        let extension = self.extension.image(palette.into());
+        FfiRecoloredSheets {
+            standard: FfiPetImage { width: standard.width as u32,
+                height: standard.height as u32, pixels: standard.pixels },
+            extension: FfiPetImage { width: extension.width as u32,
+                height: extension.height as u32, pixels: extension.pixels },
+        }
+    }
+}
+
 /// Point one region's ramp at a picked colour, keeping its shading width.
 ///
 /// The shell must not do this arithmetic itself. A colour picker gives one

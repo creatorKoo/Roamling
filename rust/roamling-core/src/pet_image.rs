@@ -26,6 +26,8 @@
 
 use std::collections::VecDeque;
 
+pub mod ssal;
+
 pub type PaletteColour = [u8; 3];
 
 /// Alpha at or below this does not vote and does not get repainted. Carried

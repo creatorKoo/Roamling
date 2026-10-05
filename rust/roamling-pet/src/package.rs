@@ -26,6 +26,11 @@ const MAXIMUM_ENCODED_BYTES: u64 = 32 * 1_024 * 1_024;
 const MAXIMUM_FRAMES: usize = 256;
 const ROAMLING_SCHEMA_VERSION: u32 = 1;
 
+const SSAL_STANDARD: &[u8] = include_bytes!("../../../Sources/RoamlingPet/Resources/BuiltInPets/ssal-standard-atlas.webp");
+const SSAL_EXTENSION: &[u8] = include_bytes!("../../../Sources/RoamlingPet/Resources/BuiltInPets/ssal-extension-atlas.webp");
+const SSAL_MANIFEST: &[u8] = include_bytes!("../../../Sources/RoamlingPet/Resources/BuiltInPets/ssal-pet.json");
+const SSAL_EXTRA: &[u8] = include_bytes!("../../../Sources/RoamlingPet/Resources/BuiltInPets/ssal-roamling.json");
+
 #[derive(Debug, Deserialize)]
 struct FrameManifest {
     width: usize,
@@ -198,6 +203,112 @@ struct Layout {
 pub struct Loaded {
     pub asset: PetAsset,
     pub warnings: Vec<String>,
+}
+
+/// Cached straight-alpha originals for the authored white Ssal package.
+/// No colour-specific files or package schema changes are required.
+pub struct SsalPalette {
+    standard: roamling_core::pet_image::ssal::Source,
+    extension: roamling_core::pet_image::ssal::Source,
+}
+
+impl SsalPalette {
+    pub fn built_in() -> Option<Self> {
+        Some(Self {
+            standard: roamling_core::pet_image::ssal::Source::decode(SSAL_STANDARD)?,
+            extension: roamling_core::pet_image::ssal::Source::decode(SSAL_EXTENSION)?,
+        })
+    }
+
+    pub fn load(package: &Path) -> Option<Self> {
+        let manifest = read_manifest(package).ok()?;
+        if manifest.id != "ssal-white" {
+            return None;
+        }
+        if manifest
+            .frame
+            .as_ref()
+            .is_none_or(|f| f.width != 192 || f.height != 208 || f.columns != 8 || f.rows != 9)
+        {
+            return None;
+        }
+        let sprite = safe_asset_path(&manifest.spritesheet_path, package).ok()?;
+        let extension: RoamlingManifest =
+            serde_json::from_slice(&std::fs::read(package.join("roamling.json")).ok()?).ok()?;
+        if extension.schema_version != ROAMLING_SCHEMA_VERSION
+            || extension
+                .frame
+                .as_ref()
+                .is_none_or(|f| f.columns != 8 || f.rows != 3)
+        {
+            return None;
+        }
+        let extra = safe_asset_path(extension.spritesheet_path.as_deref()?, package).ok()?;
+        let read = |path: &Path| {
+            if std::fs::metadata(path).ok()?.len() > MAXIMUM_ENCODED_BYTES {
+                return None;
+            }
+            roamling_core::pet_image::ssal::Source::decode(&std::fs::read(path).ok()?)
+        };
+        Some(Self {
+            standard: read(&sprite)?,
+            extension: read(&extra)?,
+        })
+    }
+
+    pub fn apply(&self, asset: &mut PetAsset, palette: roamling_core::Palette) -> bool {
+        let standard = self.standard.image(palette);
+        let extension = self.extension.image(palette);
+        if standard.width != asset.atlas.width
+            || standard.height != asset.atlas.height
+            || asset
+                .extension_atlas
+                .as_ref()
+                .is_none_or(|im| im.width != extension.width || im.height != extension.height)
+        {
+            return false;
+        }
+        asset.atlas = standard;
+        asset.extension_atlas = Some(extension);
+        true
+    }
+}
+
+/// The approved Ssal package, available without installing an external pet.
+pub fn built_in_ssal() -> Result<Loaded, String> {
+    let manifest: Manifest = serde_json::from_slice(SSAL_MANIFEST).map_err(|e| e.to_string())?;
+    let extra: RoamlingManifest = serde_json::from_slice(SSAL_EXTRA).map_err(|e| e.to_string())?;
+    let atlas = PetImage::decode(SSAL_STANDARD).ok_or("invalid built-in Ssal sheet")?;
+    let extension = PetImage::decode(SSAL_EXTENSION).ok_or("invalid built-in Ssal extension")?;
+    let layout = resolve_layout(&manifest, &atlas)?;
+    let grid = extra.frame.ok_or("missing built-in Ssal extension grid")?;
+    if extra.schema_version != ROAMLING_SCHEMA_VERSION
+        || extension.width != grid.columns * layout.frame_width
+        || extension.height != grid.rows * layout.frame_height
+    {
+        return Err("invalid built-in Ssal extension geometry".into());
+    }
+    let mut warnings = Vec::new();
+    let mut tracks = standard_tracks(layout.columns);
+    let count = layout.columns * layout.rows;
+    install(manifest.animations.as_ref(), &mut tracks, count, &mut warnings);
+    install(extra.animations.as_ref(), &mut tracks, count + grid.columns * grid.rows, &mut warnings);
+    Ok(Loaded {
+        asset: PetAsset {
+            display_name: manifest.display_name,
+            atlas,
+            extension_atlas: Some(extension),
+            frame_width: layout.frame_width,
+            frame_height: layout.frame_height,
+            columns: layout.columns,
+            rows: layout.rows,
+            extension_columns: grid.columns,
+            extension_rows: grid.rows,
+            tracks,
+            behavior_mappings: extra.behaviors,
+        },
+        warnings,
+    })
 }
 
 pub fn load(package: &Path) -> Result<Loaded, String> {
@@ -483,6 +594,36 @@ fn resolve_layout(manifest: &Manifest, atlas: &PetImage) -> Result<Layout, Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn built_in_ssal_matches_the_package_and_supports_every_approved_colour() {
+        let dir = std::env::temp_dir().join(format!("borissal-built-in-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for (name, bytes) in [("pet.json", SSAL_MANIFEST), ("roamling.json", SSAL_EXTRA),
+            ("spritesheet.webp", SSAL_STANDARD), ("roamling.webp", SSAL_EXTENSION)] {
+            std::fs::write(dir.join(name), bytes).unwrap();
+        }
+        let external = load(&dir).unwrap();
+        let mut embedded = built_in_ssal().unwrap();
+        assert!(embedded.warnings.is_empty() && external.warnings.is_empty());
+        assert_eq!(embedded.asset.atlas.pixels, external.asset.atlas.pixels);
+        assert_eq!(embedded.asset.extension_atlas.as_ref().unwrap().pixels,
+            external.asset.extension_atlas.as_ref().unwrap().pixels);
+        let tracks = format!("{:?}", embedded.asset.tracks);
+        assert_eq!(tracks, format!("{:?}", external.asset.tracks));
+        assert_eq!(embedded.asset.behavior_mappings, external.asset.behavior_mappings);
+        let source = SsalPalette::built_in().unwrap();
+        for (_, palette) in roamling_core::pet_image::ssal::PRESETS {
+            assert!(source.apply(&mut embedded.asset, *palette));
+            assert_eq!(tracks, format!("{:?}", embedded.asset.tracks));
+        }
+        assert!(source.apply(&mut embedded.asset, roamling_core::pet_image::ssal::WHITE));
+        assert_eq!(embedded.asset.atlas.pixels, external.asset.atlas.pixels);
+        for name in ["pet.json", "roamling.json", "spritesheet.webp", "roamling.webp"] {
+            std::fs::remove_file(dir.join(name)).unwrap();
+        }
+        std::fs::remove_dir(dir).unwrap();
+    }
 
     /// The manifest is a file the user downloaded, so a path in it must not be
     /// able to name anything outside the package.
